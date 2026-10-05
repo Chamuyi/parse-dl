@@ -1,0 +1,27 @@
+License Notice
+
+Copyright (C) 2026 Cha Muyi
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation, either version 3 of the License, or (at your
+option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program. If not, see https://www.gnu.org/licenses/gpl-3.0.html
+
+This application needs you to sign in to, and access, third-party
+platforms (X / Douyin) on your own. The terms of service between you and
+those platforms are between you and those platforms. This application
+does not represent any platform and takes no responsibility for how you
+use them.
+
+Downloaded files are written only to the directory you choose in the
+settings. This application has no telemetry and does not update itself.
+
+By installing, you confirm that you have read and accept the terms above.

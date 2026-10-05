@@ -1,0 +1,56 @@
+name: parse_dl
+description: "解析下载器 —— 批量下载 X 与抖音上的图片与视频"
+publish_to: 'none'
+
+# 版本号规则：从 1.0 起，每迭代一次 +0.1；`+N` 为该版本内的构建序号。
+version: 1.2.0+1
+
+environment:
+  sdk: ^3.13.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Material/Cupertino 自带文案（文本选择工具条、日期格式化）的中英对照。
+  # 应用自己的文案不在这里，见 `lib/l10n/`。
+  flutter_localizations:
+    sdk: flutter
+
+  # ── 窗口与外观 ──────────────────────────────────────────────
+  # Windows 11 Mica / 亚克力 / 透明窗口（底层就是 DwmSetWindowAttribute）
+  flutter_acrylic: ^1.1.0
+  # 无边框窗口、拖动、最小化/最大化/关闭
+  window_manager: ^0.4.2
+  # 选背景图
+  file_picker: ^8.1.4
+
+  # ── 网络与下载 ──────────────────────────────────────────────
+  # X API 调用（原生应用无 CORS，不需要代理层）
+  http: ^1.2.2
+  # aria2 JSON-RPC over WebSocket
+  web_socket_channel: ^3.0.1
+
+  # ── 基础设施 ────────────────────────────────────────────────
+  path: ^1.9.0
+  path_provider: ^2.1.5
+  provider: ^6.1.2
+  intl: ^0.20.2
+  url_launcher: ^6.3.1
+  uuid: ^4.5.1
+  # 打开系统文件夹
+  process_run: ^1.2.1
+
+  cupertino_icons: ^1.0.8
+  webview_windows: ^0.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/logo.png
+    - assets/aria2c.exe
