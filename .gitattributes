@@ -1,0 +1,59 @@
+# 行尾与二进制判定。
+#
+# 为什么要有这个文件：本机 `core.autocrlf=true`，git 会把工作区的 CRLF 存成 LF、
+# 检出时再换回去。对这个项目里那几类"字节内容有意义"的文件，这种隐式行为是隐患：
+#   * installer/*.nsi        —— NSIS 只接受 ANSI 或**带 BOM 的 UTF-8**，
+#                               build_installer.py 里专门有一道补 BOM 的兜底。
+#   * installer/LICENSE.txt  —— 必须 GBK + CRLF：NSIS 的协议控件按系统 ANSI 代码页
+#                               解码，规范化成 UTF-8/LF 就是界面乱码。
+#   * assets/aria2c.exe、*.ico、*.bmp —— 二进制，动一个字节就废。
+# 显式声明之后，行为不再取决于每个人机器上的全局 autocrlf。
+#
+# **规则顺序有讲究：gitattributes 是后匹配的覆盖先匹配的。**
+# 所以泛规则（*.txt、*.dart…）一律写在前面，需要保护的例外写在后面。
+
+# ── 泛规则 ─────────────────────────────────────────────────────
+# 常规源码与文本：仓库内统一 LF，跨平台 diff 干净
+*.dart text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.md   text eol=lf
+*.py   text eol=lf
+*.mjs  text eol=lf
+*.json text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.js   text eol=lf
+*.c    text eol=lf
+*.cc   text eol=lf
+*.cpp  text eol=lf
+*.h    text eol=lf
+*.rc   text eol=lf
+*.txt  text eol=lf
+CMakeLists.txt text eol=lf
+*.cmake  text eol=lf
+
+# ── 例外：必须排在泛规则之后才有效 ──────────────────────────────
+# 二进制：永不转换
+*.exe  binary
+*.ico  binary
+*.bmp  binary
+*.png  binary
+*.jar  binary
+*.so   binary
+*.dll  binary
+
+# NSIS 脚本与随包文本：仓库里的字节原样进工作区，不做任何规范化
+*.nsi  -text
+installer/LICENSE.txt    -text
+installer/LICENSE.en.txt -text
+installer/config.txt     -text
+
+# Windows 批处理与 PowerShell：这两个只认 CRLF
+*.bat  -text
+*.cmd  -text
+*.ps1  -text
+
+# 打包脚本生成的卸载清单，永不入库（与 .gitignore 双保险）
+_uninst_files.nsh export-ignore
+_uninst_files.txt export-ignore
