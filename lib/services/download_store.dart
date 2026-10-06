@@ -359,11 +359,17 @@ class DownloadStore extends ChangeNotifier {
   }
 
   /// 更新进度（aria2 推送）。
-  void updateProgress(String gid, int progress, int? total) {
+  /// 进度轮询的回写口。
+  ///
+  /// `downloaded` 必须一起传：界面那行「已下 X B / 共 Y MB」读的是
+  /// [AriaTask.downloadedBytes]，只更新 [AriaTask.progress] 的话会出现
+  /// **进度条走到一半、字数还写着 0 B**（2026-10-06 真机截图就是这样）。
+  void updateProgress(String gid, int progress, int? total, {int? downloaded}) {
     final t = _findByGid(gid);
     if (t == null) return;
     t.progress = progress;
     if (total != null) t.totalBytes = total;
+    if (downloaded != null) t.downloadedBytes = downloaded;
     notifyListeners();
   }
 

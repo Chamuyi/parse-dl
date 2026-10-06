@@ -3,7 +3,7 @@ description: "解析下载器 —— 批量下载 X 与抖音上的图片与视�
 publish_to: 'none'
 
 # 版本号规则：从 1.0 起，每迭代一次 +0.1；`+N` 为该版本内的构建序号。
-version: 1.2.0+1
+version: 1.3.0+2
 
 environment:
   sdk: ^3.13.3

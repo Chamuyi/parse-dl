@@ -85,6 +85,14 @@ void main() {
       expect(args, contains('--max-tries=3'));
       expect(args, contains('--retry-wait=2'));
     });
+
+    test('必须有停滞判据，否则「连接活着但不吐字节」的下载永远不失败', () {
+      // 2026-10-06 真机：一条 474 MB 的抖音任务停在 246/474 MB、downloadSpeed=0，
+      // 从 03:27 挂到 21:50 共 18 小时，aria2 一直当它 active，白占一个并发槽。
+      // aria2 的 `--lowest-speed-limit` 默认 0（关闭），必须显式给。
+      expect(args, contains('--lowest-speed-limit=2K'),
+          reason: '没有这条，卡死的连接既不会 error 也不会重试，界面就是「卡住」');
+    });
   });
 
   group('失败 → 退避 → 重新提交（走真实事件链路）', () {
