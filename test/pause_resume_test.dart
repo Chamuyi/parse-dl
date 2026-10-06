@@ -25,6 +25,15 @@ class _FakeAria2 extends Aria2 {
   final unpaused = <String>[];
   bool failUnpause = false;
 
+  /// pause 是否抛错（模拟 aria2 的 `cannot be paused now`）
+  bool failPause = false;
+
+  /// 「pause 失败之后再去问 aria2，它那边其实是什么状态」
+  AriaStatus remoteStatus = AriaStatus.paused;
+
+  /// true 时 tellStatus 直接抛错 = aria2 已经不认这个 gid
+  bool unknownOnTell = false;
+
   @override
   Future<void> bootstrap() async {}
 
@@ -37,7 +46,10 @@ class _FakeAria2 extends Aria2 {
   }
 
   @override
-  Future<void> pause(String gid) async => paused.add(gid);
+  Future<void> pause(String gid) async {
+    if (failPause) throw Exception('GID#$gid cannot be paused now');
+    paused.add(gid);
+  }
 
   @override
   Future<void> unpause(String gid) async {
@@ -46,18 +58,39 @@ class _FakeAria2 extends Aria2 {
   }
 
   @override
-  Future<AriaTask> tellStatus(String gid) async => AriaTask(
-        gid: gid,
-        status: AriaStatus.paused,
-        completeSize: 0,
-        totalSize: 0,
-        fileName: 'm1.jpg',
-        dir: dirOf,
-        error: '',
-      );
+  Future<AriaTask> tellStatus(String gid) async {
+    if (unknownOnTell) throw Exception('GID#$gid is not found');
+    return AriaTask(
+      gid: gid,
+      status: remoteStatus,
+      completeSize: 0,
+      totalSize: 0,
+      fileName: 'm1.jpg',
+      dir: dirOf,
+      error: '',
+    );
+  }
 
   /// coordinator 记日志时会读一下当前状态，给个不炸的默认值
   String dirOf = r'C:\tmp';
+
+  /// 进度轮询（tellStatusBatch）返回的字节数
+  int batchComplete = 0;
+  int batchTotal = 0;
+
+  @override
+  Future<Map<String, AriaTask>> tellStatusBatch(List<String> gids) async => {
+        for (final g in gids)
+          g: AriaTask(
+            gid: g,
+            status: AriaStatus.active,
+            completeSize: batchComplete,
+            totalSize: batchTotal,
+            fileName: 'm1.jpg',
+            dir: dirOf,
+            error: '',
+          ),
+      };
 
   @override
   Future<void> remove(String gid) async {}
@@ -100,16 +133,62 @@ void main() {
   }
 
   group('暂停', () {
-    test('会把 pause 投给 aria2，并按 aria2 的暂停事件落到已暂停', () async {
+    test('pause 成功后本地状态立刻翻到已暂停 —— 不能只等 aria2 的事件', () async {
+      // aria2 对「还在排队（waiting）」的任务执行 pause 时只把它摘出队列，
+      // **既不发 onDownloadPause 也不发 onDownloadStop**。2026-10-06 真机：
+      // 「全部暂停」停住 765 条排队任务后，本地仍有 766 条显示「下载中 0%」，
+      // 而工具栏的「全部继续」要本地存在 paused 才渲染 → 队列看着就是卡死了。
       final aria = _FakeAria2();
       final (c, store, localId) = await wired(aria: aria);
 
-      await c.pause(localId);
-      expect(aria.paused, ['gid-1'], reason: '必须真的通知 aria2，不能只改本地状态');
+      final err = await c.pause(localId);
 
-      // aria2 回 onDownloadPause 后由 coordinator 写状态
-      store.markPaused(localId);
+      expect(aria.paused, ['gid-1'], reason: '必须真的通知 aria2，不能只改本地状态');
+      expect(err, isNull);
+      expect(store.task(localId)!.status, DownloadStatus.paused,
+          reason: '这里没有任何事件回调参与，状态必须由 pause 自己写对');
+      expect(store.activeGids(), isEmpty,
+          reason: '进度轮询只问 activeGids，还留在里面就是「下载中」的假象');
+    });
+
+    test('aria2 拒了但它那边其实已经暂停 → 不报失败，状态收口', () async {
+      // 「GID#… cannot be paused now」的第二种来源：它早就是 paused。
+      // 报成失败会在界面上刷出一排红色「暂停失败」，而用户要的效果已经生效。
+      final aria = _FakeAria2()
+        ..failPause = true
+        ..remoteStatus = AriaStatus.paused;
+      final (c, store, localId) = await wired(aria: aria);
+
+      final err = await c.pause(localId);
+
+      expect(err, isNull, reason: '目标已达成就不该骗用户说失败');
       expect(store.task(localId)!.status, DownloadStatus.paused);
+    });
+
+    test('aria2 已经不再认这条 gid → 落到错误态，给出可用的「重试」', () async {
+      final aria = _FakeAria2()
+        ..failPause = true
+        ..unknownOnTell = true;
+      final (c, store, localId) = await wired(aria: aria);
+
+      final err = await c.pause(localId);
+
+      expect(err, isNull, reason: '行里的状态已经说清楚了，不必再弹一条重复的报错');
+      expect(store.task(localId)!.status, DownloadStatus.error);
+      expect(store.task(localId)!.errorMessage, contains('无法暂停'));
+    });
+
+    test('真的停不下来（aria2 那边还在 active）才返回失败文案，状态不许乱翻', () async {
+      final aria = _FakeAria2()
+        ..failPause = true
+        ..remoteStatus = AriaStatus.active;
+      final (c, store, localId) = await wired(aria: aria);
+
+      final err = await c.pause(localId);
+
+      expect(err, contains('暂停失败'));
+      expect(store.task(localId)!.status, DownloadStatus.active,
+          reason: '它其实还在下载，标成已暂停就是反向骗人');
     });
 
     test('已暂停的任务不在进度轮询名单里（这正是"进度不动"的来源）', () async {
@@ -155,6 +234,28 @@ void main() {
       store.markComplete('gid-1');
       store.markResumed(localId);
       expect(store.task(localId)!.status, DownloadStatus.complete);
+    });
+  });
+
+  group('进度轮询', () {
+    test('已下字节要一起写回，否则进度条在走、字数却停在 0 B', () async {
+      // 2026-10-06 真机截图：暂停后再看，行上进度条约 50%，右边写「0 B / 32 MB」。
+      // 原因是 updateProgress 只写 progress 与 totalBytes，界面那行字节读的是
+      // downloadedBytes —— 没人写它。
+      final aria = _FakeAria2()
+        ..batchComplete = 16 * 1024 * 1024
+        ..batchTotal = 32 * 1024 * 1024;
+      final (_, store, localId) = await wired(aria: aria);
+      expect(store.task(localId)!.downloadedBytes, isNot(16 * 1024 * 1024));
+
+      // 轮询是 bootstrap 里的 Timer.periodic(1s)，真实计时器等它跑一轮
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+
+      final t = store.task(localId)!;
+      expect(t.totalBytes, 32 * 1024 * 1024);
+      expect(t.progress, 500);
+      expect(t.downloadedBytes, 16 * 1024 * 1024,
+          reason: '条子和字节数必须同源，不然两个数字互相打脸');
     });
   });
 

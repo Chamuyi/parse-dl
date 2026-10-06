@@ -36,7 +36,7 @@ import 'widgets/title_bar.dart';
 /// **规则**：公开基线起从 `1.0` 重新开始，每迭代一次 +0.1。
 /// 改这里的同时要同步 `pubspec.yaml`、`installer/build_installer.py` 的 `VERSION`
 /// 以及 `installer/解析下载器.nsi` 里 `!ifndef VERSION` 的兜底值。
-const String kAppVersion = '1.2';
+const String kAppVersion = '1.3';
 
 /// 「关于」页用到的全部常量。
 ///

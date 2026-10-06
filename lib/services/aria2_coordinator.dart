@@ -426,7 +426,8 @@ class Aria2Coordinator {
           final progress = remote.totalSize > 0
               ? (remote.completeSize * 1000 ~/ remote.totalSize)
               : 0;
-          store.updateProgress(gid, progress.clamp(0, 1000), remote.totalSize);
+          store.updateProgress(gid, progress.clamp(0, 1000), remote.totalSize,
+              downloaded: remote.completeSize);
       }
     }
 
@@ -658,11 +659,46 @@ class Aria2Coordinator {
     }
     try {
       await _aria.pause(gid);
+      // **成功就立刻自己回写状态，不能只等事件。** aria2 对「还在排队（waiting）」
+      // 的任务执行 pause 时只是把它从队列摘掉，**不发 onDownloadPause 也不发
+      // onDownloadStop**。只等事件回写的后果（2026-10-06 真机）：765 条排队任务
+      // 已经被 aria2 停住，界面却还全是「下载中 0%」，而工具栏的「全部继续」
+      // 要本地存在 paused 才渲染 —— 用户既看不到「已暂停」，也没有任何按钮能把
+      // 它们放回队列，整条队列看起来就是卡死了。
+      _store?.markPaused(localId);
       AppLogger.log('ARIA2', 'pause 已发送 gid=$gid（$localId）');
       return null;
     } catch (e) {
-      AppLogger.log('ARIA2', 'pause 失败 gid=$gid（$localId）：$e');
+      // 「GID#… cannot be paused now」多半不是失败：它已经不在可暂停的位置上了
+      // （早就是 paused）。按 aria2 的真实状态收口，别把已经达成的目标报成失败 ——
+      // 那会在界面上留下一堆红色「暂停失败」，而用户要的效果其实已经生效。
+      final remote = await _remoteStatus(gid);
+      if (remote == AriaStatus.paused) {
+        _store?.markPaused(localId);
+        AppLogger.log('ARIA2', 'pause 被拒但 aria2 侧已是 paused，按已暂停收口 '
+            'gid=$gid（$localId）：$e');
+        return null;
+      }
+      if (remote == AriaStatus.removed || remote == null) {
+        // 引擎侧已经没有这条了：落到「错误」，界面才会给出可用的「重试」，
+        // 而不是留一颗点了必然失败的「继续」。
+        _store?.markErrorByGid(gid, '无法暂停：aria2 已不再认这条任务（$e）');
+        AppLogger.log('ARIA2', 'pause 时 aria2 侧状态=${remote ?? '查不到'}，'
+            '已按失败落到错误态 gid=$gid（$localId）：$e');
+        return null;
+      }
+      AppLogger.log('ARIA2',
+          'pause 失败 gid=$gid（$localId）：$e（aria2 侧仍为 ${remote.name}）');
       return '暂停失败：$e';
+    }
+  }
+
+  /// 问一次 aria2 某条任务的真实状态；gid 已不被认识时返回 `null`。
+  Future<AriaStatus?> _remoteStatus(String gid) async {
+    try {
+      return (await _aria.tellStatus(gid)).status;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -910,7 +946,8 @@ class Aria2Coordinator {
         final progress = task.totalSize > 0
             ? (task.completeSize * 1000 ~/ task.totalSize)
             : 0;
-        store.updateProgress(gid, progress.clamp(0, 1000), task.totalSize);
+        store.updateProgress(gid, progress.clamp(0, 1000), task.totalSize,
+            downloaded: task.completeSize);
       });
     } catch (e) {
       // 单次失败忽略，下次再试

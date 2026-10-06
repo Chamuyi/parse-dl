@@ -135,6 +135,14 @@ List<String> aria2BootstrapArgs({
     // （`aria2_coordinator.dart` 的 `retryBackoffDelay`）做。
     '--max-tries=3',
     '--retry-wait=2',
+    // **停滞判据。** aria2 默认 `--lowest-speed-limit=0`（关闭），于是「TCP 连接还
+    // 活着、但服务器一个字节都不吐」的下载永远不会被判失败 —— 2026-10-06 真机就
+    // 有一条 474 MB 的抖音任务停在 246/474 MB、`downloadSpeed=0`，从 03:27 一直挂到
+    // 21:50（18 小时），白占一个并发槽，界面上看就是「卡住」。
+    // 2 KiB/s 这个下限对真实下载毫无影响（本机实测 1–57 MB/s），只用来掐死连接；
+    // 掐掉后按上面的 max-tries 重连，`--continue` + `.aria2` 控制文件会从已下的
+    // 位置续上，所以误判的代价只是一次重连，不丢数据。
+    '--lowest-speed-limit=2K',
     if (resumeSession) '--input-file=$sessionFile',
   ];
 }

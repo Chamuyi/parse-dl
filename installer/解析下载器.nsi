@@ -27,7 +27,7 @@ Unicode true
 ; 版本号由 build_installer.py 通过 makensis /DVERSION= 传入（唯一来源）；
 ; 直接双击编译 .nsi 时用下面的兜底值。规则：从 1.0 起每迭代 +0.1。
 !ifndef VERSION
-  !define VERSION       "1.2"
+  !define VERSION       "1.3"
 !endif
 !define APP_VERSION    "${VERSION}"
 ; NSIS 的 VIProductVersion 要求 4 段数字（X.X.X.X），故补零

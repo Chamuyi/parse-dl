@@ -54,7 +54,7 @@ OUT_DIR = os.environ.get("INSTALLER_OUT_DIR") or os.path.join(PROJECT, "build", 
 
 # 版本号规则：公开基线起从 1.0 重新开始，每迭代一次 +0.1。
 # 这里是**唯一改动点** —— .nsi 通过 makensis 的 /DVERSION 读取，不再各自硬编码。
-VERSION = "1.2"
+VERSION = "1.3"
 OUT_NAME = f"解析下载器_{VERSION}_x64-setup.exe"
 OUT = os.path.join(OUT_DIR, OUT_NAME)
 
