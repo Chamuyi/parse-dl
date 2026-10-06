@@ -7,7 +7,7 @@
 批量下载 X 与抖音上的图片、视频。
 
 [![许可证](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
-[![平台](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](releases)
+[![平台](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](https://github.com/Chamuyi/parse-dl/releases)
 [![界面](https://img.shields.io/badge/UI-Flutter%20desktop-informational)](#-界面)
 
 </div>
@@ -37,7 +37,7 @@
 
 ## ⬇️ 下载
 
-去 **[Releases](releases)** 下载安装包（约 16 MB，附件名是 `parse-downloader_<版本>_x64-setup.exe`）。
+去 **[Releases](https://github.com/Chamuyi/parse-dl/releases)** 下载安装包（约 16 MB，附件名是 `parse-downloader_<版本>_x64-setup.exe`）。
 
 数据（设置、日志、下载台账、X 登录 cookie、抖音登录态）都在 **exe 同级的 `userdata\`** ——
 装在哪就在哪，卸载前想留就整个目录拷走。不含遥测，不自动更新。
@@ -46,7 +46,7 @@
 
 基于开源项目 [X-Spider](https://github.com/MiningCattiva/x-spider) 二次开发，
 整体遵循 **GPL-3.0-or-later**。全文见 [LICENSE](LICENSE)，
-第三方组件与出处说明见 [NOTICE](NOTICE)。
+第三方组件与出处说明见 [NOTICE](NOTICE.md)。
 
 GPL-3.0 要求的是随程序附上许可证全文并作出声明，不要求每个源文件都带许可证头。
 再分发时请把 `LICENSE`、`NOTICE` 和本节一起带走。
