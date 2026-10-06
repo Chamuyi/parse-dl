@@ -42,20 +42,6 @@
 数据（设置、日志、下载台账、X 登录 cookie、抖音登录态）都在 **exe 同级的 `userdata\`** ——
 装在哪就在哪，卸载前想留就整个目录拷走。不含遥测，不自动更新。
 
-## 🛠️ 自己构建
-
-```powershell
-flutter pub get
-flutter analyze && flutter test
-flutter build windows --release --no-tree-shake-icons   # 这个参数不能省，否则图标会被裁光
-python installer/build_installer.py                     # 产出 build\dist\...-setup.exe
-python tool/verify_release.py                           # 发布门：版本一致 / 产物不旧 / 没打进运行时数据
-```
-
-前提：项目路径纯 ASCII、开启 Windows 开发者模式、装好 NSIS。
-外部工具位置都能用环境变量覆盖（`FLUTTER_BAT` / `NSIS_DIR` / `INSTALLER_OUT_DIR`），
-仓库放在哪都能跑。行尾由 `.gitattributes` 钉死，别依赖全局 `core.autocrlf`。
-
 ## 📄 许可证
 
 基于开源项目 [X-Spider](https://github.com/MiningCattiva/x-spider) 二次开发，
