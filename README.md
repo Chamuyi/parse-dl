@@ -6,9 +6,9 @@
 
 批量下载 X 与抖音上的图片、视频。
 
-![许可证](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
-![平台](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)
-![界面](https://img.shields.io/badge/UI-Flutter%20desktop-informational)
+[![许可证](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![平台](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](releases)
+[![界面](https://img.shields.io/badge/UI-Flutter%20desktop-informational)](#-界面)
 
 </div>
 
