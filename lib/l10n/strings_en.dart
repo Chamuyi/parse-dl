@@ -99,8 +99,8 @@ const Map<String, String> kStringsEn = {
   '页面「{route}」迁移中': 'Page "{route}" is still being migrated',
 
   // ── 关于页 ───────────────────────────────────────────────────
-  '批量下载 X 与抖音上的图片与视频':
-      'Bulk-download images and videos from X and Douyin',
+  '批量下载 X、抖音与 B 站上的图片与视频':
+      'Bulk-download images and videos from X, Douyin and Bilibili',
   '版本号': 'Version',
   '作者': 'Author',
   '许可证': 'License',
@@ -364,6 +364,70 @@ const Map<String, String> kStringsEn = {
   'UP 主未知': 'Uploader unknown',
   '时间未知': 'Time unknown',
   '{bv} · 分P {cid}': '{bv} · Part {cid}',
+
+  // ── B 站解析下载页（lib/pages/bili_page.dart）与它的导航入口 ───────
+  //
+  // 导航标签「解析下载」「下载管理」与抖音共用同一条 key（两个模块的那一行
+  // 本来就同名），所以这里只补带归属的那两条 + 这一页自己独有的文案。
+  'B 站解析下载': 'Bilibili Downloads',
+  // 侧边栏中文档只有 200px，组名用短一档的「B 站下载」（七字标签会被截）。
+  'B 站下载': 'Bilibili Downloads',
+  'B 站设置': 'Bilibili Settings',
+  '后退': 'Back',
+  '前进': 'Forward',
+  '刷新': 'Refresh',
+  'B 站首页': 'Bilibili home',
+  '粘贴 B 站链接，回车打开': 'Paste a Bilibili link, press Enter to open',
+  '未检测到 Edge WebView2 运行时。\n'
+          'Win11 自带；Win10 请安装「Microsoft Edge WebView2 Runtime」后重试。':
+      'Edge WebView2 runtime not found.\n'
+      'Windows 11 ships it; on Windows 10 install "Microsoft Edge WebView2 Runtime" and retry.',
+  '登录状态还没检测': 'Sign-in state not checked yet',
+  '正在检测登录状态…': 'Checking the sign-in state…',
+  '刷新登录状态': 'Refresh sign-in state',
+  '已登录：{name}': 'Signed in: {name}',
+  '已登录（没取到昵称）': 'Signed in (no profile name returned)',
+  '未登录（只能取到 480P）': 'Not signed in (only 480P available)',
+  // 「检测不到」与「未登录」是两件事：前者多半是被风控，叫用户去扫码是误导。
+  '检测不到登录状态（被风控或页面没就绪）':
+      'Cannot tell the sign-in state (rate-limited, or the page is not ready)',
+  '取主页推荐': 'Load home recommendations',
+  '推荐流里没有被认出的稿件（接口形状变了，或者这次被风控了）':
+      'Nothing recognisable in the recommendation feed '
+      '(the API shape changed, or this request was rate-limited)',
+  '取主页推荐失败：{why}': 'Failed to load recommendations: {why}',
+  '解析这条链接': 'Parse this link',
+  '粘这条稿件的链接 / BV 号 / b23.tv 短链':
+      'Paste the video link / BV id / b23.tv short link',
+  '把 B 站稿件链接或 BV 号粘进来再解析':
+      'Paste a Bilibili link or BV id first, then parse it',
+  '这不是一个能认出来的 B 站链接：{link}':
+      'Not a recognisable Bilibili link: {link}',
+  '短链没能展开（没有重定向、页面里也找不到 BV 号）':
+      'The short link did not expand (no redirect, and no BV id in the page)',
+  '这条链接里没有 BV 号也没有 AV 号':
+      'This link carries neither a BV nor an AV id',
+  '这个稿件没有可下载的分 P（已下架或仅自己可见）':
+      'This video exposes no downloadable parts (removed, or visible only to the owner)',
+  '清除结果': 'Clear results',
+  '正在忙…（取列表 / 取流 / 入队）': 'Working… (listing / fetching streams / queueing)',
+  '{n} 个稿件': '{n} videos',
+  '已选 {n} / {total} 个分P': '{n} of {total} parts selected',
+  '还没有解析结果': 'Nothing parsed yet',
+  '点「取主页推荐」看你登录后的推荐，或把一条稿件链接粘到上面再解析。':
+      'Use "Load home recommendations" to see the feed for your signed-in account, '
+      'or paste a video link above and parse it.',
+  '全部选中': 'Select all',
+  '全部取消': 'Select none',
+  '上限 {q}': 'Cap: {q}',
+  '下载选中的 {n} 个分P': 'Download the {n} selected parts',
+  '没有勾选任何分 P': 'No parts are selected',
+  '已提交 {n} 条': '{n} queued',
+  '跳过 {n} 条（台账里已处理过）': '{n} skipped (already handled in the ledger)',
+  '成品已在磁盘 {n} 条': '{n} finished files already on disk',
+  '失败 {n} 条': '{n} failed',
+  // 抖音页里这句是**没套 t()** 的裸字面量（那边已封存的漏翻），这里补上才有英文。
+  '去下载管理': 'Open downloads',
 
   // 队列空态的引导语：三个模块各一句（入口页名不同），漏一条就是英文界面夹中文。
   '「{name}」里还没有任务': 'Nothing in "{name}" yet',

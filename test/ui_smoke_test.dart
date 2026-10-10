@@ -16,6 +16,7 @@ import 'package:parse_dl/services/app_paths.dart';
 import 'package:parse_dl/services/app_state.dart';
 import 'package:parse_dl/services/aria2_coordinator.dart';
 import 'package:parse_dl/services/auto_task_store.dart';
+import 'package:parse_dl/services/bili_ledger.dart';
 import 'package:parse_dl/services/creation_task_store.dart';
 import 'package:parse_dl/services/download_store.dart';
 import 'package:parse_dl/services/douyin_auto_store.dart';
@@ -37,8 +38,10 @@ import 'package:parse_dl/theme/app_theme.dart';
 ///
 /// 每个用例的名字就是「页面 × 尺寸」，跑一次即得问题清单。
 ///
-/// **不测 DouyinPage**：它要真的 WebView2 控件，pump 起来会卡在平台通道上。
-/// 那一屏改由注入脚本的诊断与 `douyin_page_results_test` 覆盖。
+/// **不测 DouyinPage / BiliPage**：它们要真的 WebView2 控件，pump 起来会卡在
+/// 平台通道上。抖音那一屏改由注入脚本的诊断与 `douyin_page_results_test` 覆盖，
+/// B 站那一屏由 `bili_page_test` 覆盖（那里只测右侧面板：WebView 起不来时
+/// 左边落占位面板，右边照样渲染，不需要插件也能把列表与文案测到）。
 void main() {
   late Directory tmp;
   late SettingsStore settings;
@@ -49,6 +52,7 @@ void main() {
   late AutoTaskStore autoTasks;
   late CreationTaskStore creationTasks;
   late DouyinAutoStore douyinAuto;
+  late BiliLedger biliLedger;
 
   setUp(() async {
     AppPrefs.setMockInitialValues({});
@@ -70,6 +74,9 @@ void main() {
       creationTasks: creationTasks,
     );
     douyinAuto = DouyinAutoStore();
+    // 「下载管理（B 站）」那个 Tab 的角标读 `BiliLedger`，树上没有它就直接抛
+    // ProviderNotFound —— 与 `main.dart` 里必须挂上它是同一件事的两侧。
+    biliLedger = BiliLedger();
   });
 
   tearDown(() async {
@@ -115,6 +122,14 @@ void main() {
     all[2].status = DownloadStatus.complete;
     all[3].status = DownloadStatus.paused;
 
+    // B 站的一条分 P 落**两行**（视频流 + 音频流），名字都比 X 那批长，
+    // 因为这两行才是「下载管理（B 站）」真正会画出来的形状。
+    downloads.addPending(m('bi-v', MediaType.video, 'bili'), longDir,
+        fileName: 'P03-一个非常长的分P标题用来试探这一行会不会撑破.video.m4s');
+    downloads.addPending(m('bi-a', MediaType.audio, 'bili'), longDir,
+        fileName: 'P03-一个非常长的分P标题用来试探这一行会不会撑破.audio.m4s');
+    downloads.tasks.last.status = DownloadStatus.active;
+
     douyin.ingest([
       for (var i = 1; i <= 3; i++)
         Media(
@@ -148,6 +163,7 @@ void main() {
                 value: creationTasks),
             ChangeNotifierProvider<DouyinStore>.value(value: douyin),
             ChangeNotifierProvider<DouyinAutoStore>.value(value: douyinAuto),
+            ChangeNotifierProvider<BiliLedger>.value(value: biliLedger),
           ],
           child: MaterialApp(home: Scaffold(body: page)),
         ),
@@ -167,6 +183,9 @@ void main() {
     'X 主页': () => HomepagePage(onNavigate: (_) {}),
     'X 下载管理': () => const DownloadManagementPage(),
     '抖音下载管理': () => const DownloadManagementPage(feed: DownloadFeed.douyin),
+    // 第三个队列：这一屏要求 `BiliLedger` 在树上（角标读它），漏挂会直接抛 ——
+    // 冒烟测试顺手把「main.dart 接线」这件事钉住。
+    'B 站下载管理': () => const DownloadManagementPage(feed: DownloadFeed.bili),
     '自动执行': () => const AutoTaskPage(),
     '抖音自动下载': () => const DouyinAutoPage(),
     '全局设置': () => SettingsPage(

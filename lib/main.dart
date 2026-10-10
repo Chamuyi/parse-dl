@@ -12,6 +12,9 @@ import 'services/app_paths.dart';
 import 'services/app_state.dart';
 import 'services/aria2_coordinator.dart';
 import 'services/auto_task_store.dart';
+import 'services/bili_ledger.dart';
+import 'services/bili_ledger_bridge.dart';
+import 'services/bili_store.dart';
 import 'services/creation_task_store.dart';
 import 'services/download_store.dart';
 import 'services/douyin_auto_store.dart';
@@ -175,6 +178,16 @@ Future<void> main() async {
   // 真正需要页面持有的只有 WebviewController（见 DouyinAutoPage）。
   final douyinAutoStore = DouyinAutoStore();
 
+  // B 站：解析结果仓库与下载台账，挂 app 级同上（切页面不丢刚解析出来的一批）。
+  // 台账必须在 runApp 之前读一次 —— 「跳过已下载」与下载管理页那个
+  // 「已下载（B 站）」的角标数字都靠它，晚读一步就是空台账启动。
+  final biliLedger = BiliLedger();
+  await biliLedger.load();
+  final biliStore = BiliStore();
+
+  // 合并结局 → 台账转 done。**这是唯一的转 done 入口**。
+  bindBiliLedgerToSettled(coordinator, biliLedger);
+
   // 内嵌浏览器环境：必须赶在任何 WebviewController 创建之前，
   // 且全局只能初始化一次（用户数据目录定了就不能再改）。
   await prepareDouyinWebViewEnvironment();
@@ -220,5 +233,7 @@ Future<void> main() async {
     creationTaskStore: creationTaskStore,
     douyinStore: douyinStore,
     douyinAutoStore: douyinAutoStore,
+    biliStore: biliStore,
+    biliLedger: biliLedger,
   ));
 }

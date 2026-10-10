@@ -384,13 +384,14 @@ void main() {
     testWidgets('分隔线：Dock 竖向、侧边栏横向，且都分隔出模块边界', (tester) async {
       await tester.pumpWidget(_navHarness(NavLayout.dock));
       var dividers = tester.widgetList<NavDivider>(find.byType(NavDivider));
-      // Logo 后 1 条 + 每个模块后各 1 条（2 条）= 3
-      expect(dividers.length, 3, reason: 'Dock 靠分隔线体现两个模块各自独立');
+      // Logo 后 1 条 + 每个模块后各 1 条 —— 三个模块就是 4 条
+      expect(dividers.length, 1 + kNavGroups.length,
+          reason: 'Dock 靠分隔线体现每个模块各自独立');
       expect(dividers.every((d) => d.axis == Axis.vertical), isTrue);
 
       await tester.pumpWidget(_navHarness(NavLayout.sidebar));
       dividers = tester.widgetList<NavDivider>(find.byType(NavDivider));
-      // Logo 后 1 条 + 模块区与全局项之间 1 条 = 2
+      // Logo 后 1 条 + 模块区与全局项之间 1 条 = 2（侧边栏靠标题行分模块，不再逐组加线）
       expect(dividers.length, 2);
       expect(dividers.every((d) => d.axis == Axis.horizontal), isTrue);
     });
@@ -404,32 +405,35 @@ void main() {
   });
 
   // ══════════════════════════════════════════════════════════
-  // 模块入口：两个模块各自是一个「可点击展开的统一入口」
+  // 模块入口：三个模块各自是一个「可点击展开的统一入口」
   // ══════════════════════════════════════════════════════════
   group('模块入口展开 / 收起', () {
-    testWidgets('侧边栏顶层就是两个模块（不是包在一个父项里）', (tester) async {
+    testWidgets('侧边栏顶层就是三个模块（不是包在一个父项里）', (tester) async {
       await tester.pumpWidget(const _InteractiveSidebar());
 
-      // 两个模块的入口标题各一个，并列在顶层
+      // 三个模块的入口标题各一个，并列在顶层
       expect(find.text('X 下载'), findsOneWidget);
       expect(find.text('抖音解析下载'), findsOneWidget);
+      expect(find.text('B 站下载'), findsOneWidget);
 
-      // 默认展开：两组的子项都看得到
+      // 默认展开：三组的子项都看得到
       expect(find.text('主页'), findsOneWidget);
-      expect(find.text('解析下载'), findsOneWidget);
+      // 「解析下载」抖音与 B 站各一行（两个模块的那一行本来就同名）
+      expect(find.text('解析下载'), findsNWidgets(labelCount('解析下载')));
 
       // 全局项不属于任何模块，也在顶层
       expect(find.text('关于'), findsOneWidget);
     });
 
-    testWidgets('点模块标题 → 收起它自己那组，另一个模块不受影响', (tester) async {
+    testWidgets('点模块标题 → 收起它自己那组，另外两个模块不受影响', (tester) async {
       await tester.pumpWidget(const _InteractiveSidebar());
 
       expect(find.text('主页'), findsOneWidget);
-      expect(find.text('解析下载'), findsOneWidget);
+      expect(find.text('解析下载'), findsNWidgets(labelCount('解析下载')));
       // 三条设置入口各自带归属，所以能精确断言「收起的是哪一个」
       expect(find.text('X 下载设置'), findsOneWidget);
       expect(find.text('抖音设置'), findsOneWidget);
+      expect(find.text('B 站设置'), findsOneWidget);
       expect(find.text('全局设置'), findsOneWidget);
 
       await tester.tap(find.text('X 下载'));
@@ -437,16 +441,19 @@ void main() {
 
       // X 的子项收起
       expect(find.text('主页'), findsNothing);
-      // 「下载管理」X 组收了，但抖音组那个还在 —— 所以是 1 不是 0
-      expect(find.text('下载管理'), findsOneWidget);
       expect(find.text('自动执行'), findsNothing);
+      // 「下载管理」X 组收了，另外两组那个还在
+      expect(find.text('下载管理'), findsNWidgets(labelCount('下载管理', collapsed: {'x'})));
+      // 「解析下载」收了抖音那一条之后剩下的条数（每个模块独立算）
+      expect(
+        find.text('解析下载'),
+        findsNWidgets(labelCount('解析下载', collapsed: {'x'})),
+      );
 
-      // 抖音模块**不受影响**（两个模块的展开状态互相独立）
-      expect(find.text('解析下载'), findsOneWidget);
-
-      // X 组那个设置跟着收起，抖音组 + 全局的还在
+      // 抖音 + B 站两个模块**不受影响**（三个模块的展开状态互相独立）
       expect(find.text('X 下载设置'), findsNothing);
       expect(find.text('抖音设置'), findsOneWidget);
+      expect(find.text('B 站设置'), findsOneWidget);
       expect(find.text('全局设置'), findsOneWidget);
 
       // 标题行本身就是入口，收起后依然在
@@ -465,22 +472,33 @@ void main() {
       expect(find.text('主页'), findsOneWidget);
       expect(find.text('X 下载设置'), findsOneWidget);
       expect(find.text('抖音设置'), findsOneWidget);
+      expect(find.text('B 站设置'), findsOneWidget);
       expect(find.text('全局设置'), findsOneWidget);
     });
 
-    testWidgets('两个模块各自独立收起，互不联动', (tester) async {
+    testWidgets('三个模块各自独立收起，互不联动', (tester) async {
       await tester.pumpWidget(const _InteractiveSidebar());
 
       await tester.tap(find.text('X 下载'));
       await tester.pumpAndSettle();
+      // 收了第一个模块，另两个还在 —— 这一步是「不联动」的直接证据
+      expect(find.text('解析下载'), findsNWidgets(labelCount('解析下载', collapsed: {'x'})));
+
       await tester.tap(find.text('抖音解析下载'));
+      await tester.pumpAndSettle();
+      expect(find.text('解析下载'), findsNWidgets(labelCount('解析下载', collapsed: {'x', 'douyin'})));
+      expect(find.text('B 站设置'), findsOneWidget, reason: 'B 站那组还没收，设置项还在');
+
+      await tester.tap(find.text('B 站下载'));
       await tester.pumpAndSettle();
 
       expect(find.text('主页'), findsNothing);
       expect(find.text('解析下载'), findsNothing);
+      expect(find.text('下载管理'), findsNothing);
       expect(find.text('全局设置'), findsOneWidget, reason: '只剩全局那个');
       expect(find.text('X 下载设置'), findsNothing);
       expect(find.text('抖音设置'), findsNothing);
+      expect(find.text('B 站设置'), findsNothing);
 
       // 全局项始终可见，不受模块收起影响
       expect(find.text('关于'), findsOneWidget);
@@ -499,6 +517,25 @@ void main() {
       expect(find.text('主页'), findsNothing, reason: '点全局项不该把 X 下载模块连带展开');
     });
   });
+}
+
+/// 某个标签在侧边栏里**应当**出现几次（按 [collapsed] 之外的模块数据算）。
+///
+/// 「解析下载」「下载管理」这几个标签是跨模块同名的（每个模块都有自己那一行），
+/// 写死 1 会在加第三个模块时误报，写死 2 又会在收起某组时误报 —— 所以按数据算。
+int labelCount(String label, {Set<String> collapsed = const {}}) {
+  var n = 0;
+  for (final g in kNavGroups) {
+    if (g.label == label) n++;
+    if (collapsed.contains(g.id)) continue;
+    for (final c in g.children) {
+      if (c.label == label) n++;
+    }
+  }
+  for (final s in kNavStandalone) {
+    if (s.label == label) n++;
+  }
+  return n;
 }
 
 /// 可交互的侧边栏外壳：展开状态真的会变。

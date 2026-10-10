@@ -3,17 +3,19 @@ import 'package:parse_dl/widgets/nav_items.dart';
 
 /// 导航分组模型。
 ///
-/// 需求形状：**侧边栏顶层就是两个模块**（不是「一个父项包住两个模块」），
+/// 需求形状：**侧边栏顶层就是三个模块**（不是「一个父项包住三个模块」），
 /// 每个模块自己是一个「可点击展开的统一入口」。这个文件把形状钉死，
 /// 免得以后有人又把它改回平铺或改回单父项。
 void main() {
-  group('两个模块并列且独立', () {
-    test('正好两组：X 下载 / 抖音解析下载', () {
-      expect(kNavGroups.length, 2);
+  group('三个模块并列且独立', () {
+    test('正好三组：X 下载 / 抖音解析下载 / B 站下载', () {
+      expect(kNavGroups.length, 3);
       expect(kNavGroups[0].id, 'x');
       expect(kNavGroups[0].label, 'X 下载');
       expect(kNavGroups[1].id, 'douyin');
       expect(kNavGroups[1].label, '抖音解析下载');
+      expect(kNavGroups[2].id, 'bili');
+      expect(kNavGroups[2].label, 'B 站下载');
     });
 
     test('X 组含 4 个功能页，顺序固定', () {
@@ -30,15 +32,34 @@ void main() {
       );
     });
 
-    test('两个模块的设置是**两个不同页面**（不合并成一处）', () {
+    test('B 站组按同一套 id 命名规则，但**没有自动下载**（那是 P2/P3）', () {
+      expect(
+        kNavGroups[2].children.map((e) => e.id).toList(),
+        ['bili', 'bili-downloads', 'bili-settings'],
+      );
+      // 「自动下载」现在挂上来就是一个点进去白屏的入口，宁可少一项。
+      expect(kNavGroups[2].children.map((e) => e.id), isNot(contains('bili-auto')));
+    });
+
+    test('三组各自的 badge 是一个单字，且组 id 与 badge 不同名', () {
+      for (final g in kNavGroups) {
+        expect(g.badge.length, 1, reason: '${g.id} 的徽标必须是单字');
+        expect(g.id, isNot(g.badge));
+      }
+      expect(kNavGroups.map((g) => g.badge).toList(), ['X', '抖', '站']);
+    });
+
+    test('三个模块的设置是**三个不同页面**（不合并成一处）', () {
       final xSettings = kNavGroups[0].children.last;
       final dySettings = kNavGroups[1].children.last;
+      final biliSettings = kNavGroups[2].children.last;
 
-      // 名字自带归属：三条都叫「设置」时，Dock 形态下两个滑杆图标 + 相同文字
+      // 名字自带归属：三条都叫「设置」时，Dock 形态下三个滑杆图标 + 相同文字
       // 根本分不出点的是哪一个。
       expect(xSettings.label, 'X 下载设置');
       expect(dySettings.label, '抖音设置');
-      expect(xSettings.id, isNot(dySettings.id));
+      expect(biliSettings.label, 'B 站设置');
+      expect({xSettings.id, dySettings.id, biliSettings.id}, hasLength(3));
     });
 
     test('导航 id 全局唯一（否则高亮会同时亮两处）', () {
@@ -71,6 +92,7 @@ void main() {
   group('查询辅助', () {
     test('navItemById 找得到、找不到返回 null', () {
       expect(navItemById('douyin')?.label, '解析下载');
+      expect(navItemById('bili')?.label, '解析下载');
       expect(navItemById('x-settings')?.label, 'X 下载设置');
       expect(navItemById('不存在的页面'), isNull);
     });
@@ -81,6 +103,9 @@ void main() {
       expect(navGroupOf('x-settings')?.id, 'x');
       expect(navGroupOf('douyin')?.id, 'douyin');
       expect(navGroupOf('douyin-settings')?.id, 'douyin');
+      expect(navGroupOf('bili')?.id, 'bili');
+      expect(navGroupOf('bili-downloads')?.id, 'bili');
+      expect(navGroupOf('bili-settings')?.id, 'bili');
     });
 
     test('全局项不属于任何模块', () {

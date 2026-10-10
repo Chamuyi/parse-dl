@@ -52,6 +52,21 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// Dock 的自然宽度，**按导航数据算**而不是写死一个数。
+  ///
+  /// 组成：① 上下边框 2 + 左右 padding 16 ② Logo 28 ③ Logo 后那条分隔线 9
+  /// （1px 线 + 左右各 4 边距）④ 每个模块 = 单字徽标 22 + 5 + 每项 40
+  /// （36 图标格 + 左右各 2）+ 组尾分隔线 9 ⑤ 全局项每项 40。
+  /// 写死数字的话，加第三个模块就得回来改一次；按数据算才是这条断言真正想说的
+  /// 「宽度只由这些常量决定，没被气泡/指示点撑歪」。
+  double dockNaturalWidth() {
+    double w = 2 + 16 + 28 + 9;
+    for (final g in kNavGroups) {
+      w += 22 + 5 + 40.0 * g.children.length + 9;
+    }
+    return w + 40.0 * kNavStandalone.length;
+  }
+
   testWidgets('Dock 高度紧凑：气泡标签不再占用布局（曾 90px，现 54px）', (tester) async {
     await pumpDock(tester);
 
@@ -64,7 +79,9 @@ void main() {
           '若又变成 ~90px，说明悬停标签被放回了布局流里',
     );
     // 宽度只需容纳内容，不该被撑满屏幕
-    expect(size.width, lessThan(600));
+    expect(size.width, lessThan(800));
+    expect(size.width, closeTo(dockNaturalWidth(), 0.51),
+        reason: '宽度必须正好等于导航常量拼出来的自然宽度（多出来的就是被撑歪了）');
   });
 
   testWidgets('Logo / 导航图标 垂直同心（曾用 end 对齐导致错位）', (tester) async {
@@ -149,18 +166,21 @@ void main() {
       idx += g.children.length;
     }
 
-    // 模块之间 / 模块与全局项之间：隔着一条竖向分隔线，必须大于组内间距
-    final xCount = kNavGroups[0].children.length;
-    final dyCount = kNavGroups[1].children.length;
+    // 模块之间 / 最后一个模块与全局项之间：隔着一条竖向分隔线，必须大于组内间距
+    var offset = 0;
+    for (final g in kNavGroups) {
+      offset += g.children.length;
+      expect(
+        dxs[offset] - dxs[offset - 1],
+        greaterThan(gap),
+        reason: '${g.label} 与后一组之间要有分隔线把它拉开',
+      );
+    }
     expect(
-      dxs[xCount] - dxs[xCount - 1],
+      dxs[dxs.length - kNavStandalone.length] -
+          dxs[dxs.length - kNavStandalone.length - 1],
       greaterThan(gap),
-      reason: 'X 下载与抖音解析下载之间要有分隔线',
-    );
-    expect(
-      dxs[xCount + dyCount] - dxs[xCount + dyCount - 1],
-      greaterThan(gap),
-      reason: '两个模块与全局项之间也要有分隔线',
+      reason: '最后一个模块与全局项之间也要有分隔线',
     );
   });
 

@@ -7,6 +7,7 @@ import 'l10n/l10n.dart';
 import 'models/settings.dart';
 import 'pages/about_page.dart';
 import 'pages/auto_task_page.dart';
+import 'pages/bili_page.dart';
 import 'pages/download_management_page.dart';
 import 'pages/douyin_auto_page.dart';
 import 'pages/douyin_page.dart';
@@ -16,6 +17,8 @@ import 'services/app_logger.dart';
 import 'services/app_state.dart';
 import 'services/aria2_coordinator.dart';
 import 'services/auto_task_store.dart';
+import 'services/bili_ledger.dart';
+import 'services/bili_store.dart';
 import 'services/creation_task_store.dart';
 import 'services/download_store.dart';
 import 'services/douyin_auto_store.dart';
@@ -44,7 +47,7 @@ const String kAppVersion = '1.3';
 /// 协议名直接硬编码 GPL-3.0。
 const _kAboutInfo = AboutInfo(
   name: '解析下载器',
-  tagline: '批量下载 X 与抖音上的图片与视频',
+  tagline: '批量下载 X、抖音与 B 站上的图片与视频',
   version: kAppVersion,
   author: '茶沐依',
   license: 'GPL-3.0',
@@ -67,6 +70,8 @@ class XDownloaderApp extends StatelessWidget {
   final CreationTaskStore creationTaskStore;
   final DouyinStore douyinStore;
   final DouyinAutoStore douyinAutoStore;
+  final BiliStore biliStore;
+  final BiliLedger biliLedger;
 
   const XDownloaderApp({
     super.key,
@@ -78,6 +83,8 @@ class XDownloaderApp extends StatelessWidget {
     required this.creationTaskStore,
     required this.douyinStore,
     required this.douyinAutoStore,
+    required this.biliStore,
+    required this.biliLedger,
   });
 
   @override
@@ -94,6 +101,12 @@ class XDownloaderApp extends StatelessWidget {
         ),
         ChangeNotifierProvider<DouyinStore>.value(value: douyinStore),
         ChangeNotifierProvider<DouyinAutoStore>.value(value: douyinAutoStore),
+        // B 站的两个 app 级状态与抖音同构：解析结果仓库 + 下载台账。
+        // `BiliLedger` **必须挂在树上而不是只挂在页面里**：
+        // 「下载管理（B 站）」那一片历史直接 `watch<BiliLedger>()`，
+        // 漏挂就是 ProviderNotFound。
+        ChangeNotifierProvider<BiliStore>.value(value: biliStore),
+        ChangeNotifierProvider<BiliLedger>.value(value: biliLedger),
       ],
       child: Consumer<SettingsStore>(
         builder: (context, s, _) {
@@ -323,6 +336,8 @@ class _AppShellState extends State<_AppShell> {
         return HomepagePage(onNavigate: _setRoute);
       case 'douyin':
         return DouyinPage(onNavigate: _setRoute);
+      case 'bili':
+        return BiliPage(onNavigate: _setRoute);
       case 'download-management':
         return const DownloadManagementPage();
       case 'douyin-downloads':
@@ -330,6 +345,10 @@ class _AppShellState extends State<_AppShell> {
         // 并多出「已下载（抖音）」这个作品粒度历史 Tab。X 那边反过来看不到
         // 抖音的任务，也看不到这个 Tab —— 两个模块的界面各说各的话。
         return const DownloadManagementPage(feed: DownloadFeed.douyin);
+      case 'bili-downloads':
+        // B 站那份：只列 source == 'bili' 的任务行，历史 Tab 是「已下载（B 站）」
+        // 这个**分 P 粒度**的那本台账（与抖音的作品粒度台账不同文件、不同键）。
+        return const DownloadManagementPage(feed: DownloadFeed.bili);
       case 'douyin-auto':
         // 抖音模块的「自动下载」（对应 X 模块的「自动执行」）
         return const DouyinAutoPage();
@@ -337,50 +356,15 @@ class _AppShellState extends State<_AppShell> {
         return const AutoTaskPage();
       case 'x-settings':
         // X 下载模块自己的设置（原设置页的「下载」分区）
-        return SettingsPage(
-          brightness: widget.brightness,
-          onMaterialChanged: (m) async {
-            // 这个函数特意把失败原因算好了交回界面（系统关掉「透明效果」时
-            // 只能提示用户，程序无法代劳）—— 以前三处调用点把返回值丢了。
-            final r = await applyWindowMaterial(m);
-            if (!r.ok && mounted) {
-              // 用 State.context：build 的参数 context 会被 lint 认为与
-              // State.mounted 无关（异步间隙后无法证明它还活着）。
-              AppToast.show(this.context, r.message, kind: AppToastKind.error);
-            }
-          },
-          scope: SettingsScope.xDownload,
-        );
+        return _settingsPage(SettingsScope.xDownload);
       case 'douyin-settings':
         // 抖音解析下载模块自己的设置（原设置页的「抖音」分区）
-        return SettingsPage(
-          brightness: widget.brightness,
-          onMaterialChanged: (m) async {
-            // 这个函数特意把失败原因算好了交回界面（系统关掉「透明效果」时
-            // 只能提示用户，程序无法代劳）—— 以前三处调用点把返回值丢了。
-            final r = await applyWindowMaterial(m);
-            if (!r.ok && mounted) {
-              // 用 State.context：build 的参数 context 会被 lint 认为与
-              // State.mounted 无关（异步间隙后无法证明它还活着）。
-              AppToast.show(this.context, r.message, kind: AppToastKind.error);
-            }
-          },
-          scope: SettingsScope.douyin,
-        );
+        return _settingsPage(SettingsScope.douyin);
+      case 'bili-settings':
+        // B 站解析下载模块自己的设置
+        return _settingsPage(SettingsScope.bili);
       case 'settings':
-        return SettingsPage(
-          brightness: widget.brightness,
-          onMaterialChanged: (m) async {
-            // 这个函数特意把失败原因算好了交回界面（系统关掉「透明效果」时
-            // 只能提示用户，程序无法代劳）—— 以前三处调用点把返回值丢了。
-            final r = await applyWindowMaterial(m);
-            if (!r.ok && mounted) {
-              // 用 State.context：build 的参数 context 会被 lint 认为与
-              // State.mounted 无关（异步间隙后无法证明它还活着）。
-              AppToast.show(this.context, r.message, kind: AppToastKind.error);
-            }
-          },
-        );
+        return _settingsPage(SettingsScope.global);
       case 'about':
         return AboutPage(info: _kAboutInfo);
       default:
@@ -389,6 +373,30 @@ class _AppShellState extends State<_AppShell> {
           routeId: _routeId,
           colors: AppTheme.colorsOf(context),
         );
+    }
+  }
+
+  /// 四个设置入口共用这一个页面组件，只是 `scope` 不同。
+  ///
+  /// 材质回调只有「全局设置」那一页真的会用到（外观分区只在 global 渲染），
+  /// 但四个入口都必须把它传全 —— 以前每个 case 复制一遍这段异步块，
+  /// 加第四个模块时就是第四份副本，而这段里的每条注释都是踩坑写下的。
+  Widget _settingsPage(SettingsScope scope) => SettingsPage(
+    brightness: widget.brightness,
+    onMaterialChanged: _applyMaterial,
+    scope: scope,
+  );
+
+  /// 把窗口材质真正落到原生窗口上。
+  ///
+  /// 这个函数特意把失败原因算好了交回界面（系统关掉「透明效果」时
+  /// 只能提示用户，程序无法代劳）—— 以前三处调用点把返回值丢了。
+  Future<void> _applyMaterial(WindowMaterial m) async {
+    final r = await applyWindowMaterial(m);
+    if (!r.ok && mounted) {
+      // 用 State.context：build 的参数 context 会被 lint 认为与
+      // State.mounted 无关（异步间隙后无法证明它还活着）。
+      AppToast.show(context, r.message, kind: AppToastKind.error);
     }
   }
 
@@ -405,6 +413,11 @@ class _AppShellState extends State<_AppShell> {
     'douyin-downloads' => t('下载管理'),
     'douyin-auto' => t('自动下载'),
     'douyin-settings' => t('抖音解析下载设置'),
+    // B 站那一项的导航标签与抖音同字（都叫「解析下载」），所以标题栏
+    // 必须带模块名，否则切过去看不出自己在哪一个模块里。
+    'bili' => t('B 站解析下载'),
+    'bili-downloads' => t('下载管理'),
+    'bili-settings' => t('B 站解析下载设置'),
     'settings' => t('设置'),
     'about' => t('关于'),
     _ => '',

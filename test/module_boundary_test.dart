@@ -62,10 +62,14 @@ const _douyinOnlyFiles = [
 
 /// B 站模块独占的文件。
 ///
+/// `app.dart` / `nav_items.dart` 是三个模块共用的文件，不在这里扫 ——
+/// 导航与路由由 `test/bili_nav_wiring_test.dart` 去扫。
+///
 /// 判据取的是**字符串字面量**（注释与标识符不算），所以服务层也在扫描范围内：
 /// B 站的接口层若在提示文案里冒出「抖音 / 推文」，用户在 B 站页面上就会看到
-/// 另一个模块的说法。`bili_page.dart` 落地后一并加进来。
+/// 另一个模块的说法。`import` 那类路径字面量已被排除，见 `stringLiterals`。
 const _biliOnlyFiles = [
+  'lib/pages/bili_page.dart',
   'lib/widgets/bili_section.dart',
   'lib/widgets/download_history_section.dart',
   'lib/services/bili_api.dart',
@@ -75,6 +79,7 @@ const _biliOnlyFiles = [
   'lib/services/bili_feed.dart',
   'lib/services/bili_store.dart',
   'lib/services/bili_ledger.dart',
+  'lib/services/bili_ledger_bridge.dart',
   'lib/services/bili_merger.dart',
   'lib/services/bili_download_plan.dart',
   'lib/services/bili_ffmpeg.dart',

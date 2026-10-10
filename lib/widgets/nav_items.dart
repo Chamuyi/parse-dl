@@ -14,10 +14,10 @@ class NavItem {
 
 /// 一个**模块**：侧边栏里一个「可点击展开的统一入口」+ 它下面的功能页。
 ///
-/// 两个下载模块在侧边栏里是**并列的两行**，不是包在一个父项里 ——
+/// 三个下载模块在侧边栏里是**并列的三行**，不是包在一个父项里 ——
 /// 点某一行的标题就展开/收起它自己那一组，各管各的。
 class NavGroup {
-  /// 分组标识（'x' / 'douyin'），展开状态的持久化键
+  /// 分组标识（'x' / 'douyin' / 'bili'），展开状态的持久化键
   final String id;
 
   /// 入口标题
@@ -37,7 +37,7 @@ class NavGroup {
   const NavGroup(this.id, this.label, this.icon, this.children, this.badge);
 }
 
-/// 两个下载模块。这两个模块在功能与设置层面都保持独立。
+/// 三个下载模块。这三个模块在功能与设置层面都保持独立。
 const kNavGroups = <NavGroup>[
   NavGroup('x', 'X 下载', Icons.download_rounded, [
     NavItem('home', '主页', Icons.home_rounded),
@@ -54,9 +54,20 @@ const kNavGroups = <NavGroup>[
     NavItem('douyin-auto', '自动下载', Icons.bolt_rounded),
     NavItem('douyin-settings', '抖音设置', Icons.tune_rounded),
   ], '抖'),
+  // B 站这一组照抖音那组的命名与图标规则，但**只有三项**：
+  // 「自动下载」是 P2/P3 的东西，现在挂上来就是一个点进去会白屏的入口，
+  // 所以刻意留空而不是先造一个假页面。
+  // 组名比页面名短一档（「B 站下载」而不是「B 站解析下载」）：侧边栏中文档
+  // 只有 200px，七字标签会被截断 —— `l10n_test` 的「中文导航不许被截断」那条
+  // 当场把它撞出来了。组里的子项已经写明是「解析下载」，标题不必再重复一遍。
+  NavGroup('bili', 'B 站下载', Icons.live_tv_rounded, [
+    NavItem('bili', '解析下载', Icons.play_circle_outline_rounded),
+    NavItem('bili-downloads', '下载管理', Icons.download_rounded),
+    NavItem('bili-settings', 'B 站设置', Icons.tune_rounded),
+  ], '站'),
 ];
 
-/// 不属于任何模块的**全局**项（侧边栏里排两个模块下面）。
+/// 不属于任何模块的**全局**项（侧边栏里排在三个模块下面）。
 const kNavStandalone = <NavItem>[
   // 三条都叫「设置」时，Dock 形态下两个滑杆图标 + 相同气泡文字根本分不出
   // 点的是哪一个 —— 名字要自带归属。
