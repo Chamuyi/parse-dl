@@ -20,6 +20,7 @@ import '../services/bili_web.dart';
 import '../services/file_name_template.dart' show resolveVariables;
 import '../services/settings_store.dart';
 import '../theme/app_theme.dart';
+import '../widgets/bili_download_options_dialog.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_toast.dart';
 
@@ -347,7 +348,6 @@ class _BiliPageState extends State<BiliPage> {
       return;
     }
     if (_working) return;
-    setState(() => _working = true);
     store.setBusy(true);
     try {
       final keys = await api.fetchWbiKeys();
@@ -494,7 +494,7 @@ class _BiliPageState extends State<BiliPage> {
     final store = context.read<BiliStore>();
     final ledger = context.read<BiliLedger>();
     // 弹窗返回的那一份只活在这一批里；没点「同步为默认」就不进 settings.json。
-    final cfg = override ?? context.read<SettingsStore>().settings.bili;
+    var cfg = context.read<SettingsStore>().settings.bili;
     final api = _api;
     if (api == null) return;
     if (_working) return;
@@ -515,6 +515,22 @@ class _BiliPageState extends State<BiliPage> {
       );
       return;
     }
+
+    // 弹窗只在「界面上点下载」这一条路出现：批量页与自动链路会把
+    // override 传进来，那已经是用户点过一次的结果，不该再问一遍。
+    var batch = override;
+    if (batch == null) {
+      final r = await showBiliDownloadOptions(context, cfg);
+      if (!mounted) return;
+      if (r.action == BiliOptionsAction.cancel) return;
+      batch = r.config ?? cfg;
+      if (r.action == BiliOptionsAction.confirmAndSync) {
+        final picked = batch;
+        await context.read<SettingsStore>().setBili((b) => b.applyFrom(picked));
+        if (!mounted) return;
+      }
+    }
+    cfg = batch;
 
     setState(() => _working = true);
     store.setBusy(true);

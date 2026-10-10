@@ -210,6 +210,23 @@ void main() {
       }
     });
 
+    test('applyFrom 逐键搬过去，一格都不许留', () {
+      final src = allNonDefault();
+      final dst = BiliConfig();
+      dst.applyFrom(src);
+      // 只加字段不在这条测试里改代码是抓不到的：它比的是 toJson 的**全部键**。
+      // 漏了一格赋值，那一格的值就会留在 dst 的默认值上，这里立刻红。
+      expect(dst.toJson(), src.toJson());
+      expect(dst.isDefault, isFalse);
+    });
+
+    test('applyFrom 之后改 src 不影响 dst（列表是拷的不是引用）', () {
+      final src = allNonDefault();
+      final dst = BiliConfig()..applyFrom(src);
+      src.subtitleLangs = ['ja'];
+      expect(dst.subtitleLangs, isNot(src.subtitleLangs));
+    });
+
     test('每一格都被改过的那一份，往返后逐键相等', () {
       final c = allNonDefault();
       expect(c.isDefault, isFalse);

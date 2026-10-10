@@ -70,6 +70,7 @@ const _douyinOnlyFiles = [
 /// 另一个模块的说法。`import` 那类路径字面量已被排除，见 `stringLiterals`。
 const _biliOnlyFiles = [
   'lib/pages/bili_page.dart',
+  'lib/widgets/bili_download_options_dialog.dart',
   'lib/widgets/bili_section.dart',
   'lib/widgets/download_history_section.dart',
   'lib/services/bili_api.dart',

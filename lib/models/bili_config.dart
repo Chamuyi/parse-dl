@@ -464,6 +464,44 @@ class BiliConfig {
     trackPriority: trackPriority ?? this.trackPriority,
   );
 
+  /// 把 [src] 的每一项搬进自己。**同步为默认**走的就是这一条。
+  ///
+  /// 刻意逐字段赋值而不是换对象：`SettingsStore.setBili` 给的是
+  /// 「拿到那一份活的配置改它」的写法，别处（下载管理、设置页）正 watch 着同一个
+  /// 对象，换成新对象会让它们看的是旧的。
+  void applyFrom(BiliConfig src) {
+    quality = src.quality;
+    codec = src.codec;
+    mergeAfterDownload = src.mergeAfterDownload;
+    skipDownloaded = src.skipDownloaded;
+    groupByWork = src.groupByWork;
+    concurrency = src.concurrency;
+    customText = src.customText;
+    saveDirBase = src.saveDirBase;
+    enableSaveFolder = src.enableSaveFolder;
+    dirTemplate = src.dirTemplate;
+    fileNameTemplate = src.fileNameTemplate;
+    container = src.container;
+    speedLimitKbps = src.speedLimitKbps;
+    saveDanmaku = src.saveDanmaku;
+    danmakuFormat = src.danmakuFormat;
+    danmakuFontFace = src.danmakuFontFace;
+    danmakuFontSize = src.danmakuFontSize;
+    danmakuOpacity = src.danmakuOpacity;
+    danmakuMarginV = src.danmakuMarginV;
+    saveSubtitle = src.saveSubtitle;
+    subtitleFormat = src.subtitleFormat;
+    subtitleLangs = List.of(src.subtitleLangs);
+    subtitleManualOnly = src.subtitleManualOnly;
+    saveCover = src.saveCover;
+    coverFormat = src.coverFormat;
+    saveChapter = src.saveChapter;
+    saveMetadata = src.saveMetadata;
+    metadataFormat = src.metadataFormat;
+    embedSubtitleTrack = src.embedSubtitleTrack;
+    trackPriority = src.trackPriority;
+  }
+
   /// 内封字幕轨的前提缺了哪一条。
   ///
   /// 返回 null = 可以内封；否则给出还差什么，**由界面原样显示**。
