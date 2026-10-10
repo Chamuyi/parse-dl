@@ -433,11 +433,17 @@ class BiliPlayUrl {
 
     if (dash is Map) {
       final d = dash.cast<String, dynamic>();
+      // 2026-10-10 真机：`fnval=4048` 的响应里**每条流既不给 `size` 也不给 `duration`**
+      // （六条视频流、三条音频流全是 0），时长只在容器级。所以下面两件事都要拿
+      // 容器时长兜底：一是 `durationMs` 本身，二是「按 bandwidth × 时长 反推字节数」。
+      final containerMs = _containerDurationMs(d, j);
       for (final e in (d['video'] as List? ?? const []).whereType<Map>()) {
-        video.add(_streamFromMap(e.cast<String, dynamic>(), formats, false));
+        video.add(_streamFromMap(e.cast<String, dynamic>(), formats, false,
+            containerMs: containerMs));
       }
       for (final e in (d['audio'] as List? ?? const []).whereType<Map>()) {
-        audio.add(_streamFromMap(e.cast<String, dynamic>(), formats, true));
+        audio.add(_streamFromMap(e.cast<String, dynamic>(), formats, true,
+            containerMs: containerMs));
       }
       // `dash.flac.audio` / `dash.dolby.audio` 是嵌套对象/数组，形状与普通 audio
       // 不同；Hi-Res 与杜比音轨本期不取。
@@ -1134,10 +1140,23 @@ String _firstNonEmpty(List<dynamic> values) {
 BiliStream _streamFromMap(
   Map<String, dynamic> j,
   Map<int, String> formats,
-  bool isAudio,
-) {
+  bool isAudio, {
+  int containerMs = 0,
+}) {
   final id = _int(j['id']) ?? 0;
   final codecs = _str(j['codecs']);
+  final bandwidth = _int(j['bandwidth']) ?? 0;
+  final selfMs = (_int(j['duration']) ?? 0) * 1000;
+  final durationMs = selfMs > 0 ? selfMs : containerMs;
+  // `size` 在 `fnval=4048` 的响应里**不给**（2026-10-10 真机：六条视频流、三条音频流
+  // 的 `size` 全是缺失，`dataSize` 一律落到 0）。所以按 `bandwidth × 时长` 反推。
+  // 这个估算不是凑数：同一条 2172 秒的稿件，估视频 95,145,568 / 实下 95,104,081
+  // （差 0.04%），估音频 44,583,286 / 实下 44,579,075（差 0.009%）。
+  // 真拿到 `size` 时仍然优先用原值。
+  final sizeBytes = _int(j['size'] ?? j['file_size']) ??
+      (bandwidth > 0 && durationMs > 0
+          ? bandwidth * durationMs ~/ 8000
+          : 0);
   return BiliStream(
     id: id,
     codecs: codecs,
@@ -1149,12 +1168,19 @@ BiliStream _streamFromMap(
     width: _int(j['width']) ?? 0,
     height: _int(j['height']) ?? 0,
     fps: _fps(j['frame_rate']),
-    bitrate: _int(j['bandwidth']) ?? 0,
-    dataSize: _int(j['size'] ?? j['file_size']) ?? 0,
-    durationMs: (_int(j['duration']) ?? 0) * 1000,
+    bitrate: bandwidth,
+    dataSize: sizeBytes,
+    durationMs: durationMs,
     qualityLabel: _labelOf(id, isAudio, formats),
     isAudio: isAudio,
   );
+}
+
+/// 容器级时长（毫秒）：`dash.duration` 是秒，`data.timelength` 是毫秒。
+int _containerDurationMs(Map<String, dynamic> dash, Map<String, dynamic> data) {
+  final fromDash = _int(dash['duration']) ?? 0;
+  if (fromDash > 0) return fromDash * 1000;
+  return _int(data['timelength']) ?? 0;
 }
 
 /// 老稿件的 `durl` 一段 → 一条「流」。durl 的字段名与 dash 完全不同，编码信息
