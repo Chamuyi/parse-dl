@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:http/http.dart' as http;
 
 import '../models/bili_meta.dart';
@@ -137,9 +139,10 @@ BiliRef? parseBiliRef(String raw) {
 
 /// 跟随 `b23.tv` 短链的重定向，拿到最终地址再解析。
 ///
-/// **故意不跟自动重定向**：`http` 的客户端默认会一路跟到底，而 B 站的跳转链上
-/// 有一跳会把 `p=` 丢掉。这里只取**第一跳的 Location**，取不到才退回最终地址，
-/// 这样 `?p=3` 这种分 P 信息能留住。
+/// **先看第一跳的 `Location`，拿不到才退到 GET**：短链的目标地址本身就带着
+/// `?p=` 这类分 P 参数，一路跟到底反而要经过中间页，参数可能被改写。
+/// 退路有两条：GET 拿最终请求的 URL；再不行从 HTML 正文里抠 BV 号
+/// （有些短链是 200 + 一段跳转脚本，压根不发 302）。
 Future<BiliRef?> expandBiliShortLink(String shortUrl,
     {http.Client? client, Duration timeout = const Duration(seconds: 10)}) async {
   final c = client ?? http.Client();
@@ -165,10 +168,16 @@ Future<BiliRef?> expandBiliShortLink(String shortUrl,
     final req = get.request;
     if (req != null) {
       final byFinal = parseBiliRef(req.toString());
-      if (byFinal != null) return byFinal;
+      // 结果仍然是个短链就等于什么都没进展 —— 返回它会让调用方原地打转，
+      // 所以这里只认「已经落到能解析的形状」的那一种。
+      if (byFinal != null && !byFinal.needsExpand) return byFinal;
     }
     // 最后一搏：从 HTML 里抠 BV 号（短链页常把目标写进 `<meta>` 或跳转脚本）
-    final inBody = _bvidRe.firstMatch(get.body);
+    // 用 bodyBytes 自己按 UTF-8 解，而不是 `get.body` —— 后者按响应头的
+    // `content-type` 猜编码，短链页常常**不带** charset，猜不出来就退回 latin1，
+    // 中文正文会直接解坏（本文件的测试就是被这个炸出来的）。
+    final html = utf8.decode(get.bodyBytes, allowMalformed: true);
+    final inBody = _bvidRe.firstMatch(html);
     return inBody == null ? null : BiliRef._(bvid: inBody.group(0));
   } finally {
     if (client == null) c.close();

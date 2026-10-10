@@ -1,4 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+// `show Response` 是必要的：`package:http` 会连带导出 `MediaType`，
+// 与本项目的 `models/media.dart` 里的同名枚举撞车，整个测试文件编译不过。
+import 'package:http/http.dart' show Response;
+import 'package:http/testing.dart';
 import 'package:parse_dl/models/media.dart';
 import 'package:parse_dl/services/bili_link.dart';
 
@@ -171,6 +177,58 @@ void main() {
       final back = Media.fromJson(j.cast<String, dynamic>());
       expect(back.bili!.cid, '42528477088');
       expect(back.source, 'bili');
+    });
+  });
+
+  group('短链展开（假 client，不碰网）', () {
+    const target = 'https://www.bilibili.com/video/BV1S4pK6tEuR?p=3';
+
+    test('302 的 Location 带着分P号，必须原样解析出来', () async {
+      final seen = <String>[];
+      final c = MockClient((req) async {
+        seen.add(req.method);
+        return Response('', 302, headers: {'location': target});
+      });
+      final r = await expandBiliShortLink('https://b23.tv/aBc1234', client: c);
+      expect(r!.bvid, 'BV1S4pK6tEuR');
+      expect(r.partIndex, 3);
+      expect(seen, ['HEAD'], reason: '第一跳就该停住，不用再去 GET');
+    });
+
+    test('HEAD 没有 Location 时退到 GET，从正文里抠 BV 号', () async {
+      final seen = <String>[];
+      final c = MockClient((req) async {
+        seen.add(req.method);
+        if (req.method == 'HEAD') return Response('', 200);
+        // 不带 content-type —— 故意让「按响应头猜编码」这条路失效
+        return Response.bytes(
+            utf8.encode('<a href="/video/BV1S4pK6tEuR">看这里</a>'), 200);
+      });
+      final r = await expandBiliShortLink('https://b23.tv/aBc1234', client: c);
+      expect(r!.bvid, 'BV1S4pK6tEuR');
+      expect(seen, ['HEAD', 'GET'], reason: '第二级退路必须真的被走到');
+    });
+
+    test('三条路都走空 → 返回 null，不抛', () async {
+      final c = MockClient((req) async => Response('nothing here', 200));
+      expect(await expandBiliShortLink('https://b23.tv/aBc1234', client: c),
+          isNull);
+    });
+
+    test('Location 指向另一个短链时不再递归（避免来回跳）', () async {
+      final c = MockClient((req) async =>
+          Response('', 302, headers: {'location': 'https://b23.tv/other'}));
+      final r = await expandBiliShortLink('https://b23.tv/aBc1234', client: c);
+      expect(r, isNull, reason: '二次短链交给上层决定，这里不无限跟');
+    });
+
+    test('正控制：把 Location 换成番剧页，必须落进「本期不做」而不是解出 BV', () async {
+      final c = MockClient((req) async => Response('', 302, headers: {
+            'location': 'https://www.bilibili.com/bangumi/play/ep123456'
+          }));
+      final r = await expandBiliShortLink('https://b23.tv/aBc1234', client: c);
+      expect(r!.bvid, isNull);
+      expect(r.isUnsupported, isTrue);
     });
   });
 }
