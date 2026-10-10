@@ -119,6 +119,11 @@ void main() {
         api.setCookie(envCookie);
         stdout.writeln('LOGIN env bytes=${envCookie.length}');
         login = true;
+      } else if (Platform.environment['PD_BILI_ANON'] == '1') {
+        // 匿名档：480P/360P 本来就是匿名的上限，要验这一档不需要登录态。
+        // 做成显式开关，是为了不让人把「扫码没成功」误当成「匿名跑通了」。
+        stdout.writeln('LOGIN skipped（匿名：只拿得到 480P/360P）');
+        login = true;
       } else {
         login = smoke || await _scanLogin(api, liveDir);
       }
