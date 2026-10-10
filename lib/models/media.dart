@@ -27,6 +27,7 @@
 library;
 
 import 'media_variant.dart';
+import 'bili_meta.dart';
 
 class Media {
   final String id;
@@ -85,6 +86,10 @@ class Media {
   /// 对齐参照实现的「自定义文本」文件名组件。
   final String? customText;
 
+  /// B 站一条媒体独有的上下文（作品标题 / 分 P 标题 / BV·AV·CID / 画质·编码）。
+  /// 其他平台为 null。
+  final BiliMeta? bili;
+
   const Media({
     required this.id,
     required this.type,
@@ -111,6 +116,7 @@ class Media {
     this.shareCount,
     this.collectionEpisode = 0,
     this.customText,
+    this.bili,
   });
 
   /// 复制并覆盖部分字段 —— 解析器先建对象、后补用户信息时用，
@@ -137,6 +143,7 @@ class Media {
     int? shareCount,
     int? collectionEpisode,
     String? customText,
+    BiliMeta? bili,
   }) =>
       Media(
         id: id,
@@ -164,6 +171,7 @@ class Media {
         shareCount: shareCount ?? this.shareCount,
         collectionEpisode: collectionEpisode ?? this.collectionEpisode,
         customText: customText ?? this.customText,
+        bili: bili ?? this.bili,
       );
 
   /// 落盘用的 JSON（下载任务表持久化用）。
@@ -199,6 +207,7 @@ class Media {
         if (collectCount != null) 'collectCount': collectCount,
         if (shareCount != null) 'shareCount': shareCount,
         if (collectionEpisode != 0) 'collectionEpisode': collectionEpisode,
+        if (bili != null) 'bili': bili!.toJson(),
       };
 
   /// [toJson] 的逆运算。缺字段一律回退默认值 —— 调用方（`DownloadStore`）
@@ -228,6 +237,9 @@ class Media {
         commentCount: (j['commentCount'] as num?)?.toInt(),
         collectCount: (j['collectCount'] as num?)?.toInt(),
         shareCount: (j['shareCount'] as num?)?.toInt(),
+        bili: j['bili'] is Map
+            ? BiliMeta.fromJson((j['bili'] as Map).cast<String, dynamic>())
+            : null,
         collectionEpisode: (j['collectionEpisode'] as num?)?.toInt() ?? 0,
       );
 
