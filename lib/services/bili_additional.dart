@@ -10,6 +10,7 @@
 library;
 
 import '../models/bili_config.dart';
+import '../models/media.dart';
 
 /// 一条已经落盘、等着塞进成品的内封字幕轨。
 class BiliEmbeddedTrack {
@@ -104,3 +105,29 @@ class BiliAdditionalOutcome {
   bool get hasAnything =>
       tracks.isNotEmpty || written.isNotEmpty || chapterMetadataPath != null;
 }
+
+/// 这一份配置里有没有要产出任何附加文件。为 false 时协调器一个请求都不发，
+/// 也不会往收口文案里掺「没拿到」。
+bool biliAsksForAnything(BiliConfig cfg) =>
+    cfg.saveSubtitle ||
+    cfg.saveCover ||
+    cfg.saveChapter ||
+    cfg.saveMetadata ||
+    cfg.saveDanmaku;
+
+/// 附加文件的产出钩子。
+///
+/// 协调器在**起 ffmpeg 之前**调一次：ass 字幕轨与章节的 ffmetadata 是合并命令的
+/// 输入，必须先落盘。实现在 `bili_subtitle.dart` 那几个文件里，由装配层
+/// （`main.dart`）注进来 —— 协调器不该知道接口层与渲染层的存在。
+///
+/// 做成可空函数域而不是抽象类，是跟着这个模块里 `onBiliSettled` /
+/// `onTaskSubmitted` 的既有写法走的；没注就是「只出成品、没有侧文件」，
+/// 这一层的缺席永远不该波及主产物。
+typedef BiliAdditionalProduce =
+    Future<BiliAdditionalOutcome> Function({
+      required BiliConfig cfg,
+      required String saveDir,
+      required String outBase,
+      required Media video,
+    });

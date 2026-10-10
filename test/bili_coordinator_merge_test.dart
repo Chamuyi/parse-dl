@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:parse_dl/services/bili_additional.dart';
 import 'package:parse_dl/models/bili_config.dart';
 import 'package:parse_dl/models/bili_meta.dart';
 import 'package:parse_dl/models/media.dart';
@@ -440,8 +441,17 @@ void main() {
                 'Cookie 进去就是明文落盘');
         expect(call.options.values, isNot(anyElement(contains('SESSDATA'))));
         expect(call.options.values, isNot(anyElement(contains('bili_jct'))));
-        expect(call.options.keys.toSet(), {'referer', 'user-agent'},
-            reason: '除来源头之外不许多带任何东西');
+        // 白名单，不是「恰好这两个键」：限速也是 per-task option，但它不是头 ——
+        // 落进会话文件只是一个数字，不碰凭据那条线。除这三个之外多带任何东西仍然算串门。
+        expect(
+          call.options.keys.toSet().difference({
+            'referer',
+            'user-agent',
+            'max-download-limit',
+          }),
+          isEmpty,
+          reason: '来源头与限速之外不许再带任何 per-task option',
+        );
       }
 
       await env.c.dispose();
@@ -471,6 +481,418 @@ void main() {
       await env.c.dispose();
     });
   });
+
+  group('限速：per-task max-download-limit', () {
+    BiliConfig limited(int kbps) => cfg()..speedLimitKbps = kbps;
+
+    test('设了限速 → 两条流都带上，写法是 aria2 认的 512K', () async {
+      final env = await boot();
+      await env.c.enqueueBiliMedia(biliVideo(), biliAudio(), '冬天', limited(512));
+      expect(env.aria.calls, hasLength(2));
+      for (final call in env.aria.calls) {
+        expect(call.options['max-download-limit'], '512K');
+      }
+      await env.c.dispose();
+    });
+
+    test('0 = 不限，这个 option 干脆不出现', () async {
+      final env = await boot();
+      await env.c.enqueueBiliMedia(biliVideo(), biliAudio(), '冬天', limited(0));
+      expect(env.aria.calls, isNotEmpty);
+      for (final call in env.aria.calls) {
+        expect(
+          call.options.containsKey('max-download-limit'),
+          isFalse,
+          reason: '传 "0K" 语义相同，但会在会话文件里凭空多出一堆没用的字段',
+        );
+      }
+      await env.c.dispose();
+    });
+
+    test('限速记在任务行上，markActive 与改名之后都不许丢', () async {
+      // `_submit` 是 addPending 之后立刻 markActive，而这两处都是**整行重建** ——
+      // 新字段最容易在这里被悄悄抹掉，那样换源重投就变回全速。
+      final env = await boot();
+      await env.c.enqueueBiliMedia(biliVideo(), biliAudio(), '冬天', limited(256));
+      expect(env.s.tasks, hasLength(2));
+      expect(
+        env.s.tasks.every((t) => t.speedLimitKbps == 256),
+        isTrue,
+        reason: '两条流都要带；只有一条带上了等于没有',
+      );
+      expect(env.s.renameTaskFile(env.s.tasks.first.localId, '改名后的.m4s'), isTrue);
+      expect(env.s.tasks.first.speedLimitKbps, 256);
+      await env.c.dispose();
+    });
+
+    test('带限速时来源头里依然没有任何凭据', () async {
+      final env = await boot();
+      await env.c.enqueueBiliMedia(biliVideo(), biliAudio(), '冬天', limited(512));
+      for (final call in env.aria.calls) {
+        expect(call.options.keys, isNot(anyElement(contains('cookie'))));
+        expect(call.options.values, isNot(anyElement(contains('SESSDATA'))));
+      }
+      await env.c.dispose();
+    });
+
+    test('限速只读 B 站那份配置：抖音与 X 拿不到它', () async {
+      final env = await boot();
+      await env.c.enqueueMedia(
+        Media(
+          id: 'dy-1',
+          type: MediaType.video,
+          url: 'https://v26-web.douyinvod.com/a.mp4',
+          source: 'douyin',
+        ),
+      );
+      expect(
+        env.aria.calls.first.options.containsKey('max-download-limit'),
+        isFalse,
+        reason: '这一期只给 B 站开限速，不许顺手改抖音那条链路的口径',
+      );
+      await env.c.dispose();
+    });
+  });
+
+  group('附加文件的产出缝', () {
+    /// 走完「两条流都下完」这一步，让协调器真的进到收口。
+    Future<void> run(
+      Aria2Coordinator c,
+      DownloadStore s,
+      BiliConfig cfg, {
+      Media? video,
+    }) async {
+      final r = await c.enqueueBiliMedia(
+        video ?? biliVideo(),
+        biliAudio(),
+        '冬天',
+        cfg,
+      );
+      await finish(c, s, r.videoLocalId!, fileName: '冬天.video.m4s');
+      await finish(c, s, r.audioLocalId!, fileName: '冬天.audio.m4s');
+    }
+
+    test('没勾任何附加文件 → 一次都不调', () async {
+      final env = await boot();
+      var calls = 0;
+      env.c.biliAdditional = ({
+        required cfg,
+        required saveDir,
+        required outBase,
+        required video,
+      }) async {
+        calls++;
+        return BiliAdditionalOutcome.none;
+      };
+      await run(env.c, env.s, cfg());
+      expect(calls, 0, reason: '一个格子都没勾还发请求，就是替用户多打一遍接口');
+      await env.c.dispose();
+    });
+
+    test('注入点是 null（装配层没接）→ 合并照常、一句都不报', () async {
+      final env = await boot();
+      final settled = <BiliSettleInfo>[];
+      env.c.onBiliSettled = settled.add;
+      final c2 = cfg()..saveSubtitle = true;
+      await run(env.c, env.s, c2);
+      expect(env.m.calls, 1, reason: '附加文件没接线不能挡住合并');
+      expect(settled.single.kind, BiliSettleKind.merged);
+      expect(settled.single.message, isNot(contains('没拿到')));
+      await env.c.dispose();
+    });
+
+    test('勾了字幕且 cid 拿得到 → 恰好调一次，参数是这一 P 的身份', () async {
+      final env = await boot();
+      final seen = <String>[];
+      BiliConfig? gotCfg;
+      env.c.biliAdditional = ({
+        required cfg,
+        required saveDir,
+        required outBase,
+        required video,
+      }) async {
+        seen.add(
+          '$outBase|$saveDir|${video.bili?.cid}|${video.bili?.bvid}',
+        );
+        gotCfg = cfg;
+        return const BiliAdditionalOutcome(
+          tracks: [],
+          written: ['冬天.字幕.srt'],
+          missing: [],
+        );
+      };
+      await run(env.c, env.s, cfg()..saveSubtitle = true);
+      expect(seen, ['冬天|${tmp.path}|777|BV1xx']);
+      expect(gotCfg!.saveSubtitle, isTrue);
+      await env.c.dispose();
+    });
+
+    test('cid 拿不到（旧行没有 cid）→ 不发请求，也不报缺', () async {
+      final env = await boot();
+      var calls = 0;
+      env.c.biliAdditional = ({
+        required cfg,
+        required saveDir,
+        required outBase,
+        required video,
+      }) async {
+        calls++;
+        return BiliAdditionalOutcome.none;
+      };
+      // 注意是**不带 cid 的那一份 meta**，不能用 `copyWith(bili: null)`：
+      // Media.copyWith 里写的是 `bili ?? this.bili`，传 null 等于「不改」，
+      // 那样测出来的根本不是「没有身份」这一路。
+      await run(
+        env.c,
+        env.s,
+        cfg()..saveCover = true,
+        video: biliVideo().copyWith(
+          bili: const BiliMeta(
+            workTitle: '作品',
+            partTitle: '第3P 冬天',
+            bvid: 'BV1xx',
+            partTotal: 12,
+          ),
+        ),
+      );
+      expect(calls, 0, reason: '没有 cid 就没法取字幕与弹幕，硬打只会拿到一堆失败');
+      expect(env.m.calls, 1, reason: '主产物不受这一层影响');
+      await env.c.dispose();
+    });
+
+    test('产出抛异常 → 合并照常成功，收口文案里看得见「没拿到」', () async {
+      final env = await boot();
+      final settled = <BiliSettleInfo>[];
+      env.c.onBiliSettled = settled.add;
+      env.c.biliAdditional = ({
+        required cfg,
+        required saveDir,
+        required outBase,
+        required video,
+      }) async => throw StateError('接口炸了');
+      await run(env.c, env.s, cfg()..saveMetadata = true);
+      expect(env.m.calls, 1, reason: '附加文件失败不能变成合并失败');
+      expect(settled.single.kind, BiliSettleKind.merged);
+      expect(settled.single.message, contains('没拿到'),
+          reason: '只进日志等于用户看不见（这一层的原罪就是静默）');
+      expect(settled.single.message, contains('附加文件没跑起来'));
+      await env.c.dispose();
+    });
+
+    test('关合并那一路也产侧文件，但内封前提按「没开合并」如实算', () async {
+      final env = await boot();
+      bool? mergingSaw;
+      env.c.biliAdditional = ({
+        required cfg,
+        required saveDir,
+        required outBase,
+        required video,
+      }) async {
+        mergingSaw = cfg.mergeAfterDownload;
+        return const BiliAdditionalOutcome(
+          tracks: [],
+          written: ['冬天.封面.jpg'],
+          missing: [],
+        );
+      };
+      await run(env.c, env.s, cfg(merge: false)..saveCover = true);
+      expect(mergingSaw, isFalse,
+          reason: '这一条压根没有合并步骤，内封的前提必须是「没开合并」而不是别的');
+      await env.c.dispose();
+    });
+
+    test('durl 退化路径（只有一行）也走这一层', () async {
+      final env = await boot();
+      var calls = 0;
+      env.c.biliAdditional = ({
+        required cfg,
+        required saveDir,
+        required outBase,
+        required video,
+      }) async {
+        calls++;
+        return BiliAdditionalOutcome.none;
+      };
+      // 音频侧没有流 = durl 退化路径，投一条、不建配对。
+      // 这里也必须直接造一个不带 `chosen` 的 Media：`copyWith(chosen: null)`
+      // 走的是 `??` 语义，传 null 是「不改」，退化路径根本不会被触发。
+      final audio = Media(
+        id: 'BV1xx-3_audio',
+        type: MediaType.audio,
+        url: 'https://upos.bilivideo.com/冬天-audio.m4s',
+        source: 'bili',
+        tweetId: 'BV1xx',
+        mediaIndex: 3,
+        bili: const BiliMeta(
+          workTitle: '作品',
+          partTitle: '第3P 冬天',
+          bvid: 'BV1xx',
+          cid: '777',
+          partTotal: 12,
+        ),
+      );
+      final r = await env.c.enqueueBiliMedia(
+        biliVideo(),
+        audio,
+        '冬天',
+        cfg()..saveDanmaku = true,
+      );
+      await finish(env.c, env.s, r.videoLocalId!, fileName: '冬天.mp4');
+      expect(calls, 1, reason: '单文件那一条也是成品，用户勾的附加文件照样该出');
+      await env.c.dispose();
+    });
+
+    test('缺项写在完成那一行的 note 上，重启之后还在', () async {
+      final env = await boot();
+      env.c.biliAdditional = ({
+        required cfg,
+        required saveDir,
+        required outBase,
+        required video,
+      }) async => const BiliAdditionalOutcome(
+        tracks: [],
+        written: [],
+        missing: ['字幕'],
+      );
+      await run(env.c, env.s, cfg()..saveSubtitle = true);
+
+      final row = env.s.tasks.single;
+      expect(row.status, DownloadStatus.complete,
+          reason: '少一样附加文件不许把已完成的一行标成错误 —— 那会自动重下整条');
+      expect(row.note, contains('字幕'));
+
+      // 收口 message 只有失败分支会被读（台账桥接就是那么写的），
+      // 所以「用户看得见」这句只能靠 note 这一行来兑现，重启后也必须在。
+      final s2 = DownloadStore()..restoreFromJson(env.s.encode());
+      expect(s2.tasks.single.note, contains('字幕'));
+
+      await env.c.dispose();
+    });
+
+    test('没有缺项时完成行不带 note', () async {
+      final env = await boot();
+      env.c.biliAdditional = ({
+        required cfg,
+        required saveDir,
+        required outBase,
+        required video,
+      }) async => const BiliAdditionalOutcome(
+        tracks: [],
+        written: ['冬天.封面.jpg'],
+        missing: [],
+      );
+      await run(env.c, env.s, cfg()..saveCover = true);
+      expect(env.s.tasks.single.note, isNull,
+          reason: '一切正常时不该在行尾挂一句多余的说明');
+      await env.c.dispose();
+    });
+
+    test('容器是 MP4 时内封轨被挡在合并之前，并挂上一条缺项', () async {
+      final env = await boot();
+      final settled = <BiliSettleInfo>[];
+      env.c.onBiliSettled = settled.add;
+      env.c.biliAdditional = ({
+        required cfg,
+        required saveDir,
+        required outBase,
+        required video,
+      }) async => const BiliAdditionalOutcome(
+        tracks: [
+          BiliEmbeddedTrack(
+            fileName: '冬天.字幕.chi.ass',
+            title: '中文',
+            iso639: 'chi',
+            fromDanmaku: false,
+          ),
+        ],
+        written: ['冬天.字幕.chi.ass'],
+        missing: [],
+      );
+      // MP4 塞 ass 的实测后果是「整个文件写不出来」，不是掉一条轨那么轻，
+      // 所以这一层必须在起进程之前就把它拦下来。
+      await run(
+        env.c,
+        env.s,
+        (cfg()
+              ..container = BiliContainer.mp4
+              ..saveSubtitle = true
+              ..embedSubtitleTrack = true),
+      );
+
+      expect(env.m.trackLog.single, isEmpty, reason: '不该把字幕轨递给 ffmpeg');
+      expect(env.s.tasks.single.fileName, endsWith('.mp4'));
+      expect(settled.single.message, contains('内封轨要 MKV 容器'),
+          reason: '拦下来了却不告诉用户，等于他以为内封成功了');
+      await env.c.dispose();
+    });
+
+    test('MKV 收到字幕轨与章节输入，合并成功后章节中间文件被删掉', () async {
+      final env = await boot();
+      final chap = File('${tmp.path}${Platform.pathSeparator}chapter_1.txt');
+      await chap.writeAsString(';FFMETADATA1\n');
+      env.c.biliAdditional = ({
+        required cfg,
+        required saveDir,
+        required outBase,
+        required video,
+      }) async => BiliAdditionalOutcome(
+        tracks: const [
+          BiliEmbeddedTrack(
+            fileName: '冬天.字幕.chi.ass',
+            title: '中文',
+            iso639: 'chi',
+            fromDanmaku: false,
+          ),
+        ],
+        written: const ['冬天.字幕.chi.ass'],
+        missing: const [],
+        chapterMetadataPath: chap.path,
+      );
+      await run(
+        env.c,
+        env.s,
+        (cfg()
+              ..container = BiliContainer.mkv
+              ..saveSubtitle = true
+              ..embedSubtitleTrack = true),
+      );
+
+      final got = env.m.trackLog.single;
+      expect(got, hasLength(1));
+      expect(got.single.path, endsWith('冬天.字幕.chi.ass'));
+      expect(got.single.lang, 'chi');
+      expect(env.m.chapterLog.single, chap.path);
+      expect(env.s.tasks.single.fileName, endsWith('.mkv'),
+          reason: '选了 MKV 却落出 .mp4 是没人会报错的那类坏');
+      expect(chap.existsSync(), isFalse, reason: '章节那份是给 ffmpeg 当输入的，不是交付物');
+      await env.c.dispose();
+    });
+
+    test('章节文件删不掉时不许把已成功的合并改判成失败', () async {
+      final env = await boot();
+      final settled = <BiliSettleInfo>[];
+      env.c.onBiliSettled = settled.add;
+      // 目录冒充文件：delete() 必抛
+      final fake = Directory('${tmp.path}${Platform.pathSeparator}chapter_dir');
+      await fake.create();
+      env.c.biliAdditional = ({
+        required cfg,
+        required saveDir,
+        required outBase,
+        required video,
+      }) async => BiliAdditionalOutcome(
+        tracks: const [],
+        written: const ['x.nfo'],
+        missing: const [],
+        chapterMetadataPath: fake.path,
+      );
+      await run(env.c, env.s, cfg()..saveMetadata = true);
+      expect(settled.single.kind, BiliSettleKind.merged);
+      expect(fake.existsSync(), isTrue, reason: '删不掉就留在原地，别把成功改成失败');
+      await env.c.dispose();
+    });
+  });
+
 
   group('重启后的配对', () {
     test('进程内表丢了 → 按文件名重建配对并合出成品', () async {
@@ -641,14 +1063,23 @@ class _FakeMerger extends BiliMerger {
   int calls = 0;
   final seen = <_MergeCall>[];
 
+  /// 假合并器也要收下新增的两样输入，否则这个 override 直接编译不过。
+  /// 单独记账而不改 `_MergeCall` 的形状：那些老断言不该被我这次改动牵连。
+  final trackLog = <List<BiliSubtitleInput>>[];
+  final chapterLog = <String?>[];
+
   @override
   Future<BiliMergeResult> merge({
     required String videoPath,
     required String audioPath,
     required String outPath,
+    List<BiliSubtitleInput> subtitleTracks = const [],
+    String? chapterPath,
     void Function(double p)? onProgress,
   }) async {
     calls++;
+    trackLog.add(subtitleTracks);
+    chapterLog.add(chapterPath);
     seen.add(
       (videoPath: videoPath, audioPath: audioPath, outPath: outPath),
     );

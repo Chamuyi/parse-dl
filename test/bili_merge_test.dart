@@ -251,6 +251,84 @@ void main() {
   });
 
   // ── merge：成功 ───────────────────────────────────────────
+  group('内封字幕轨与章节的命令拼接', () {
+    final m = BiliMerger(ffmpegPath: r'C:\ffmpeg\ffmpeg.exe');
+    BiliSubtitleInput t(String path, {String title = '字幕', String lang = ''}) =>
+        (path: path, title: title, lang: lang);
+
+    test('不传新参数时，命令与改造前逐字相同', () {
+      expect(
+        m.mergeArgs(r'D:\v.m4s', r'D:\a.m4s', r'D:\out.mp4'),
+        [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-y',
+          '-i',
+          r'D:\v.m4s',
+          '-i',
+          r'D:\a.m4s',
+          '-map',
+          '0:v:0',
+          '-map',
+          '1:a:0',
+          '-c',
+          'copy',
+          '-movflags',
+          kFfmpegMovflags,
+          '-progress',
+          'pipe:1',
+          r'D:\out.mp4',
+        ],
+        reason: '这一条是「既有链路没被容器/内封改造碰坏」的唯一证据',
+      );
+    });
+
+    test('一条字幕轨：输入排在音视频之后，-map 用的是 2', () {
+      final args = m.mergeArgs('v', 'a', 'o.mkv', subtitleTracks: [
+        t(r'D:\x.字幕.中文.ass', lang: 'chi'),
+      ]);
+      expect(args, containsAllInOrder(['-i', r'D:\x.字幕.中文.ass']));
+      expect(args, containsAllInOrder(['-map', '0:v:0', '-map', '1:a:0', '-map', '2:0']));
+      expect(args, containsAllInOrder(['-metadata:s:s0', 'language=chi']));
+      expect(args, contains('-c:s'));
+    });
+
+    test('两条轨 + 章节：索引按输入顺序排，章节不占 -map', () {
+      final args = m.mergeArgs(
+        'v',
+        'a',
+        'o.mkv',
+        subtitleTracks: [t('s0.ass'), t('s1.ass')],
+        chapterPath: 'chap.txt',
+      );
+      // 输入顺序：0=v 1=a 2=s0 3=s1 4=chap
+      expect(
+        args.where((x) => x.endsWith('.ass') || x == 'v' || x == 'a' || x == 'chap.txt').toList(),
+        ['v', 'a', 's0.ass', 's1.ass', 'chap.txt'],
+      );
+      expect(args, containsAllInOrder(['-map', '2:0', '-map', '3:0']));
+      expect(args, containsAllInOrder(['-metadata:s:s0', 'title=字幕']));
+      expect(args, containsAllInOrder(['-metadata:s:s1', 'title=字幕']));
+      // 实测结论（Q6d）：章节是被 muxer 从输入本身吸进去的，
+      // `-map_metadata` 对章节既不必需也不充分，还会换掉全局 metadata 的来源。
+      expect(args, isNot(contains('-map_metadata')));
+    });
+
+    test('语言码为空时不写 language，但 title 照写', () {
+      final args = m.mergeArgs('v', 'a', 'o.mkv', subtitleTracks: [t('d.ass')]);
+      expect(args.any((x) => x.startsWith('language=')), isFalse);
+      expect(args, contains('title=字幕'), reason: '弹幕墙没有语言概念，但轨道名还得有');
+    });
+
+    test('产物是 mkv 时不带 -movflags（那是 mp4 的键）', () {
+      expect(m.mergeArgs('v', 'a', 'o.mkv'), isNot(contains('-movflags')));
+      expect(m.mergeArgs('v', 'a', 'o.mp4'), contains(kFfmpegMovflags));
+      expect(m.mergeArgs('v', 'a', 'o.MKV'), isNot(contains('-movflags')),
+          reason: '扩展名判据不许只对小写生效');
+    });
+  });
+
   group('merge：成功路径', () {
     test('进度单调不减到 1.0、产物在、两条原始流被删', () async {
       final v = stream('v.m4s', 1000);

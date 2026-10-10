@@ -31,16 +31,22 @@ String biliVideoStreamName(String outBase) => '$outBase.video.m4s';
 /// 音频流那条的临时名。
 String biliAudioStreamName(String outBase) => '$outBase.audio.m4s';
 
-/// 合并后的产物名。
-String biliMergedName(String outBase) => '$outBase.mp4';
+/// 合并后的产物名 —— 扩展名跟着**容器**走。
+///
+/// 以前这里写死 `.mp4`：容器可选之后写死就会让「选了 MKV、落出来还是 .mp4」
+/// 变成一件没人报错也没人发现的事。
+String biliMergedName(String outBase, [BiliContainer container = BiliContainer.mp4]) =>
+    '$outBase.${container.id}';
 
 /// 这条流落到哪个 B 站容器扩展名（B 站 DASH 只有这几个形状）。
 ///
 /// `%EXT%` 会跟着模板进到文件名里，而合并产物只该有一个 `.mp4`，
 /// 所以 base 名必须把这段尾巴剥掉 —— 只认这张表里的扩展名，
 /// 标题正文里的「冬.天」不会被误削。
-final RegExp _biliTrailingExt =
-    RegExp(r'\.(m4s|mp4|m4a|aac|mp3|flac)$', caseSensitive: false);
+final RegExp _biliTrailingExt = RegExp(
+    r'\.(m4s|mp4|mkv|m4a|aac|mp3|flac)$',
+    caseSensitive: false,
+);
 
 /// 由模板渲染出来的完整文件名反推**不含扩展名**的 base 名。
 ///

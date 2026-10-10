@@ -10,6 +10,7 @@ import '../models/media.dart';
 import 'app_logger.dart';
 import 'aria2.dart';
 import 'bili_api.dart';
+import 'bili_additional.dart';
 import 'bili_download_plan.dart';
 import 'bili_merger.dart';
 import 'douyin_ledger.dart';
@@ -323,7 +324,26 @@ class _BiliPair {
     required this.saveDir,
     required this.merge,
     this.single = false,
+    this.cfg,
+    this.video,
+    this.container = BiliContainer.mp4,
   });
+
+  /// 成品容器。跟着入队那批的配置走；重启重建时取**当前设置**那一份
+  /// （和 `merge` 一样的取舍，理由见 [_rebuildBiliPairs]）。
+  final BiliContainer container;
+
+  /// 投这一批时**实际生效**的那份配置（可能来自下载选项弹窗的本批覆盖）。
+  /// null = 不知道（重启重建时设置被换过），此时附加文件那一步整个跳过。
+  final BiliConfig? cfg;
+
+  /// 视频侧那条 `Media`：附加文件要的 cid / 时长 / 封面全在里面（`bili.cid`、
+  /// `durationMs`、`previewUrl`）。刻意不再拆一份出来 —— 拆了就有第二个真源，
+  /// 而 `bili_page.dart` 那段逐字段重建 `BiliMeta` 的地方会把它静默丢掉。
+  final Media? video;
+
+  /// 合并前跑出来的附加文件结果（字幕轨、章节中间文件、没拿到的东西）。
+  BiliAdditionalOutcome? additional;
 
   /// 不含扩展名的 base 名。三个名字（`.video.m4s` / `.audio.m4s` / `.mp4`）
   /// 全部由它派生，见 `bili_download_plan.dart` 的那组 `biliXxxName()`。
@@ -344,7 +364,7 @@ class _BiliPair {
 
   String get videoName => biliVideoStreamName(outBase);
   String get audioName => biliAudioStreamName(outBase);
-  String get mergedName => biliMergedName(outBase);
+  String get mergedName => biliMergedName(outBase, container);
   String get mergedPath => p.join(saveDir, mergedName);
   String get videoPath => p.join(saveDir, videoName);
   String get audioPath => p.join(saveDir, audioName);
@@ -439,6 +459,12 @@ class Aria2Coordinator {
 
   DownloadStore? _store;
   SettingsStore? _settings;
+
+  /// 附加文件的产出钩子，由装配层（`main.dart`）注进来。null = 只出成品。
+  ///
+  /// 这一层缺席或失败都**不该波及主产物**：合并照常、收口照常，缺的样目走
+  /// `missing` 回到文案里。
+  BiliAdditionalProduce? biliAdditional;
 
   /// 每次**真正**把一条媒体投给 aria2 并被接受后回调一次（`localId` 是任务表里的 id）。
   ///
@@ -701,6 +727,7 @@ class Aria2Coordinator {
     String out, {
     required int retryRemains,
     int attempt = 0,
+    int? speedLimitKbps,
   }) async {
     final store = _store;
     if (store == null) {
@@ -719,6 +746,7 @@ class Aria2Coordinator {
       fileName: out,
       retryRemains: retryRemains,
       attempt: index,
+      speedLimitKbps: speedLimitKbps,
     );
 
     try {
@@ -726,7 +754,7 @@ class Aria2Coordinator {
         url,
         dir: saveDir,
         out: out,
-        options: _requestOptions(media),
+        options: _requestOptions(media, speedLimitKbps: speedLimitKbps),
       );
       store.markActive(localId, gid);
       onTaskSubmitted?.call(media, localId);
@@ -842,6 +870,9 @@ class Aria2Coordinator {
       saveDir: saveDir,
       merge: cfg.mergeAfterDownload && !single,
       single: single,
+      cfg: cfg,
+      video: videoMedia,
+      container: cfg.container,
     );
 
     try {
@@ -861,11 +892,16 @@ class Aria2Coordinator {
       );
     }
 
+    // 0 是「不限」，这时候**干脆不传这个 option** —— 传 `0K` 虽然语义相同，
+    // 但会让 session 文件里凭空多出一堆没用的字段。
+    final limit = cfg.speedLimitKbps > 0 ? cfg.speedLimitKbps : null;
+
     final v = await _submit(
       videoMedia,
       saveDir,
       single ? pair.mergedName : pair.videoName,
       retryRemains: kAriaRetryTimes,
+      speedLimitKbps: limit,
     );
     if (v.outcome != EnqueueOutcome.queued) {
       return (
@@ -883,6 +919,7 @@ class Aria2Coordinator {
         saveDir,
         pair.audioName,
         retryRemains: kAriaRetryTimes,
+        speedLimitKbps: limit,
       );
       if (a.outcome != EnqueueOutcome.queued) {
         // 只进去一半：**不回滚视频那条**（它正在下，删掉等于把已到手的字节扔掉），
@@ -985,6 +1022,81 @@ class Aria2Coordinator {
     return out;
   }
 
+  /// 合并之前把附加文件取回来落盘。
+  ///
+  /// 三条判据都得成立，否则一个请求都不发：这一批的配置知道、这一 P 的
+  /// `cid` 拿得到、用户确实勾了至少一种附加文件。
+  ///
+  /// **失败不许拖垮合并**：主产物完好就算下载成功（台账红线），缺的那几样
+  /// 走 `missing` 回到收口文案里，用户看得见。参照实现这里是静默跳过的。
+  Future<void> _produceAdditional(_BiliPair pair, {required bool merging}) async {
+    final produce = biliAdditional;
+    final cfg = pair.cfg;
+    final video = pair.video;
+    if (produce == null ||
+        cfg == null ||
+        video == null ||
+        video.bili?.cid == null ||
+        !biliAsksForAnything(cfg)) {
+      return;
+    }
+    // 没开合并这一条不是用户选的，是这一对压根只有一个文件（durl 退化路径）或
+    // 他关了合并 —— 那内封的前提就不成立，用改过的副本让 embedBlockReason 给出
+    // 真实的原因，而不是报一句「要开合并」却明明是别的缘故。
+    final effective = merging ? cfg : cfg.copyWith(mergeAfterDownload: false);
+    try {
+      pair.additional = await produce(
+        cfg: effective,
+        saveDir: pair.saveDir,
+        outBase: pair.outBase,
+        video: video,
+      );
+      final missing = pair.additional!.missing;
+      if (missing.isNotEmpty) {
+        AppLogger.log('BILI', '附加文件缺项（${pair.outBase}）：${missing.join('、')}');
+      }
+    } catch (e) {
+      AppLogger.log('BILI', '附加文件这一步整个失败了（成品不受影响）：$e');
+      pair.additional = const BiliAdditionalOutcome(
+        tracks: [],
+        written: [],
+        missing: ['附加文件没跑起来'],
+      );
+    }
+  }
+
+  /// 章节那份 ffmetadata 是给 ffmpeg 当输入用的中间文件，**不是交付物**。
+  /// 删不掉只记日志：成品已经合好了，不能因为一个临时文件留在盘上就把成功改判成失败。
+  Future<void> _dropChapterScratch(_BiliPair pair) async {
+    final scratch = pair.additional?.chapterMetadataPath;
+    if (scratch == null) return;
+    try {
+      final f = File(scratch);
+      if (await f.exists()) await f.delete();
+    } catch (e) {
+      AppLogger.log('BILI', '章节中间文件没删掉（成品不受影响）：$scratch —— $e');
+    }
+  }
+
+  /// 把缺的附加文件写在**完成的那一行**上。
+  ///
+  /// 收口 message 今天只有失败分支会被读（台账桥接就是那么写的），
+  /// 所以「部分成功」必须另找一个界面真的在读的落点，否则等于没说。
+  void _writeAdditionalNote(_BiliPair pair, DownloadStore store) {
+    final missing = pair.additional?.missing;
+    if (missing == null || missing.isEmpty) return;
+    final row = pair.taskFor(store, pair.mergedName);
+    if (row == null) return;
+    store.markNote(row.localId, '没拿到：${missing.join('、')}');
+  }
+
+  /// 「勾了但没拿到」要出现在收口文案里，只进日志等于用户看不见。
+  String _additionalNote(_BiliPair pair) {
+    final missing = pair.additional?.missing;
+    if (missing == null || missing.isEmpty) return '';
+    return '（没拿到：${missing.join('、')}）';
+  }
+
   /// 一条配对收口：够不齐就等着，够齐就合（或按设置留裸流）。
   Future<void> _settleOneBiliPair(_BiliPair pair, DownloadStore store) async {
     if (pair.settled || pair.mergeStarted) return;
@@ -992,9 +1104,11 @@ class Aria2Coordinator {
     if (pair.single) {
       // durl 退化路径：那一条本身就是成品，没有什么可等的。
       pair.settled = true;
+      await _produceAdditional(pair, merging: false);
       _biliPairs.remove(pair.key);
       AppLogger.log('BILI', 'B 站分 P 完成（单文件，无需合并）：${pair.mergedPath}');
-      _notifyBili(pair, BiliSettleKind.merged, '已下载完成：${pair.mergedName}');
+      _notifyBili(pair, BiliSettleKind.merged,
+          '已下载完成：${pair.mergedName}${_additionalNote(pair)}');
       return;
     }
 
@@ -1012,6 +1126,8 @@ class Aria2Coordinator {
       return; // 另一条还在下
     }
 
+    await _produceAdditional(pair, merging: pair.merge);
+
     if (!pair.merge) {
       pair.settled = true;
       _biliPairs.remove(pair.key);
@@ -1019,7 +1135,8 @@ class Aria2Coordinator {
       _notifyBili(
         pair,
         BiliSettleKind.streamsKept,
-        '两条裸流都已下载（没开合并，它们各自都不能单独播放）。',
+        '两条裸流都已下载（没开合并，它们各自都不能单独播放）'
+        '${_additionalNote(pair)}。',
       );
       return;
     }
@@ -1061,16 +1178,49 @@ class Aria2Coordinator {
       'BILI',
       '开始合并：${pair.videoName} + ${pair.audioName} → ${pair.mergedName}',
     );
+    final extra = pair.additional;
+    // MP4 装不下 ass（实测：整个文件写不出来，不是掉一条轨那么轻），
+    // 所以这一层就是最后一道闸：容器不是 MKV 时把轨丢在门外，
+    // 并且**不静默** —— 把原因挂到缺项里，让完成那一行说清楚。
+    var tracks = extra?.tracks ?? const <BiliEmbeddedTrack>[];
+    if (tracks.isNotEmpty && pair.container != BiliContainer.mkv) {
+      AppLogger.log(
+        'BILI',
+        '容器是 ${pair.container.id}，装不下内封轨，这 ${tracks.length} 条只留侧文件：${pair.outBase}',
+      );
+      pair.additional = BiliAdditionalOutcome(
+        tracks: const [],
+        written: extra!.written,
+        missing: [...extra.missing, '内封轨要 MKV 容器'],
+        chapterMetadataPath: extra.chapterMetadataPath,
+      );
+      tracks = const [];
+    }
     final r = await _biliMerger.merge(
       videoPath: pair.videoPath,
       audioPath: pair.audioPath,
       outPath: outPath,
+      subtitleTracks: [
+        for (final t in tracks)
+          (
+            path: p.join(pair.saveDir, t.fileName),
+            title: t.title,
+            lang: t.iso639,
+          ),
+      ],
+      chapterPath: extra?.chapterMetadataPath,
     );
 
     if (r.ok) {
       _finalizeBiliMerge(pair, store);
+      await _dropChapterScratch(pair);
+      _writeAdditionalNote(pair, store);
       AppLogger.log('BILI', '合并成功：$outPath${r.message.isEmpty ? '' : '（${r.message}）'}');
-      _notifyBili(pair, BiliSettleKind.merged, '已合并为 ${pair.mergedName}');
+      _notifyBili(
+        pair,
+        BiliSettleKind.merged,
+        '已合并为 ${pair.mergedName}${_additionalNote(pair)}',
+      );
       return;
     }
 
@@ -1174,7 +1324,8 @@ class Aria2Coordinator {
     final store = _store;
     if (store == null) return;
 
-    final merge = _settings?.settings.bili.mergeAfterDownload ?? true;
+    final biliCfg = _settings?.settings.bili;
+    final merge = biliCfg?.mergeAfterDownload ?? true;
     final rebuilt = <String, _BiliPair>{};
     var videoSide = 0;
     var audioSide = 0;
@@ -1192,7 +1343,16 @@ class Aria2Coordinator {
       final key = '${t.saveDir}|$outBase';
       final pair = rebuilt.putIfAbsent(
         key,
-        () => _BiliPair(outBase: outBase, saveDir: t.saveDir, merge: merge),
+        () => _BiliPair(
+          outBase: outBase,
+          saveDir: t.saveDir,
+          merge: merge,
+          cfg: biliCfg,
+          container: biliCfg?.container ?? BiliContainer.mp4,
+          // 时长、封面、cid 都跟着 media 一起存过盘，重启后仍然拿得回来 ——
+          // 这是「上次没来得及出附加文件」这一格还能补上的前提。
+          video: t.media,
+        ),
       );
       if (isVideo) {
         videoSide++;
@@ -1254,7 +1414,10 @@ class Aria2Coordinator {
   /// 结论：**登录态一律不许经过 aria2 这一层。** 需要凭据才能取的流这一期不支持，
   /// 由 `planBiliStreams()` 返回可读原因（见 [BiliEnqueueResult.message]），
   /// 而不是想办法把 cookie 递过去。
-  Map<String, String>? _requestOptions(Media media) {
+  Map<String, String>? _requestOptions(
+    Media media, {
+    int? speedLimitKbps,
+  }) {
     switch (media.source) {
       case 'douyin':
         return const {
@@ -1265,9 +1428,14 @@ class Aria2Coordinator {
         // 键名按 aria2 的选项写法（小写），值复用接口层那一份常量 ——
         // 页面取流、下载器取流用的是同一个 UA/Referer，才不会出
         // 「页面能播、下载 403」这种极难归因的组合。
-        return const {
+        //
+        // 限速也挂在这里：它是 per-task option，不是 header，写进
+        // `aria2.session` 只是一个数字，不碰「凭据不许落盘」那条线。
+        return {
           'referer': kBiliReferer,
           'user-agent': kBiliUserAgent,
+          if (speedLimitKbps != null && speedLimitKbps > 0)
+            'max-download-limit': '${speedLimitKbps}K',
         };
     }
     return null; // X 不需要来源头
@@ -1571,7 +1739,10 @@ class Aria2Coordinator {
       );
     }
     final r = await _submit(t.media, t.saveDir, t.fileName,
-        retryRemains: kAriaRetryTimes, attempt: 0);
+        retryRemains: kAriaRetryTimes,
+        attempt: 0,
+        // 限速跟着这一行走：手动重试不该把用户设过的限速悄悄放回全速。
+        speedLimitKbps: t.speedLimitKbps);
     return (localId: r.localId, outcome: r.outcome, message: null);
   }
 
@@ -1881,7 +2052,10 @@ class Aria2Coordinator {
     } catch (_) {}
     store.remove(t.localId);
     await _submit(t.media, t.saveDir, t.fileName,
-        retryRemains: retryRemains, attempt: attempt);
+        retryRemains: retryRemains,
+        attempt: attempt,
+        // 换源重投是同一条任务的继续，不是新任务 —— 限速必须原样带上。
+        speedLimitKbps: t.speedLimitKbps);
   }
 
   /// 把「本地任务表里已经没有、却仍在 aria2 会话里」的死任务摘掉。

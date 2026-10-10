@@ -162,7 +162,13 @@ class DownloadListItem extends StatelessWidget {
       case DownloadStatus.paused:
         return '已暂停';
       case DownloadStatus.complete:
-        return '已完成 · ${DateFormat('HH:mm:ss').format(t.createdAt)}';
+        final when = DateFormat('HH:mm:ss').format(t.createdAt);
+        // 完成行上的补充说明（B 站「勾了附加文件却没拿到」走这里）。
+        // 刻意不是 errorMessage：那会把一行已完成的任务标成错误，
+        // 于是自动重试会把它再下一遍，用户也分不清「下坏了」还是「少样东西」。
+        return t.note == null
+            ? '已完成 · $when'
+            : '已完成 · $when · ${t.note}';
       case DownloadStatus.error:
         return t.errorMessage ?? '下载失败';
     }

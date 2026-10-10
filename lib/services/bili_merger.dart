@@ -187,6 +187,12 @@ class BiliMergeResult {
 ///   videoPath: v, audioPath: a, outPath: mp4, onProgress: (p) => ...);
 /// if (!r.ok) { /* 显示 r.displayMessage，两条 .m4s 仍在原地 */ }
 /// ```
+/// 一条要塞进成品的内封字幕轨。
+///
+/// 路径由调用方解析成绝对路径再交进来 —— 合并层不该知道保存目录的拼法，
+/// 也不该知道 `BiliEmbeddedTrack` 那套契约（它只吃路径和两个标签）。
+typedef BiliSubtitleInput = ({String path, String title, String lang});
+
 class BiliMerger {
   /// [ffmpegPath] 为 null 时用 [defaultFfmpegPath]（exe 同级 `ffmpeg\`）。
   ///
@@ -274,40 +280,75 @@ class BiliMerger {
   List<String> mergeArgs(
     String videoPath,
     String audioPath,
-    String outPath,
-  ) =>
-      [
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-y',
-        '-i',
-        videoPath,
-        '-i',
-        audioPath,
-        '-map',
-        '0:v:0',
-        '-map',
-        '1:a:0',
-        '-c',
-        'copy',
-        '-movflags',
-        kFfmpegMovflags,
-        '-progress',
-        'pipe:1',
-        outPath,
-      ];
+    String outPath, {
+    List<BiliSubtitleInput> subtitleTracks = const [],
+    String? chapterPath,
+    bool? faststart,
+  }) {
+    // 没显式给就按产物扩展名定：`+faststart` 只有 mp4 认，
+    // 交给调用方去推早晚会漏一处（比如重启重建那条路径）。
+    final wantFaststart = faststart ?? outPath.toLowerCase().endsWith('.mp4');
+    final args = <String>[
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-y',
+      '-i',
+      videoPath,
+      '-i',
+      audioPath,
+    ];
+    // 输入顺序决定后面所有 `-map` 的索引，别在中途插东西。
+    for (final t in subtitleTracks) {
+      args.addAll(['-i', t.path]);
+    }
+    if (chapterPath != null) args.addAll(['-i', chapterPath]);
+
+    args.addAll(['-map', '0:v:0', '-map', '1:a:0']);
+    for (var k = 0; k < subtitleTracks.length; k++) {
+      args.addAll(['-map', '${2 + k}:0']);
+    }
+    args.addAll(['-c', 'copy']);
+    if (subtitleTracks.isNotEmpty) {
+      // 字幕轨原样封进去，不转格式：转 ass↔srt 要的是编码器，
+      // 而这里只想要「同一条字节流换个容器」。
+      args.addAll(['-c:s', 'copy']);
+      for (var k = 0; k < subtitleTracks.length; k++) {
+        final t = subtitleTracks[k];
+        args.addAll(['-metadata:s:s$k', 'title=${t.title}']);
+        // 空语言码比不写更糟（播放器菜单里会出现一个非法的 Language 标签），
+        // 所以空串就整条不写。
+        if (t.lang.isNotEmpty) {
+          args.addAll(['-metadata:s:s$k', 'language=${t.lang}']);
+        }
+      }
+    }
+    // +faststart 是 mp4 的事。matroska 不认这个键，塞过去只会换一句没人看的告警。
+    if (wantFaststart) args.addAll(['-movflags', kFfmpegMovflags]);
+    args.addAll(['-progress', 'pipe:1', outPath]);
+    return args;
+  }
 
   /// 完整 argv（前缀在最前）。
   List<String> buildCommand(
     String videoPath,
     String audioPath,
-    String outPath,
-  ) =>
+    String outPath, {
+    List<BiliSubtitleInput> subtitleTracks = const [],
+    String? chapterPath,
+    bool? faststart,
+  }) =>
       [
         ...commandPrefix,
         ffmpegPath,
-        ...mergeArgs(videoPath, audioPath, outPath),
+        ...mergeArgs(
+          videoPath,
+          audioPath,
+          outPath,
+          subtitleTracks: subtitleTracks,
+          chapterPath: chapterPath,
+          faststart: faststart,
+        ),
       ];
 
   /// 把 [videoPath] + [audioPath] 合并成 [outPath]（单个 mp4）。
@@ -330,6 +371,8 @@ class BiliMerger {
     required String videoPath,
     required String audioPath,
     required String outPath,
+    List<BiliSubtitleInput> subtitleTracks = const [],
+    String? chapterPath,
     void Function(double p)? onProgress,
   }) =>
       _withGate(
@@ -337,6 +380,8 @@ class BiliMerger {
           videoPath: videoPath,
           audioPath: audioPath,
           outPath: outPath,
+          subtitleTracks: subtitleTracks,
+          chapterPath: chapterPath,
           onProgress: onProgress,
         ),
       );
@@ -345,9 +390,17 @@ class BiliMerger {
     required String videoPath,
     required String audioPath,
     required String outPath,
+    List<BiliSubtitleInput> subtitleTracks = const [],
+    String? chapterPath,
     void Function(double p)? onProgress,
   }) async {
-    final argv = buildCommand(videoPath, audioPath, outPath);
+    final argv = buildCommand(
+      videoPath,
+      audioPath,
+      outPath,
+      subtitleTracks: subtitleTracks,
+      chapterPath: chapterPath,
+    );
     final commandLine = formatFfmpegCommand(argv);
 
     // ① 先确认二进制在不在。少了这一步，Process.start 只会给一句

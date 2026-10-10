@@ -490,10 +490,11 @@ class _BiliPageState extends State<BiliPage> {
   ///     `bindBiliLedgerToSettled` 里，不在这里。
   ///   * 单条失败**不重新投整批**：那一行已经进了任务表，用户在
   ///     「下载管理（B 站）」里对它单独重试（`retryTask`）即可。
-  Future<void> _download() async {
+  Future<void> _download({BiliConfig? override}) async {
     final store = context.read<BiliStore>();
     final ledger = context.read<BiliLedger>();
-    final cfg = context.read<SettingsStore>().settings.bili;
+    // 弹窗返回的那一份只活在这一批里；没点「同步为默认」就不进 settings.json。
+    final cfg = override ?? context.read<SettingsStore>().settings.bili;
     final api = _api;
     if (api == null) return;
     if (_working) return;

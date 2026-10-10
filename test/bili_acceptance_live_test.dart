@@ -179,6 +179,10 @@ void main() {
           dirTemplate: e['dirTemplate'] as String,
           fileNameTemplate: e['fileNameTemplate'] as String,
           concurrency: e['concurrency'] as int,
+          // 真机验限速用的开关：单测只能证明我们把 option 递出去了，
+          // 「aria2 收不收这个键」只有真进程能回答（不收的话是 addUri 直接报错）。
+          speedLimitKbps:
+              int.tryParse(Platform.environment['PD_BILI_SPEED'] ?? '') ?? 0,
         );
         final row = <String, dynamic>{
           'round': round,

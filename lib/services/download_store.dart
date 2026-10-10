@@ -66,6 +66,21 @@ class DownloadTask {
   /// 直到用尽才考虑原地重试（见 `Aria2Coordinator._handleFailure`）。
   int attempt;
 
+  /// 这一行的限速（KB/s），null = 不限。
+  ///
+  /// 记在任务行上而不是只在入队那一刻用：aria2 的限速是 **per-task option**，
+  /// 每次 `addUri` 都要重传一遍。换源自动重投和用户手动重试走的是同一条
+  /// `_submit`，不带着它就会出「明明设了限速，失败重试一次后变全速」这种
+  /// 没法归因的现象。
+  final int? speedLimitKbps;
+
+  /// 完成之后要补给用户看的一句说明（**不是错误**，状态仍是已完成）。
+  ///
+  /// 这一期唯一的使用者是 B 站的附加文件：主产物完好、但用户勾的某样没拿到。
+  /// 那种「部分成功」既不该把行标成错误（会被自动重试、也会让人重下一遍），
+  /// 也不能只进日志（日志不是界面）。
+  final String? note;
+
   DownloadTask({
     required this.localId,
     required this.media,
@@ -79,6 +94,8 @@ class DownloadTask {
     this.errorMessage,
     this.retryRemains = 0,
     this.attempt = 0,
+    this.speedLimitKbps,
+    this.note,
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
@@ -237,6 +254,8 @@ class DownloadStore extends ChangeNotifier {
         if (t.errorMessage != null) 'errorMessage': t.errorMessage,
         'retryRemains': t.retryRemains,
         'attempt': t.attempt,
+        if (t.speedLimitKbps != null) 'speedLimitKbps': t.speedLimitKbps,
+        if (t.note != null) 'note': t.note,
         'createdAt': t.createdAt.toIso8601String(),
       };
 
@@ -280,6 +299,8 @@ class DownloadStore extends ChangeNotifier {
       errorMessage: errorMessage,
       retryRemains: (j['retryRemains'] as num?)?.toInt() ?? 0,
       attempt: (j['attempt'] as num?)?.toInt() ?? 0,
+      speedLimitKbps: (j['speedLimitKbps'] as num?)?.toInt(),
+      note: j['note'] as String?,
       createdAt: DateTime.tryParse(j['createdAt'] as String? ?? ''),
     );
   }
@@ -323,6 +344,7 @@ class DownloadStore extends ChangeNotifier {
     String? fileName,
     int retryRemains = 0,
     int attempt = 0,
+    int? speedLimitKbps,
   }) {
     final id = '${media.id}_${DateTime.now().microsecondsSinceEpoch}';
     _tasks[id] = DownloadTask(
@@ -333,9 +355,34 @@ class DownloadStore extends ChangeNotifier {
       status: DownloadStatus.pending,
       retryRemains: retryRemains,
       attempt: attempt,
+      speedLimitKbps: speedLimitKbps,
     );
     _changed();
     return id;
+  }
+
+  /// 给某一行的完成态补一句说明（不改状态，只改这行并通知界面）。
+  void markNote(String localId, String note) {
+    final t = _tasks[localId];
+    if (t == null || t.note == note) return;
+    _tasks[localId] = DownloadTask(
+      localId: t.localId,
+      aria2Gid: t.aria2Gid,
+      media: t.media,
+      saveDir: t.saveDir,
+      fileName: t.fileName,
+      status: t.status,
+      progress: t.progress,
+      totalBytes: t.totalBytes,
+      downloadedBytes: t.downloadedBytes,
+      errorMessage: t.errorMessage,
+      retryRemains: t.retryRemains,
+      attempt: t.attempt,
+      speedLimitKbps: t.speedLimitKbps,
+      note: note,
+      createdAt: t.createdAt,
+    );
+    _changed();
   }
 
   /// 标记任务已投给 aria2（绑定 gid）。
@@ -353,6 +400,8 @@ class DownloadStore extends ChangeNotifier {
       downloadedBytes: t.downloadedBytes,
       retryRemains: t.retryRemains,
       attempt: t.attempt,
+      speedLimitKbps: t.speedLimitKbps,
+      note: t.note,
       createdAt: t.createdAt,
     );
     _changed();
@@ -467,6 +516,8 @@ class DownloadStore extends ChangeNotifier {
       errorMessage: t.errorMessage,
       retryRemains: t.retryRemains,
       attempt: t.attempt,
+      speedLimitKbps: t.speedLimitKbps,
+      note: t.note,
       createdAt: t.createdAt,
     );
     _changed();
