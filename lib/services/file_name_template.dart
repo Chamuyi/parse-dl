@@ -843,13 +843,13 @@ Media douyinExampleMedia() => Media(
 /// 刻意选**多 P**：`%P%` 在单 P 时按空处理，用单 P 样例预览会让 `<P%P%>` 这段
 /// 直接消失，用户在设置页里就看不出补零到底生效没有。
 Media biliExampleMedia() => Media(
-  id: 'BV1y4411o7Kp-3',
+  id: 'BV1ofPY3Thnr-3',
   type: MediaType.video,
   url: 'https://upos-sz-mirrorhw.bilivideo.com/example/video.m4s',
   previewUrl: 'https://i0.hdslb.com/bfs/archive/example_cover.jpg',
   width: 1920,
   height: 1080,
-  tweetId: 'BV1y4411o7Kp',
+  tweetId: 'BV1ofPY3Thnr',
   tweetText: '【4K】把一年的海边拍成十二段，第 3 段是冬天。',
   createdAt: DateTime.fromMillisecondsSinceEpoch(1705756536000),
   userId: '349326425505',
@@ -864,8 +864,8 @@ Media biliExampleMedia() => Media(
   bili: const BiliMeta(
     workTitle: '把一年的海边拍成十二段',
     partTitle: '第3P 冬天',
-    bvid: 'BV1y4411o7Kp',
-    aid: '426593054',
+    bvid: 'BV1ofPY3Thnr',
+    aid: '114514000',
     cid: '765432109',
     partTotal: 12,
     qualityLabel: '1080P60',

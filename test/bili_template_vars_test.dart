@@ -152,7 +152,7 @@ void main() {
 
     test('单 P 稿件的 %P% 是 0，可选段整段消失', () {
       final single = biliExampleMedia().copyWith(
-        bili: const BiliMeta(bvid: 'BV1y4411o7Kp', partTotal: 1),
+        bili: const BiliMeta(bvid: 'BV1ofPY3Thnr', partTotal: 1),
       );
       expect(resolveVariables('%P%', single), '0');
       expect(resolveVariables('<P%P%>', single), '');
