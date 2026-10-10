@@ -179,6 +179,12 @@ void main() {
         brightness: Brightness.dark,
         onMaterialChanged: (_) async {},
         scope: SettingsScope.douyin),
+    // 折叠组「只裁剪不销毁」，所以这三档里 BiliSection 是真被布局出来的 ——
+    // 收起态冒烟同样能撞出撑破容器的行。
+    'B 站设置': () => SettingsPage(
+        brightness: Brightness.dark,
+        onMaterialChanged: (_) async {},
+        scope: SettingsScope.bili),
     '关于': () => const AboutPage(
         info: AboutInfo(
             name: '解析下载器',

@@ -17,11 +17,14 @@ import 'package:parse_dl/services/douyin_store.dart';
 import 'package:parse_dl/theme/app_theme.dart';
 import 'package:parse_dl/widgets/nav_items.dart';
 
-/// 两个模块的边界：界面各说各的话，任务队列各看各的。
+/// 各模块的边界：界面各说各的话，任务队列各看各的。
 ///
 /// 与 `platform_terms_test.dart` 的分工：那份只管**模板变量表**；
 /// 这份管导航文案、各模块独占文件的界面文案、以及共用的「下载管理」页
 /// 在两个 feed 下到底渲染了什么。
+///
+/// 独占文件按模块清点：X / 抖音 / B 站各一份清单，B 站这一期只有设置分区，
+/// 其余文件（页面、解析、台账）落地后往那张表里加。
 ///
 /// 「界面文案」的判据是**源码里的字符串字面量**（跳过注释后提取）——
 /// 注释里解释「为什么和 X 侧分开」是允许提到对方的，界面上不行。
@@ -57,11 +60,20 @@ const _douyinOnlyFiles = [
   'lib/models/douyin_auto_task.dart',
 ];
 
+/// B 站模块独占的文件（这一期只有设置分区，其余由集成方补进来）
+const _biliOnlyFiles = ['lib/widgets/bili_section.dart'];
+
 /// X 侧界面里不能出现的说法
 const _xForbidden = ['抖音', '作品', 'aweme', 'douyin'];
 
 /// 抖音侧界面里不能出现的说法
 const _douyinForbidden = ['推文', '帖子', 'tweet', 'twitter'];
+
+/// B 站侧界面里不能出现的说法 —— 另两个模块的术语都不许串进来。
+///
+/// 「作品」不在禁止列表里：B 站自己就叫作品（`%WORK_TITLE%` 的说明是「作品标题」），
+/// 串门的判据是**对方的平台名与对方的专有术语**，不是共用的中文普通名词。
+const _biliForbidden = ['推文', '帖子', 'tweet', 'twitter', '抖音', 'aweme', 'douyin'];
 
 /// 取源码里的**字符串字面量**内容（注释、标识符都不算）。
 List<String> stringLiterals(String src) {
@@ -251,6 +263,10 @@ void main() {
 
     test('抖音侧文件的字符串字面量里没有 X 说法', () {
       expect(_scan(_douyinOnlyFiles, _douyinForbidden), isEmpty);
+    });
+
+    test('B 站侧文件的字符串字面量里没有 X 与抖音说法', () {
+      expect(_scan(_biliOnlyFiles, _biliForbidden), isEmpty);
     });
 
     test('字面量提取器跳过注释与插值、认得转义', () {

@@ -10,6 +10,7 @@ import '../theme/window_material.dart';
 import '../widgets/account_section.dart';
 import '../widgets/app_section.dart';
 import '../widgets/background_picker.dart';
+import '../widgets/bili_section.dart';
 import '../widgets/collapsible_group.dart';
 import '../widgets/download_section.dart';
 import '../widgets/douyin_section.dart';
@@ -34,8 +35,8 @@ import '../widgets/app_toast.dart';
 /// 代理地址变成必填时自动展开，不把必需项藏在收起态里。
 /// 设置页显示哪一组设置。
 ///
-/// 需求：「软件设置页面只保留全局设置」，而 X 下载与抖音解析下载各自作为
-/// **独立设置分组** —— 既不混进全局设置，也不互相合并。所以这里是同一个
+/// 需求：「软件设置页面只保留全局设置」，而 X 下载、抖音解析下载、B 站解析下载
+/// 各自作为**独立设置分组** —— 既不混进全局设置，也不互相合并。所以这里是同一个
 /// 页面组件，按 scope 只渲染属于本页的那一段。
 enum SettingsScope {
   /// 全局设置：外观 / 账号 / 代理 / 高级 / 应用
@@ -45,18 +46,25 @@ enum SettingsScope {
   xDownload,
 
   /// 抖音解析下载模块自己的设置（原「抖音」分区）
-  douyin;
+  douyin,
+
+  /// B 站解析下载模块自己的设置
+  bili;
 
   String get title => switch (this) {
     SettingsScope.global => '设置',
     SettingsScope.xDownload => 'X 下载设置',
     SettingsScope.douyin => '抖音解析下载设置',
+    SettingsScope.bili => 'B 站解析下载设置',
   };
 
   IconData get icon => switch (this) {
     SettingsScope.global => Icons.settings_rounded,
     SettingsScope.xDownload => Icons.download_rounded,
+    // 四个模块图标统一用 *_rounded 的**描边**款：play_circle_fill_rounded 是实心块，
+    // 混进 download_rounded / music_note_rounded 这一排里会像一个多了底色。
     SettingsScope.douyin => Icons.music_note_rounded,
+    SettingsScope.bili => Icons.play_circle_outline_rounded,
   };
 }
 
@@ -213,6 +221,18 @@ class SettingsPage extends StatelessWidget {
             summary: t('下载源、质量优先策略、图片格式、批量与筛选选项'),
             expandLabel: t('展开设置'),
             children: const [DouyinSection()],
+          ),
+
+        // ── B 站 ──────────────────────────────────────────────
+        if (scope == SettingsScope.bili)
+          CollapsibleGroup(
+            storageId: 'section.bili',
+            variant: CollapsibleVariant.section,
+            title: t('B 站'),
+            icon: Icons.play_circle_outline_rounded,
+            summary: t('画质上限、编码偏好、下载完合并、命名模板'),
+            expandLabel: t('展开设置'),
+            children: const [BiliSection()],
           ),
 
         // ── 代理 ──────────────────────────────────────────────

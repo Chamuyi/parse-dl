@@ -23,7 +23,8 @@ import 'package:parse_dl/theme/app_theme.dart';
 ///   - **X 下载设置**是独立一页：账号（登录）+ 下载（保存路径与模板）。
 ///     账号归在这里，是因为它是 X 下载的前置条件：没登录就抓不到媒体；
 ///   - **抖音解析下载设置**是独立一页：只有抖音分区；
-///   - 三者互不混入，两个模块的设置也互不合并。
+///   - **B 站解析下载设置**是独立一页：只有 B 站分区；
+///   - 互不混入，各模块的设置也互不合并。
 void main() {
   /// 全局设置页该有的分区（账号已挪到 X 下载模块）
   const globalSectionIds = <String>[
@@ -39,12 +40,16 @@ void main() {
   /// 抖音解析下载设置页该有的分区
   const douyinSectionIds = <String>['section.douyin'];
 
+  /// B 站解析下载设置页该有的分区
+  const biliSectionIds = <String>['section.bili'];
+
   /// 每个分区的收起概要 —— 必须是中性描述，不含任何用户当前值
   const summaries = <String, String>{
     'section.appearance': '窗口材质、自定义色调、导航形态、主题模式、背景图片、界面语言',
     'section.account': '登录状态、cookie 输入与验证',
     'section.download': '保存路径、文件夹 / 文件名模板、同名文件处理',
     'section.douyin': '下载源、质量优先策略、图片格式、批量与筛选选项',
+    'section.bili': '画质上限、编码偏好、下载完合并、命名模板',
     'section.proxy': '启用代理、使用系统代理、自定义代理地址、连通性测试',
     'section.advanced': 'X 接口标识缓存（搜索用户或加载媒体失败时使用）',
     'section.app': '日志记录、日志目录与文件',
@@ -54,7 +59,9 @@ void main() {
   const sentinels = <String>[
     '%USER_SCREEN_NAME%',
     '%POST_ID%%EXT%',
+    '%BVID%/%P%-%QUALITY%%EXT%',
     r'D:\secret-path',
+    r'D:\bili-secret-path',
     '#123456',
     '127.0.0.1',
   ];
@@ -83,7 +90,7 @@ void main() {
 
   /// 泵出设置页。
   ///
-  /// [store] 用来在**同一个**设置仓库上依次泵三个页面（验证归属时要用同一份数据）。
+  /// [store] 用来在**同一个**设置仓库上依次泵四个页面（验证归属时要用同一份数据）。
   Future<SettingsStore> pumpPage(
     WidgetTester tester, {
     SettingsScope scope = SettingsScope.global,
@@ -142,10 +149,10 @@ void main() {
   }
 
   // ══════════════════════════════════════════════════════════
-  // 一、设置归属：全局页只留全局，两个模块各自独立成页
+  // 一、设置归属：全局页只留全局，三个模块各自独立成页
   // ══════════════════════════════════════════════════════════
   group('设置归属', () {
-    testWidgets('全局设置页只有全局分区：账号/下载/抖音都不在', (tester) async {
+    testWidgets('全局设置页只有全局分区：账号/下载/抖音/B 站都不在', (tester) async {
       await pumpPage(tester);
 
       for (final id in globalSectionIds) {
@@ -155,7 +162,7 @@ void main() {
           reason: '全局设置页应当有 $id',
         );
       }
-      // 这三个分区已经搬到各自模块里，全局页里连节点都不该有
+      // 这些分区已经搬到各自模块里，全局页里连节点都不该有
       expect(
         find.byKey(contentKey('section.account')),
         findsNothing,
@@ -171,14 +178,20 @@ void main() {
         findsNothing,
         reason: '抖音解析下载的设置不该混进全局设置页',
       );
+      expect(
+        find.byKey(contentKey('section.bili')),
+        findsNothing,
+        reason: 'B 站解析下载的设置不该混进全局设置页',
+      );
 
       // 连标题文字也不该出现
       expect(find.text('账号'), findsNothing);
       expect(find.text('下载'), findsNothing);
       expect(find.text('抖音'), findsNothing);
+      expect(find.text('B 站'), findsNothing);
     });
 
-    testWidgets('X 下载设置页：账号登录与下载设置都在，没有抖音', (tester) async {
+    testWidgets('X 下载设置页：账号登录与下载设置都在，没有抖音、没有 B 站', (tester) async {
       await pumpPage(tester, scope: SettingsScope.xDownload);
 
       expect(find.text('X 下载设置'), findsOneWidget, reason: '页头要表明这是哪个模块的设置');
@@ -194,12 +207,17 @@ void main() {
         findsNothing,
         reason: '抖音的设置不该出现在 X 下载的设置页里',
       );
+      expect(
+        find.byKey(contentKey('section.bili')),
+        findsNothing,
+        reason: 'B 站的设置不该出现在 X 下载的设置页里',
+      );
       // 全局分区也不该跟过来
       expect(find.byKey(contentKey('section.appearance')), findsNothing);
       expect(find.byKey(contentKey('section.proxy')), findsNothing);
     });
 
-    testWidgets('抖音解析下载设置页：只有抖音分区，没有账号/下载', (tester) async {
+    testWidgets('抖音解析下载设置页：只有抖音分区，没有账号/下载/B 站', (tester) async {
       await pumpPage(tester, scope: SettingsScope.douyin);
 
       expect(find.text('抖音解析下载设置'), findsOneWidget);
@@ -216,20 +234,58 @@ void main() {
         findsNothing,
         reason: 'X 下载的设置不该出现在抖音设置页里',
       );
+      expect(
+        find.byKey(contentKey('section.bili')),
+        findsNothing,
+        reason: 'B 站的设置不该出现在抖音设置页里',
+      );
       expect(find.byKey(contentKey('section.appearance')), findsNothing);
       expect(find.byKey(contentKey('section.proxy')), findsNothing);
     });
 
-    testWidgets('两个模块的设置页互不相同（不合并成同一页）', (tester) async {
+    testWidgets('B 站解析下载设置页：只有 B 站分区，没有账号/下载/抖音', (tester) async {
+      await pumpPage(tester, scope: SettingsScope.bili);
+
+      expect(find.text('B 站解析下载设置'), findsOneWidget,
+          reason: '页头要表明这是哪个模块的设置');
+      for (final id in biliSectionIds) {
+        expect(find.byKey(contentKey(id)), findsOneWidget);
+      }
+      expect(
+        find.byKey(contentKey('section.account')),
+        findsNothing,
+        reason: 'X 账号登录不属于 B 站模块',
+      );
+      expect(
+        find.byKey(contentKey('section.download')),
+        findsNothing,
+        reason: 'X 下载的设置不该出现在 B 站设置页里',
+      );
+      expect(
+        find.byKey(contentKey('section.douyin')),
+        findsNothing,
+        reason: '抖音的设置不该出现在 B 站设置页里',
+      );
+      expect(find.byKey(contentKey('section.appearance')), findsNothing);
+      expect(find.byKey(contentKey('section.proxy')), findsNothing);
+    });
+
+    testWidgets('三个模块的设置页互不相同（不合并成同一页）', (tester) async {
       await pumpPage(tester, scope: SettingsScope.xDownload);
       expect(find.text('X 下载设置'), findsOneWidget);
 
       await pumpPage(tester, scope: SettingsScope.douyin);
       expect(find.text('X 下载设置'), findsNothing, reason: '抖音的设置页里不该出现 X 下载的标题');
       expect(find.text('抖音解析下载设置'), findsOneWidget);
+
+      await pumpPage(tester, scope: SettingsScope.bili);
+      expect(find.text('X 下载设置'), findsNothing);
+      expect(find.text('抖音解析下载设置'), findsNothing,
+          reason: 'B 站的设置页里不该出现抖音的标题');
+      expect(find.text('B 站解析下载设置'), findsOneWidget);
     });
 
-    testWidgets('三个页面的页头标题各不相同', (tester) async {
+    testWidgets('四个页面的页头标题各不相同', (tester) async {
       await pumpPage(tester);
       expect(find.text('设置'), findsWidgets);
 
@@ -238,6 +294,9 @@ void main() {
 
       await pumpPage(tester, scope: SettingsScope.douyin);
       expect(find.text('抖音解析下载设置'), findsOneWidget);
+
+      await pumpPage(tester, scope: SettingsScope.bili);
+      expect(find.text('B 站解析下载设置'), findsOneWidget);
     });
   });
 
@@ -252,7 +311,6 @@ void main() {
         expect(contentHeight(tester, id), 0, reason: '$id 默认必须收起');
       }
     });
-
     testWidgets('分区标题都在，动作文案统一是「展开」', (tester) async {
       await pumpPage(tester);
 
@@ -363,6 +421,57 @@ void main() {
       );
     });
 
+    testWidgets('B 站页的分区默认收起（内容可见高度为 0）', (tester) async {
+      await pumpPage(tester, scope: SettingsScope.bili);
+
+      for (final id in biliSectionIds) {
+        expect(contentHeight(tester, id), 0, reason: '$id 默认必须收起');
+      }
+      expect(find.text('展开设置'), findsOneWidget);
+    });
+
+    testWidgets('B 站设置页：分区展开后各选项直接可见（没有第二层折叠）', (tester) async {
+      await pumpPage(tester, scope: SettingsScope.bili);
+
+      await tester.tap(find.text('B 站'));
+      await tester.pumpAndSettle();
+
+      expect(
+        contentHeight(tester, 'section.bili'),
+        greaterThan(0),
+        reason: 'B 站分区展开后内容要真的露出来',
+      );
+      for (final f in [
+        '画质上限',
+        '编码偏好',
+        '下载完成后合并',
+        '跳过已下载的分 P',
+        '同一稿件的分 P 排在一起',
+        '并发数',
+        '保存与命名',
+        '启用保存文件夹',
+        '启用模版',
+      ]) {
+        expect(
+          inSection('section.bili', f),
+          findsOneWidget,
+          reason: '「$f」应在展开后直接可见',
+        );
+      }
+      // 「自定义文本」和抖音那页同理：选项标题之外，两张变量表里还各有一枚
+      // %CUSTOM_TEXT% 芯片，描述文字同为「自定义文本」，所以只要求至少一次。
+      expect(
+        inSection('section.bili', '自定义文本'),
+        findsWidgets,
+        reason: '「自定义文本」应在展开后直接可见',
+      );
+
+      // 三个模块各说各的话：抖音专有的说法不该出现在 B 站这一页
+      for (final f in ['下载源', '质量优先策略', '图片格式']) {
+        expect(find.text(f), findsNothing, reason: '「$f」是抖音的说法，不该出现在 B 站页');
+      }
+    });
+
     testWidgets('下载源切到「质量优先」后，质量优先策略下拉才出现', (tester) async {
       final settings = await pumpPage(tester, scope: SettingsScope.douyin);
 
@@ -387,6 +496,11 @@ void main() {
         d.saveDirBase = r'D:\secret-path';
       });
       await settings.setProxy((p) => p.url = 'http://127.0.0.1:7890');
+      await settings.setBili((b) {
+        b.dirTemplate = '%BVID%';
+        b.fileNameTemplate = '%BVID%/%P%-%QUALITY%%EXT%';
+        b.saveDirBase = r'D:\bili-secret-path';
+      });
       await settings.setAppearance((a) {
         a.customTint = true;
         a.tintColor = '#123456';
@@ -400,12 +514,15 @@ void main() {
       // 真正「露在屏幕上」的只有分区标题 + 这一行概要，所以直接审概要本身。
       expectSummariesClean(globalSectionIds, tester);
 
-      // 两个模块的设置页同样不许外漏（用同一个 store，保证塞进去的值还在）
+      // 三个模块的设置页同样不许外漏（用同一个 store，保证塞进去的值还在）
       await pumpPage(tester, scope: SettingsScope.xDownload, store: settings);
       expectSummariesClean(xSectionIds, tester);
 
       await pumpPage(tester, scope: SettingsScope.douyin, store: settings);
       expectSummariesClean(douyinSectionIds, tester);
+
+      await pumpPage(tester, scope: SettingsScope.bili, store: settings);
+      expectSummariesClean(biliSectionIds, tester);
     });
   });
 

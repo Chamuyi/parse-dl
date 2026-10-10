@@ -534,4 +534,108 @@ const Map<String, String> kStringsEn = {
   '按作品分文件夹（推荐）': 'Folder per video (recommended)',
   '按「UP 主 / 作品」两级文件夹': 'Two-level folder (uploader / video)',
   '按 BV 号分文件夹': 'Folder by BV id',
+
+  // ── B 站设置分区（lib/widgets/bili_section.dart）─────────────────
+  //
+  // 「保存与命名」那一段里能复用上面已有 key 的都复用了（启用保存文件夹 /
+  // 启用模版 / 文件夹模板 / 改动会自动保存……），这里只列 B 站自己那些。
+  'B 站': 'Bilibili',
+  'B 站解析下载设置': 'Bilibili Settings',
+  '画质上限、编码偏好、下载完合并、命名模板':
+      'Quality ceiling, codec preference, merge after download, naming templates',
+  '画质上限': 'Quality ceiling',
+  '编码偏好': 'Codec preference',
+  '下载完成后合并': 'Merge after download',
+  '跳过已下载的分 P': 'Skip parts already downloaded',
+  '同一稿件的分 P 排在一起': 'Keep parts of one video together',
+  '并发数': 'Concurrent downloads',
+  '保存与命名': 'Save location and naming',
+  '启用保存文件夹': 'Use save subfolder',
+  '启用模版': 'Template preset',
+  '这里是「上限」而不是保证：B 站会按你账号的实际权限（大会员、付费稿件）'
+      '把拿不到的高阶档位直接裁掉，所以选了「1080P 60帧」也可能只下到 1080P。'
+      '这是 B 站和本项目另两个模块最大的行为差异 —— 那里档位由平台返回的候选决定，'
+      '这里还要多过一道账号权限，选高了不会报错，只会安静地退回能拿到的那一档。':
+      'This is a ceiling, not a guarantee: Bilibili drops the tiers your account '
+      'cannot reach (premium membership, paid content) before answering, so '
+      'picking 1080P 60fps may still download plain 1080P. This is the biggest '
+      'behavioral difference from the other two modules here — there the tier '
+      'comes from whatever the platform returns, here it also passes an account '
+      'permission check. Asking too high never errors, it quietly falls back to '
+      'the best tier you can actually get.',
+  '同一档画质 B 站通常同时给 H.264 / HEVC / AV1 三条流。选哪条不影响清晰度，'
+      '只影响体积和播放器兼容性 —— HEVC / AV1 同画质更小，但老播放器与部分剪辑软件不认；'
+      '「自动（兼容性优先）」挑哪边都能播的那条。这条同样只是偏好：稿件没有该编码的流时会退回其它编码，'
+      '画质上限那套账号裁档的规则对这里一样成立。':
+      'At the same quality Bilibili usually offers three streams: H.264, HEVC '
+      'and AV1. Picking one does not change sharpness, only file size and '
+      'playback compatibility — HEVC / AV1 are smaller at the same quality but '
+      'older players and some editors refuse them. Auto (compatibility first) '
+      'takes whichever plays everywhere. This is also only a preference: when '
+      'the video has no stream in that codec it falls back to another one, and '
+      'the account permission filter from the quality ceiling applies here too.',
+  'B 站的视频流和音频流是分开的两个文件，下完是两个 .m4s，'
+      '各自都不能单独播放 —— 必须先用 ffmpeg 合成一个 .mp4 才能看，所以默认开着。'
+      '留这个开关只有一种用途：合并要用的 ffmpeg 被安全软件拦下时，'
+      '先拿到原始流自己处理，总比什么都拿不到强。':
+      'Bilibili video and audio are two separate files — you get two .m4s, and '
+      'neither plays on its own. ffmpeg has to mux them into one .mp4 first, so '
+      'this is on by default. The switch exists for exactly one case: when the '
+      'bundled ffmpeg is blocked by security software, keeping the raw streams '
+      'to process yourself still beats getting nothing usable.',
+  '当前环境找不到可用的 ffmpeg，合并这一步会失败：'
+      '下完只会得到两个不能单独播放的 .m4s 文件。':
+      'No usable ffmpeg found — merging will fail and you would end up with two '
+      '.m4s files that do not play on their own.',
+  '按「BV 号 + 分 P 内容 ID」记账：下过的分 P 不再重下。'
+      '记的是台账而不是磁盘上的文件，所以把文件移走、甚至删掉，也仍然算下过 —— '
+      '想重下要么关掉这个开关，要么清掉记录。':
+      'Booked by BV id plus part content id: parts already downloaded are queued '
+      'again never. The ledger records the download, not the file on disk, so '
+      'moving or deleting it still counts as downloaded — to re-download, either '
+      'turn this off or clear the records.',
+  '一个稿件的多个分 P 会占连续位置，跨稿件的才交错。关闭后严格按抓取顺序入队。':
+      'Parts of one video take consecutive slots; only different videos '
+      'interleave. When off, items are queued strictly in fetch order.',
+  'aria2 同时下载的任务数上限（默认 4）。这是那一个下载进程的全局上限，'
+      '不是只作用于 B 站的队列 —— 调大它，同时在下的别的内容也会一起挤这几个槽位。':
+      'Maximum concurrent aria2 transfers (default 4). This caps the whole '
+      'download process, not just the Bilibili queue — raising it lets other '
+      'downloads compete for the same slots.',
+  '模板变量 %CUSTOM_TEXT% 的输出内容，可用来给文件名加前缀、标注批次等。'
+      '留空时这个变量就是空串。':
+      'What %CUSTOM_TEXT% expands to — use it for a file name prefix, a batch '
+      'mark and so on. Left empty, the variable becomes an empty string.',
+  '例如：追番清单': 'e.g. Anime watchlist',
+  'B 站下载存到哪个根目录、往下怎么建子文件夹、文件叫什么名字，都由下面这几项决定。'
+      '可用变量都是 B 站语义的：%WORK_TITLE% 作品标题、%PART_TITLE% 分P标题、'
+      '%P% 分P序号、%BVID% BV 号、%UP_NAME% UP 主昵称、%QUALITY% 画质、'
+      '%CODEC% 编码格式等。':
+      'Which root folder Bilibili downloads land in, what subfolders go under '
+      'it and what the files are called all come from the options below. Every '
+      'variable is Bilibili-flavoured: %WORK_TITLE% video title, %PART_TITLE% '
+      'part title, %P% part number, %BVID% BV id, %UP_NAME% uploader name, '
+      '%QUALITY% quality, %CODEC% codec.',
+  '开启：按下面的「文件夹模板」建子目录再存；'
+      '关闭：忽略文件夹模板，文件全部平铺在保存根目录里':
+      'On: build subfolders from the folder template below. Off: ignore the '
+      'folder template and lay every file in the save root.',
+  '从现成组合里挑一套，一键填进下面两个模板框；之后仍可手动微调，'
+      '改过之后这里会显示「自定义」。':
+      'Pick a ready-made pair and it fills both template fields below in one '
+      'go. You can still fine-tune them afterwards — once you do, this shows '
+      'Custom.',
+  '留空则直接存到保存目录下': 'Leave empty to save straight into the save folder',
+  '「启用保存文件夹」已关闭 —— 文件全部平铺在保存目录下':
+      'Use save subfolder is off — every file goes flat into the save folder',
+  '提示：文件夹模板建议只用「作品 / UP 主」这一级的变量；'
+      '%MEDIA_INDEX%、%EXT% 这类逐文件的变量会让每个文件各建一个文件夹。'
+      '分 P 想挤进同一个目录就别在这里放 %P%。':
+      'Tip: the folder template should only use video-level or uploader-level '
+      'variables. Per-file ones like %MEDIA_INDEX% and %EXT% create a folder for '
+      'every file. To keep all parts of one video in the same folder, leave %P% '
+      'out of here.',
+  '留空则不按模板命名 —— 兜底名字由下载层决定，点「填入默认」恢复':
+      'Leave empty to skip template naming — the download layer picks the name; '
+      'tap Use default to restore it',
 };
