@@ -176,6 +176,139 @@ String biliTargetKey(BiliRef ref) {
   return 'unknown';
 }
 
+/// 一个目标摊出来的「这一行到底要下哪些稿件」。
+///
+/// 单独做成一个纯函数（[biliPlanWorks]）而不是留在页面里，是因为这一段全是判断：
+/// 短链要不要展开、`sid` 判成合集还是系列、上限从哪一条开始截、列表混进没 BV 号的行。
+/// 藏在 `StatefulWidget` 里就只能靠手点界面来验，而点界面恰恰是这一期最不该当证据的东西。
+class BiliWorkPlan {
+  const BiliWorkPlan({
+    required this.works,
+    required this.title,
+    this.target,
+    this.archives = const [],
+    this.skippedUnsupported = 0,
+    this.truncated = 0,
+  });
+
+  /// bvid → 标题（列表给的，可能为空串）。用 Map 而不是 List：同一个合集里
+  /// 接口偶尔会把同一条给两遍，键去重比再写一个 seen 集合省事。
+  final Map<String, String> works;
+
+  /// 列表名（合集名 / 系列名 / 收藏夹名）；单条稿件那一行是稿件标题。
+  final String title;
+
+  /// 判完身份的列表目标（单条稿件那一行为 null）。
+  final BiliListTarget? target;
+
+  /// 翻回来的原始列表项，界面展开明细时用。
+  final List<BiliArchive> archives;
+
+  /// 本期不支持因而丢掉的条数（收藏夹里混音频 / 番剧）。
+  final int skippedUnsupported;
+
+  /// 被 `maxWorks` 截掉的条数。
+  final int truncated;
+
+  int get collected => works.length;
+}
+
+/// 计划阶段的失败。**稳定 ASCII 码 + 详情**，中文文案归界面（与
+/// `bili_link.dart` 的 `BiliLinkProblem` 同一套纪律：这一层不新增用户可见中文串）。
+enum BiliPlanProblem {
+  /// 短链没能展开（没有重定向、页面里也找不到 BV 号）。
+  shortLinkUnresolved,
+
+  /// 列表里一条本期能下的稿件都没有（全被丢掉或本来就是空列表）。
+  noWorks,
+
+  /// 展开之后发现是「本期不做」的形态（番剧 / 直播间…），`detail` 带的是链接层那句话。
+  unsupported,
+}
+
+class BiliPlanException implements Exception {
+  const BiliPlanException(this.problem, [this.detail = '']);
+
+  final BiliPlanProblem problem;
+  final String detail;
+
+  @override
+  String toString() => 'BiliPlanException(${problem.name}${detail.isEmpty ? '' : ': $detail'})';
+}
+
+/// 一个目标 → [BiliWorkPlan]。
+///
+/// 三个口由调用方注入，所以这一段可以不打网络就钉住：
+///  * [expandShort] —— 短链展开（真机是 `expandBiliShortLink`，它要发请求）；
+///  * [resolveWork] —— 稿件链接 → `{bvid, title}`（真机是 `BiliApi.view`）；
+///  * [listApi] —— 列表接口层（`BiliListApi` 自己就能用假传输构造）。
+Future<BiliWorkPlan> biliPlanWorks({
+  required BiliRef ref,
+  required BiliListApi listApi,
+  required Future<({String bvid, String title})> Function({String? bvid, int? aid})
+  resolveWork,
+  required Future<BiliRef?> Function(String shortUrl) expandShort,
+  int maxWorks = 0,
+  void Function(BiliBatchStatus stage)? onStage,
+}) async {
+  var current = ref;
+  if (current.needsExpand) {
+    onStage?.call(BiliBatchStatus.expanding);
+    final expanded = await expandShort(current.shortLink!);
+    if (expanded == null) {
+      throw const BiliPlanException(BiliPlanProblem.shortLinkUnresolved);
+    }
+    current = expanded;
+  }
+  if (current.isUnsupported) {
+    throw BiliPlanException(
+      BiliPlanProblem.unsupported,
+      current.unsupportedReason ?? current.problem?.code ?? '',
+    );
+  }
+
+  onStage?.call(BiliBatchStatus.listing);
+  final works = <String, String>{};
+  final list = current.list;
+
+  if (list == null) {
+    // 单条稿件那一行：不翻列表，只把这条展开成「一个 work」
+    final work = await resolveWork(bvid: current.bvid, aid: current.aid);
+    if (work.bvid.isNotEmpty) works[work.bvid] = work.title;
+    if (works.isEmpty) {
+      throw const BiliPlanException(BiliPlanProblem.noWorks);
+    }
+    return BiliWorkPlan(works: works, title: work.title);
+  }
+
+  final judged =
+      list.kind == BiliListKind.unknown ? await listApi.resolveTarget(list) : list;
+  final summary = await listApi.allArcsSummary(judged);
+  var take = summary.items;
+  var truncated = 0;
+  if (maxWorks > 0 && take.length > maxWorks) {
+    truncated = take.length - maxWorks;
+    take = take.sublist(0, maxWorks);
+  }
+  for (final a in take) {
+    if (a.bvid.isEmpty) continue;
+    works[a.bvid] = a.title;
+  }
+  if (works.isEmpty) {
+    throw const BiliPlanException(BiliPlanProblem.noWorks);
+  }
+  return BiliWorkPlan(
+    works: works,
+    // 列表没给名字时用第一条的 UP 主名兜一句都比空着好？不 —— 空就空，
+    // 界面会退回显示用户自己贴的那一行，比编一个名字诚实。
+    title: summary.listTitle,
+    target: judged,
+    archives: summary.items,
+    skippedUnsupported: summary.skipped,
+    truncated: truncated,
+  );
+}
+
 /// 批量页的状态。
 class BiliBatchStore extends ChangeNotifier {
   /// 目标数上限。太多了列表先卡住，而且一晚上也跑不完。

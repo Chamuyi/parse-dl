@@ -208,7 +208,13 @@ class _BiliBatchPageState extends State<BiliBatchPage> {
       while (store.running) {
         final target = store.current;
         if (target == null) break;
-        await _runTarget(target, api, listApi, cfg, ledger, store, coordinator);
+        try {
+          await _runTarget(target, api, listApi, cfg, ledger, store, coordinator);
+        } catch (e) {
+          // 一个目标失败不该掀掉整批：这一行标失败 + 一句原因，后面的照跑。
+          AppLogger.log('BILI', '批量里这个目标没跑通（${target.input}）：$e');
+          store.mark(target, BiliBatchStatus.failed, error: _why(e));
+        }
         store.advance();
       }
     } finally {
@@ -249,67 +255,43 @@ class _BiliBatchPageState extends State<BiliBatchPage> {
     BiliBatchStore store,
     Aria2Coordinator coordinator,
   ) async {
-    var ref = target.ref;
-    if (ref.needsExpand) {
-      store.mark(target, BiliBatchStatus.expanding);
-      final expanded = await expandBiliShortLink(ref.shortLink!);
-      if (expanded == null) {
-        throw StateError(t('短链没能展开（没有重定向、页面里也找不到 BV 号）'));
-      }
-      ref = expanded;
-      target.ref = ref;
-      if (ref.isUnsupported) throw StateError(ref.unsupportedReason!);
-    }
-
-    store.mark(target, BiliBatchStatus.listing);
-    final works = <String, String>{}; // bvid → 标题（列表给的，可能为空）
-    final list = ref.list;
-    if (list == null) {
-      // 单条稿件那一行：不翻列表，直接把这条展开
-      final view = await api.view(bvid: ref.bvid, aid: ref.aid?.toString());
-      target.title = view.title;
-      works[view.bvid] = view.title;
-    } else {
-      final judged = list.kind == BiliListKind.unknown
-          ? await listApi.resolveTarget(list)
-          : list;
-      target.target = judged;
-      final summary = await listApi.allArcsSummary(judged);
-      target.archives = summary.items;
-      target.skippedUnsupported = summary.skipped;
-      target.title = summary.listTitle;
-      var take = summary.items;
-      final cap = store.maxWorks;
-      if (cap > 0 && take.length > cap) {
-        target.truncated = take.length - cap;
-        take = take.sublist(0, cap);
-      }
-      for (final a in take) {
-        if (a.bvid.isEmpty) continue;
-        works[a.bvid] = a.title;
-      }
-    }
-    target.collected = works.length;
+    final plan = await biliPlanWorks(
+      ref: target.ref,
+      listApi: listApi,
+      resolveWork: ({bvid, aid}) async {
+        final v = await api.view(bvid: bvid, aid: aid?.toString());
+        return (bvid: v.bvid, title: v.title);
+      },
+      expandShort: expandBiliShortLink,
+      maxWorks: store.maxWorks,
+      onStage: (stage) => store.mark(target, stage),
+    );
+    target
+      ..target = plan.target
+      ..archives = plan.archives
+      ..skippedUnsupported = plan.skippedUnsupported
+      ..truncated = plan.truncated
+      ..title = plan.title
+      ..collected = plan.collected;
     store.refresh();
-    if (works.isEmpty) {
-      throw StateError(t('这个列表里一条本期能下的稿件都没有'));
+    if (plan.works.isEmpty) {
+      throw const BiliPlanException(BiliPlanProblem.noWorks);
     }
 
     final tally = BiliRunTally();
     target.run = tally;
     store.mark(target, BiliBatchStatus.downloading);
-    for (final bvid in works.keys) {
+    for (final work in plan.works.entries) {
       if (!store.running) break;
       try {
-        final view = await api.view(bvid: bvid);
-        final all = biliPartsOfView(view);
+        final v = await api.view(bvid: work.key);
+        final all = biliPartsOfView(v);
         if (all.isEmpty) {
           tally.failed++;
-          tally.addNote(tf('{bvid} 没有可下载的分 P', {'bvid': bvid}));
+          tally.addNote(tf('{bvid} 没有可下载的分 P', {'bvid': work.key}));
           continue;
         }
-        // 「多 P 只取第 1P」是**默认**：一个 20P 的合集勾上全取就是几百条队列，
-        // 而想要全部的人本来也可以在解析页里按稿件勾。
+        // 「多 P 只取第 1P」是默认，理由见 `bili_batch_store.dart` 里那句注释。
         final parts = store.allParts ? all : [all.first];
         tally.absorb(await biliDownloadParts(
           api: api,
@@ -322,12 +304,21 @@ class _BiliBatchPageState extends State<BiliBatchPage> {
       } catch (e) {
         tally.failed++;
         tally.addNote('$e');
-        AppLogger.log('BILI', '批量里这条稿件没跑通（$bvid）：$e');
+        AppLogger.log('BILI', '批量里这条稿件没跑通（${work.key}）：$e');
       }
       store.refresh();
     }
     store.mark(target, BiliBatchStatus.done);
   }
+
+  /// 界面那一行要说的那句话：编排层只给稳定码，中文归这里。
+  String _why(Object e) => e is BiliPlanException
+      ? switch (e.problem) {
+          BiliPlanProblem.shortLinkUnresolved => t('短链没能展开（没有重定向、页面里也找不到 BV 号）'),
+          BiliPlanProblem.noWorks => t('这个列表里一条本期能下的稿件都没有'),
+          BiliPlanProblem.unsupported => e.detail,
+        }
+      : '$e';
 
   // ── 收藏夹下拉（D8 的后半）──────────────────────────────────
 
