@@ -144,7 +144,11 @@ class BiliConfig {
     'fileNameTemplate': fileNameTemplate,
   };
 
-  /// 与默认值不同的项数 —— 设置区折叠时点「已修改」小圆点用。
+  /// 是否全部保持默认值。
+  ///
+  /// `CollapsibleGroup` 那边有个 `modified` 小圆点的渲染分支，但**目前全仓没有
+  /// 任何调用点传它**，所以这个 getter 现在只被测试用作「改过任何一项就要翻
+  /// false」的判据，不要对外宣称界面上有圆点。
   bool get isDefault =>
       quality == BiliQuality.highest &&
       codec == BiliCodec.auto &&
