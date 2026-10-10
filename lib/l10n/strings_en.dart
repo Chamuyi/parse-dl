@@ -348,6 +348,34 @@ const Map<String, String> kStringsEn = {
   '清空下载历史？': 'Clear the download history?',
   '清空之后，下次批量下载就不会再跳过这些作品了。':
       'After clearing, the next batch run will no longer skip these posts.',
+
+  // ── 下载管理：B 站的「已下载（B 站）」历史分区 ─────────────────
+  //
+  // 「清空下载历史？」「从历史中移除…」「还没有下载记录」「清除失败…」这几句
+  // 两边共用（说法本身不带平台名），所以不重复开 key；带平台名的必须各一条。
+  '共 {n} 个分P': '{n} parts in total',
+  '在 B 站解析下载页勾选分P并下完之后就会记在这里。\n'
+          '记录按「分P」计，把文件移走或删掉也仍然算下过。':
+      'Parts you finished downloading get recorded here.\n'
+      'Records count parts — moving or deleting the files still counts as downloaded.',
+  '清空之后，下次批量下载就不会再跳过这些分P了。':
+      'After clearing, the next batch run will no longer skip these parts.',
+  '已清除 B 站下载记录': 'Bilibili download history cleared',
+  'UP 主未知': 'Uploader unknown',
+  '时间未知': 'Time unknown',
+  '{bv} · 分P {cid}': '{bv} · Part {cid}',
+
+  // 队列空态的引导语：三个模块各一句（入口页名不同），漏一条就是英文界面夹中文。
+  '「{name}」里还没有任务': 'Nothing in "{name}" yet',
+  '在主页或自动执行页选择媒体后，\n任务会出现在这里':
+      'Pick media on the Home page or the Auto Tasks page,\n'
+      'and the tasks show up here',
+  '在解析下载页或自动下载页勾选作品后，\n任务会出现在这里':
+      'Pick posts on the Parse & Download page or the Auto Download page,\n'
+      'and the tasks show up here',
+  '在 B 站解析下载页勾选分P后，\n任务会出现在这里':
+      'Pick parts on the Bilibili Parse & Download page,\n'
+      'and the tasks show up here',
   '已保存模板': 'Saved templates',
   '保存模板': 'Save template',
   '模板改动会自动保存': 'Template changes are saved automatically',
@@ -516,6 +544,7 @@ const Map<String, String> kStringsEn = {
   '错误': 'Error',
   '已完成': 'Completed',
   '已下载（抖音）': 'Downloaded (Douyin)',
+  '已下载（B 站）': 'Downloaded (Bilibili)',
   '作品标题': 'Title',
   '分P标题': 'Part title',
   '分P序号': 'Part number',

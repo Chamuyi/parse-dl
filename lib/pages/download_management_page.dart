@@ -5,12 +5,14 @@ import 'package:provider/provider.dart';
 
 import '../models/creation_task.dart';
 import '../services/aria2_coordinator.dart';
+import '../services/bili_ledger.dart';
 import '../services/creation_task_store.dart';
 import '../services/download_store.dart';
 import '../services/douyin_ledger.dart';
 import '../services/douyin_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
+import '../widgets/download_history_section.dart';
 import '../widgets/download_list_item.dart';
 import '../l10n/l10n.dart';
 import '../services/app_logger.dart';
@@ -18,27 +20,62 @@ import '../widgets/app_toast.dart';
 
 /// 下载管理页归属哪个模块。
 ///
-/// 两个模块各有一个「下载管理」导航项，共用这一个页面，但**各看各的任务队列**：
+/// 三个模块各有一个「下载管理」导航项，共用这一个页面，但**各看各的任务队列**：
 /// aria2 底层只有一条队列，界面按 `Media.source` 分列 —— X 的页面里既看不到
 /// 抖音的任务，也不会出现抖音的下载历史 Tab，反之同理。
+///
+/// ## 判据为什么拆成三条（别再往回写 `isDouyin`）
+/// 以前页面里到处写 `feed.isDouyin`，那一个开关同时表达着三件**互不相干**的事：
+/// 「有没有历史 Tab」（抖音有，因为它有台账）、「是不是 X」（决定顶部要不要画
+/// 创作任务）、「本模块的文案是哪个」（空队列引导语）。两个模块时 `!isDouyin`
+/// 恰好等价于「是 X」，加进第三个队列后这层巧合就碎了：`!isDouyin` 会让 B 站页
+/// 去画 X 的创作任务区块，`isDouyin ? 抖音文案 : X 文案` 会让 B 站页说 X 的话。
+/// 所以每条语义各自命名，加第四个模块时只改这几处判据，不用回头猜当年的 `!x` 指什么。
 enum DownloadFeed {
   x('x'),
-  douyin('douyin');
+  douyin('douyin'),
+  bili('bili');
 
   const DownloadFeed(this.source);
 
   /// 与 `Media.source` 对齐的取值
   final String source;
 
-  bool get isDouyin => this == douyin;
+  /// 本模块的「已下载」历史 Tab 名；没有这个 Tab 的模块返回 null。
+  ///
+  /// **名字各模块一份**（[kBiliHistoryTab] / [_kDouyinHistoryTab]），不共用一个
+  /// 常量：Tab 名自带平台术语，共用等于两个模块说同一句话，术语扫描也没得扫了。
+  String? get historyTabName => switch (this) {
+    DownloadFeed.douyin => _kDouyinHistoryTab,
+    DownloadFeed.bili => kBiliHistoryTab,
+    DownloadFeed.x => null,
+  };
+
+  /// 有没有「已下载」历史 Tab —— 判据是「这个模块有没有自己的下载台账」：
+  /// 抖音有 [DouyinLedger]、B 站有 [BiliLedger]，X 侧压根没有台账，所以它没这个 Tab。
+  bool get hasHistoryTab => historyTabName != null;
+
+  /// 顶部要不要画「创作任务」区块 —— **只有 X 有**：那是 X 的翻页抓取概念
+  /// （主页点一下就开始逐页拉媒体，进度挂在这里）。抖音和 B 站都是
+  /// 「勾完直接投 aria2」，没有中间态，画出来只会是个永远空着的坑。
+  bool get hasCreationTasks => this == x;
+
+  /// 队列为空时的引导语 —— 按模块各一份：三个模块的入口页名不一样，
+  /// 写成二选一的三元就会让新模块读到别家的页面名。
+  String get emptyQueueHint => switch (this) {
+    DownloadFeed.x => t('在主页或自动执行页选择媒体后，\n任务会出现在这里'),
+    DownloadFeed.douyin => t('在解析下载页或自动下载页勾选作品后，\n任务会出现在这里'),
+    DownloadFeed.bili => t('在 B 站解析下载页勾选分P后，\n任务会出现在这里'),
+  };
 }
 
 /// 抖音模块独有的第 4 个 Tab 名（作品粒度的下载历史，数据就是「跳过已下载」那份台账）。
 ///
-/// 只在这个页面出现，所以就近定义；X 模块的页面不会渲染它。
-const String _kHistoryTab = '已下载（抖音）';
+/// 只在这个页面出现，所以就近定义；其它模块的页面不会渲染它。
+const String _kDouyinHistoryTab = '已下载（抖音）';
 
-/// 下载管理：下载中 / 错误 / 已完成 三个 Tab，抖音模块再加一个下载历史 Tab。
+/// 下载管理：下载中 / 错误 / 已完成 三个 Tab，有台账的模块（抖音、B 站）
+/// 各再加一个自己那份的下载历史 Tab。
 ///
 /// 
 class DownloadManagementPage extends StatefulWidget {
@@ -71,15 +108,20 @@ class _DownloadManagementPageState extends State<DownloadManagementPage> {
 
     // 「创建中」区块只在 X 侧显示（那是 X 的翻页抓取概念），它不计入 Tab 角标 ——
     // 角标永远只反映点进来能看见的那些 aria2 任务。
-    // 历史 Tab 用 doneCount：那个列表只列已下完的作品，角标得跟内容一致，
-    // 不能让「还在下的」也占一个数字（点进来数不上，看着像 bug）。
-    final historyCount = feed.isDouyin
-        ? context.watch<DouyinStore>().ledger.doneCount
-        : 0;
+    // 历史 Tab 的角标取各自台账的 doneCount：那个列表只列已下完的条目，
+    // 数字得跟内容一致，不能让「还在下的」也占一个数（点进来数不上，看着像 bug）。
+    // 数据源也各一份：抖音是作品粒度的 `DouyinStore.ledger`，
+    // B 站是分 P 粒度、单独落盘的 `BiliLedger`，两者字段与键都不同构。
+    final historyCount = switch (feed) {
+      DownloadFeed.x => 0,
+      DownloadFeed.douyin => context.watch<DouyinStore>().ledger.doneCount,
+      DownloadFeed.bili => context.watch<BiliLedger>().doneCount,
+    };
 
+    final historyTab = feed.historyTabName;
     final knownTabs = <String>[
       ..._tabs.map((t) => t.$1),
-      if (feed.isDouyin) _kHistoryTab,
+      ?historyTab,
     ];
     final currentName = knownTabs.contains(store.currentTab)
         ? store.currentTab
@@ -120,7 +162,7 @@ class _DownloadManagementPageState extends State<DownloadManagementPage> {
               ),
             ),
           // ② 「创建中」的任务（对应原版 CreationTasks 组件）—— 只有 X 侧有翻页抓取
-          if (!feed.isDouyin) const _CreationTasksSection(),
+          if (feed.hasCreationTasks) const _CreationTasksSection(),
 
           // ③ Tab 头 + 工具栏
           Row(
@@ -138,12 +180,12 @@ class _DownloadManagementPageState extends State<DownloadManagementPage> {
                   selected: currentName == tab.$1,
                   onTap: () => store.setCurrentTab(tab.$1),
                 ),
-              if (feed.isDouyin)
+              if (historyTab case final tab?)
                 _TabButton(
-                  label: t(_kHistoryTab),
+                  label: t(tab),
                   count: historyCount,
-                  selected: currentName == _kHistoryTab,
-                  onTap: () => store.setCurrentTab(_kHistoryTab),
+                  selected: currentName == tab,
+                  onTap: () => store.setCurrentTab(tab),
                 ),
               const Spacer(),
               // 一键重试只在「错误」Tab 出现：别的 Tab 里没有可重试的东西，
@@ -161,8 +203,8 @@ class _DownloadManagementPageState extends State<DownloadManagementPage> {
 
           // ② 内容
           Expanded(
-            child: currentName == _kHistoryTab
-                ? const _DouyinHistoryBody()
+            child: (historyTab != null && currentName == historyTab)
+                ? _historyBody(feed)
                 : _TabBody(
                     statuses: _tabs
                         .firstWhere((t) => t.$1 == currentName,
@@ -178,6 +220,18 @@ class _DownloadManagementPageState extends State<DownloadManagementPage> {
       ),
     );
   }
+
+  /// 历史 Tab 的内容 —— 按模块各一份。
+  ///
+  /// 两份台账的粒度（作品 / 分 P）、记录字段与删除接口都不同构（抖音是
+  /// `remove(awemeId)`，B 站是 `drop(键组)`），能共用的只有上面那套 Tab 壳子。
+  /// X 那个分支走不到（它没有历史 Tab，`historyTab` 就是 null），
+  /// 留着是为了 switch 对枚举穷尽：以后加第四个**带台账**的模块时必须在这里补一行。
+  Widget _historyBody(DownloadFeed feed) => switch (feed) {
+    DownloadFeed.douyin => const _DouyinHistoryBody(),
+    DownloadFeed.bili => const BiliHistorySection(),
+    DownloadFeed.x => const SizedBox.shrink(),
+  };
 }
 
 // ── Tab 按钮 ───────────────────────────────────────────────
@@ -445,12 +499,11 @@ class _TabBody extends StatelessWidget {
     final tasks = store.tasksByStatuses(statuses, source: feed.source);
 
     if (tasks.isEmpty) {
-      return _EmptyHint(
+      return DownloadEmptyHint(
         name: tabName,
-        // 引导语按模块给：抖音侧不该看到「主页 / 自动执行页」这种 X 模块的页面名
-        hint: feed.isDouyin
-            ? '在解析下载页或自动下载页勾选作品后，\n任务会出现在这里'
-            : '在主页或自动执行页选择媒体后，\n任务会出现在这里',
+        // 引导语按模块各一份：三个模块的入口页名不同，谁都不该看到别家的页面名
+        // （以前这里是 `isDouyin ? 抖音 : X` 的二选一，第三个模块进来就会读到 X 的话）。
+        hint: feed.emptyQueueHint,
       );
     }
 
@@ -771,8 +824,8 @@ class _DouyinHistoryBody extends StatelessWidget {
       builder: (context, _) {
         final records = ledger.records;
         if (records.isEmpty) {
-          return _EmptyHint(
-            name: _kHistoryTab,
+          return DownloadEmptyHint(
+            name: _kDouyinHistoryTab,
             title: t('还没有下载记录'),
             hint: t('勾选作品加入下载队列后就会记在这里。\n'
                 '记录按「作品」计，下次批量下载会跳过它们。'),
@@ -911,41 +964,5 @@ class _DouyinHistoryBody extends StatelessWidget {
   }
 }
 
-class _EmptyHint extends StatelessWidget {
-  final String name;
-
-  /// 空态标题（默认「<名字> 里还没有任务」；带括号的 Tab 名这么套不通顺，可覆盖）
-  final String? title;
-
-  /// 空态说明 —— 必须显式给：两个模块的入口页名不同，写死默认值会串到对方模块
-  final String hint;
-
-  const _EmptyHint({required this.name, required this.hint, this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = AppTheme.colorsOf(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.cloud_download_outlined,
-              size: 56, color: c.textFaint),
-          const SizedBox(height: 14),
-          Text(
-            // Tab 名直接拼会写成「下载中 里还没有任务」——那个空格是模板带的，
-            // 读起来像漏字。用「」把 Tab 名框住。
-            title ?? '「$name」里还没有任务',
-            style: TextStyle(fontSize: 14, color: c.textMuted),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            hint,
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12.5, color: c.textFaint, height: 1.6),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// 「列表为空」的提示类视图已经搬到 `widgets/download_history_section.dart`
+// （`DownloadEmptyHint`）：B 站的历史分区要用同一份视觉规格，而私有类跨不了库。
