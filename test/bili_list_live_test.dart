@@ -129,4 +129,82 @@ void main() {
           'items=${summary.items.length}');
     },
   );
+
+  test(
+    '真接口：系列的正向形状 + 「sid 是系列」的分流（匿名可通那一半）',
+    timeout: const Timeout(Duration(minutes: 4)),
+    skip: outDir == null ? '没给 PD_BILI_LIST，列表层真接口复核不跑' : false,
+    () async {
+      // 默认这个 UP 是公开的、且确实有系列（2026-10-11 真接口跑的样本：
+      // `series_list` 有 11 条，第一条「青春旅行团」`series_id=4684427`、`total=13`）。
+      final mid = int.parse(Platform.environment['PD_BILI_MID'] ?? '546195');
+      final api = BiliApi();
+      final listApi = BiliListApi(api: api);
+
+      // 系列的 id 没有公开的目录接口能猜，只能从 UP 自己的「合集与系列列表」里拿。
+      // 这一支只是**取证用的探针**：生产代码不读它，读它的是下面那三步。
+      final data = await api.getData(
+        '/x/polymer/web-space/seasons_series_list',
+        {'mid': mid, 'page_num': 1, 'page_size': 20},
+        what: 'seasons_series_list',
+      );
+      File('$outDir/seasons_series.json')
+        .writeAsStringSync(jsonEncode(data), flush: true);
+      final seriesList =
+          (data['items_lists'] as Map?)?['series_list'] as List? ?? const [];
+      // 真响应的 id 键叫 `series_id`（`seasons_series_list` 与 `x/series/series`
+      // 都是这一套；`x/polymer/…/seasons_list` 那边才叫 `season_id`）。
+      final seriesIds = <int>[
+        for (final e in seriesList.whereType<Map>())
+          ?(_asInt((e['meta'] as Map?)?['series_id']) ??
+              _asInt((e['meta'] as Map?)?['id'])),
+      ];
+      expect(seriesIds, isNotEmpty,
+          reason: '这个 UP 没有系列，换一个 PD_BILI_MID（原始响应已落在 report 旁边）');
+      final seriesId = seriesIds.first;
+
+      // 1) 探针的正向形状：夹具里只有否定的 147002，这一步补上肯定的那一半
+      final meta = await listApi.probeSeries(seriesId);
+      expect(meta, isNotNull, reason: '真系列 id 探针却没给 meta：字段路径写错了');
+      expect(meta!.name, isNotEmpty);
+
+      // 2) 分流：链接只给 `sid`（既可能是合集也可能是系列）时必须判成系列，
+      //    而且**不许再去打合集接口** —— 这是互斥那条纪律的现场版。
+      final link = 'https://www.bilibili.com/list/$mid?sid=$seriesId';
+      final ref = parseBiliRef(link);
+      expect(ref?.list?.kind, BiliListKind.unknown);
+      final judged = await listApi.resolveTarget(ref!.list!);
+      expect(judged.kind, BiliListKind.series,
+          reason: '$link 判成了 ${judged.kind.name}，分流在真接口上不成立');
+      expect(judged.seriesId, seriesId);
+
+      // 3) 翻页与字段：series/archives 的项没有作者名，名要从 card 补
+      final summary = await listApi.allArcsSummary(judged);
+      final report = <String, dynamic>{
+        'mid': mid,
+        'seriesId': seriesId,
+        'metaName': meta.name,
+        'listTitle': summary.listTitle,
+        'collected': summary.items.length,
+        'skippedUnsupported': summary.skipped,
+        'first': summary.items.isEmpty
+            ? null
+            : {
+                'bvid': summary.items.first.bvid,
+                'name': summary.items.first.upperName,
+                'state': summary.items.first.state,
+              },
+      };
+      File('$outDir/series_report.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(const JsonEncoder.withIndent('  ').convert(report),
+            flush: true);
+      expect(summary.items, isNotEmpty);
+      expect(summary.skipped, 0, reason: '系列里出现没 BV 号的行说明字段路径写错了');
+      expect(summary.listTitle, isNotEmpty, reason: '系列名要从 meta 落到列表标题');
+      stdout.writeln('LISTLIVE series ok ${meta.name} items=${summary.items.length}');
+    },
+  );
 }
+
+int? _asInt(Object? v) => v is int ? v : int.tryParse('${v ?? ''}');
