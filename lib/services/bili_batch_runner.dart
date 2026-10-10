@@ -28,6 +28,9 @@ class BiliRunTally {
   int skippedDisk = 0;
   int failed = 0;
 
+  /// 展开后一条分 P 都没有的稿件（bvid）。文案由界面接（本层不新增用户可见中文串）。
+  final List<String> noParts = [];
+
   /// 失败原因，**去重后只留前面几条**：几十条分 P 撞同一个风控时，
   /// 提示条里不该出现三十遍同一句话（全量都在日志里）。
   final List<String> notes = [];
@@ -49,6 +52,44 @@ class BiliRunTally {
       if (!notes.contains(n)) notes.add(n);
     }
   }
+}
+
+/// 一个目标摊出来的计划落进队列：**逐条稿件展开 → 投 → 累加计数**。
+///
+/// 与 [biliDownloadParts] 分两层的理由和抽下载循环一样：这一段全是「出错了怎么办」的
+/// 决定（单条抛错不许掀整批、空分 P 要留下一句人话、停止按钮什么时候生效），
+/// 长在页面里就只能手点才能验。
+/// 取数与投递都从参数进来，所以两条口都能在测试里造假。
+Future<BiliRunTally> biliRunWorks({
+  required BiliRunTally tally,
+  required Map<String, String> works,
+  required Future<List<Media>> Function(String bvid) expandWork,
+  required Future<BiliRunTally> Function(List<Media> parts) download,
+  bool allParts = false,
+  bool Function()? keepGoing,
+  void Function()? onProgress,
+}) async {
+  for (final entry in works.entries) {
+    if (keepGoing != null && !keepGoing()) break;
+    final bvid = entry.key;
+    try {
+      final all = await expandWork(bvid);
+      if (all.isEmpty) {
+        tally.failed++;
+        tally.noParts.add(bvid);
+        continue;
+      }
+      // 默认只取第 1P：一个 20P 的合集全取就是几百条队列（见 bili_batch_store 的开关注释）。
+      tally.absorb(await download(allParts ? all : [all.first]));
+    } catch (e) {
+      // 一条稿件失败只算这一条：整批几百条时不该因为一次 412 就全停。
+      tally.failed++;
+      tally.addNote('$e');
+      AppLogger.log('BILI', '批量里这条稿件没跑通（$bvid）：$e');
+    }
+    onProgress?.call();
+  }
+  return tally;
 }
 
 /// `view` 摊成分 P 级 [Media]（解析页与批量页共用，一处口径）。

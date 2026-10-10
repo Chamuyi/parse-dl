@@ -279,34 +279,28 @@ class _BiliBatchPageState extends State<BiliBatchPage> {
     }
 
     final tally = BiliRunTally();
+    // 先挂上再跑：跑一半时那一行与顶部的汇总数字都要在动。
     target.run = tally;
     store.mark(target, BiliBatchStatus.downloading);
-    for (final work in plan.works.entries) {
-      if (!store.running) break;
-      try {
-        final v = await api.view(bvid: work.key);
-        final all = biliPartsOfView(v);
-        if (all.isEmpty) {
-          tally.failed++;
-          tally.addNote(tf('{bvid} 没有可下载的分 P', {'bvid': work.key}));
-          continue;
-        }
-        // 「多 P 只取第 1P」是默认，理由见 `bili_batch_store.dart` 里那句注释。
-        final parts = store.allParts ? all : [all.first];
-        tally.absorb(await biliDownloadParts(
-          api: api,
-          cfg: cfg,
-          parts: parts,
-          ledger: ledger,
-          coordinator: coordinator,
-          cancel: () => !store.running,
-        ));
-      } catch (e) {
-        tally.failed++;
-        tally.addNote('$e');
-        AppLogger.log('BILI', '批量里这条稿件没跑通（${work.key}）：$e');
-      }
-      store.refresh();
+    await biliRunWorks(
+      tally: tally,
+      works: plan.works,
+      expandWork: (bvid) async => biliPartsOfView(await api.view(bvid: bvid)),
+      download: (parts) => biliDownloadParts(
+        api: api,
+        cfg: cfg,
+        parts: parts,
+        ledger: ledger,
+        coordinator: coordinator,
+        cancel: () => !store.running,
+      ),
+      allParts: store.allParts,
+      keepGoing: () => store.running,
+      onProgress: store.refresh,
+    );
+    // 「没有可下载的分 P」这句话由界面来拼：服务层只交出 bvid 清单。
+    for (final bvid in tally.noParts) {
+      tally.addNote(tf('{bvid} 没有可下载的分 P', {'bvid': bvid}));
     }
     store.mark(target, BiliBatchStatus.done);
   }
