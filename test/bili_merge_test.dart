@@ -290,7 +290,7 @@ void main() {
       ]);
       expect(args, containsAllInOrder(['-i', r'D:\x.字幕.中文.ass']));
       expect(args, containsAllInOrder(['-map', '0:v:0', '-map', '1:a:0', '-map', '2:0']));
-      expect(args, containsAllInOrder(['-metadata:s:s0', 'language=chi']));
+      expect(args, containsAllInOrder(['-metadata:s:s:0', 'language=chi']));
       expect(args, contains('-c:s'));
     });
 
@@ -308,8 +308,10 @@ void main() {
         ['v', 'a', 's0.ass', 's1.ass', 'chap.txt'],
       );
       expect(args, containsAllInOrder(['-map', '2:0', '-map', '3:0']));
-      expect(args, containsAllInOrder(['-metadata:s:s0', 'title=字幕']));
-      expect(args, containsAllInOrder(['-metadata:s:s1', 'title=字幕']));
+      expect(args, containsAllInOrder(['-metadata:s:s:0', 'title=字幕']));
+      expect(args, containsAllInOrder(['-metadata:s:s:1', 'title=字幕']));
+      // 少一个冒号的写法 ffmpeg 会整条拒掉（真机实测），别让它回潮
+      expect(args.where((a) => a.startsWith('-metadata:s:s') && !a.contains('s:s:')), isEmpty);
       // 实测结论（Q6d）：章节是被 muxer 从输入本身吸进去的，
       // `-map_metadata` 对章节既不必需也不充分，还会换掉全局 metadata 的来源。
       expect(args, isNot(contains('-map_metadata')));

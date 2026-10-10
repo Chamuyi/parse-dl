@@ -315,11 +315,15 @@ class BiliMerger {
       args.addAll(['-c:s', 'copy']);
       for (var k = 0; k < subtitleTracks.length; k++) {
         final t = subtitleTracks[k];
-        args.addAll(['-metadata:s:s$k', 'title=${t.title}']);
+        // `s:` 后面是**流限定符**，写法是「类型:序号」，所以这里要有两个冒号：
+        // `-metadata:s:s0` 被 ffmpeg 判成 `Trailing garbage at the end of a
+        // stream specifier: s0`，整条合并命令直接退出（2026-10-11 真机撞实）。
+        final spec = '-metadata:s:s:$k';
+        args.addAll([spec, 'title=${t.title}']);
         // 空语言码比不写更糟（播放器菜单里会出现一个非法的 Language 标签），
         // 所以空串就整条不写。
         if (t.lang.isNotEmpty) {
-          args.addAll(['-metadata:s:s$k', 'language=${t.lang}']);
+          args.addAll([spec, 'language=${t.lang}']);
         }
       }
     }
