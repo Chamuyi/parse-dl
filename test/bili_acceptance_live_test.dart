@@ -191,9 +191,9 @@ void main() {
           final tag = 'r${round}_p${e['pick']}';
           final bool usePre = (preplan ?? '').isNotEmpty;
           Map<String, dynamic> preData(String kind) => (jsonDecode(
-                File('$preplan/$kind$tag.json').readAsStringSync(),
+                File('$preplan/${kind}_$tag.json').readAsStringSync(),
               ) as Map<String, dynamic>)['data'] as Map<String, dynamic>;
-          final view = usePre
+          final view = File('$preplan/view_$tag.json').existsSync()
               ? BiliVideoView.fromJson(preData('view'))
               : await api.view(bvid: bvid);
           final pg = view.pages.firstWhere(
