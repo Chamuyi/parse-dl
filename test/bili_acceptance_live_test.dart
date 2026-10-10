@@ -7,6 +7,7 @@ import 'package:parse_dl/services/aria2.dart';
 import 'package:parse_dl/services/aria2_coordinator.dart';
 import 'package:parse_dl/services/app_logger.dart';
 import 'package:parse_dl/services/app_paths.dart';
+import 'package:parse_dl/services/bili_additional_runner.dart';
 import 'package:parse_dl/services/bili_api.dart';
 import 'package:parse_dl/services/bili_download_plan.dart';
 import 'package:parse_dl/services/bili_ledger.dart';
@@ -145,6 +146,37 @@ void main() {
       await coordinator.bootstrap(store: store, settings: settings);
       expect(coordinator.booted, isTrue, reason: 'aria2 没起来（随包 aria2c.exe 没释放成功？）');
 
+      // 附加文件那一族（弹幕 / 字幕 / 封面 / 章节 / 元数据）。生产在 `main.dart`
+      // 装配，这里给**同一份接线**：不接这一层，真机那几格就只验了取流与合并，
+      // 「勾了的都在、没勾的一个不多」这条判据根本没被跑过。
+      // 口仍然只有 `BiliApi` 这一个（匿名可通的那几支）；要登录态才有的
+      // AI 字幕按 Q4 的实测结论就是拿不到，那一条会如实落在 missing 上。
+      final extra = Platform.environment['PD_BILI_EXTRA'] == '1';
+      if (extra) {
+        coordinator.biliAdditional = ({
+          required cfg,
+          required saveDir,
+          required outBase,
+          required video,
+        }) =>
+            biliProduceAdditional(
+              cfg: cfg,
+              saveDir: saveDir,
+              outBase: outBase,
+              video: video,
+              deps: BiliAdditionalDeps(
+                signedData: (path, params) =>
+                    api.getSignedData(path, params, what: path),
+                plainData: (path, params) =>
+                    api.getRawData(path, params, what: path),
+                jsonAtUrl: api.jsonAtUrl,
+                bytesAtUrl: api.bytesAtUrl,
+                danmakuSegment: (cid, segmentIndex) =>
+                    api.danmakuSegment(cid: cid, segmentIndex: segmentIndex),
+              ),
+            );
+      }
+
       // 收口回调：先接生产的台账绑定，再套一层自己的记录 —— 台账时序
       // （「合并成功之后才转 done」）必须原样是产品那条，不能被测试替身顶掉。
       final settled = <Map<String, dynamic>>[];
@@ -183,6 +215,21 @@ void main() {
           speedLimitKbps:
               int.tryParse(Platform.environment['PD_BILI_SPEED'] ?? '') ?? 0,
         );
+        if (extra) {
+          // 弹幕 ass + 内封要的是 MKV（MP4 装不下字幕轨，实测整份写不出来），
+          // 所以这一档把容器一起换掉：验的就是「勾了内封 → 成品里真有一条轨」。
+          cfg
+            ..container = BiliContainer.mkv
+            ..embedSubtitleTrack = true
+            ..saveDanmaku = true
+            ..danmakuFormat = BiliDanmakuFormat.ass
+            ..saveSubtitle = true
+            ..subtitleFormat = BiliSubtitleFormat.srt
+            ..saveCover = true
+            ..saveChapter = true
+            ..saveMetadata = true
+            ..metadataFormat = BiliMetadataFormat.nfo;
+        }
         final row = <String, dynamic>{
           'round': round,
           'pick': e['pick'],
@@ -193,6 +240,17 @@ void main() {
           'merge': cfg.mergeAfterDownload,
           'nameTemplate': cfg.fileNameTemplate,
           'dirTemplate': cfg.dirTemplate,
+          'container': cfg.container.id,
+          'extra': extra
+              ? [
+                  if (cfg.saveDanmaku) 'danmaku:${cfg.danmakuFormat.id}',
+                  if (cfg.saveSubtitle) 'subtitle:${cfg.subtitleFormat.id}',
+                  if (cfg.saveCover) 'cover:${cfg.coverFormat.id}',
+                  if (cfg.saveChapter) 'chapter',
+                  if (cfg.saveMetadata) 'metadata:${cfg.metadataFormat.id}',
+                  if (cfg.embedSubtitleTrack) 'embed',
+                ].join('+')
+              : '',
         };
         try {
           await coordinator.applyConcurrency(cfg.concurrency);

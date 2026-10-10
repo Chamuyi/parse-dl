@@ -54,7 +54,7 @@ void main() {
     List<int> Function(String url)? bytes,
     List<int> Function(int cid, int index)? seg,
     List<String> called = const [],
-    Map<String, dynamic>? tags,
+    Object? tags = const <dynamic>[],
   }) => BiliAdditionalDeps(
     signedData: (path, params) async {
       if (path == '/x/player/wbi/v2') return player ?? const {};
@@ -62,7 +62,8 @@ void main() {
       throw StateError('不该打这一支：$path');
     },
     plainData: (path, params) async {
-      if (path == '/x/web-interface/view/detail/tag') return tags ?? const {'data': []};
+      // 标签那一支的 data 是**数组**，所以这里给的也是数组本体
+      if (path == '/x/web-interface/view/detail/tag') return tags ?? const <dynamic>[];
       throw StateError('不该打这一支：$path');
     },
     jsonAtUrl: (url) async {
@@ -355,7 +356,7 @@ void main() {
           signedData: (path, params) async => view,
           plainData: (path, params) async {
             tagCalls++;
-            return const {'data': []};
+            return const <dynamic>[];
           },
           jsonAtUrl: (url) async => const {},
           bytesAtUrl: (url) async => const <int>[],
@@ -376,12 +377,10 @@ void main() {
         video: video(cid: '777'),
         deps: depsOf(
           view: view,
-          tags: {
-            'data': [
-              {'tag_name': '美食'},
-              {'tag_name': 'vlog & 日常'},
-            ],
-          },
+          tags: [
+            {'tag_name': '美食'},
+            {'tag_name': 'vlog & 日常'},
+          ],
         ),
       );
       expect(out.written, ['冬天.元数据.nfo']);
@@ -391,6 +390,22 @@ void main() {
       expect(nfo, contains('<studio>海边的猫</studio>'));
       expect(nfo, contains('<premiered>2026-'));
     });
+
+    test('标签接口不给 data（稿件真没标签）→ nfo 照写，也不算缺项', () async {
+      final out = await biliProduceAdditional(
+        cfg: cfgOf()
+          ..saveMetadata = true
+          ..metadataFormat = BiliMetadataFormat.nfo,
+        saveDir: tmp.path,
+        outBase: '冬天',
+        video: video(cid: '777'),
+        deps: depsOf(view: view, tags: null),
+      );
+      expect(out.written, ['冬天.元数据.nfo']);
+      expect(out.missing, isEmpty);
+      expect(read('冬天.元数据.nfo'), isNot(contains('<tag>')));
+    });
+
   });
 
   // ── 编排与汇总 ──────────────────────────────────────────────
@@ -440,6 +455,51 @@ void main() {
       );
       expect(out.missing, contains(kBiliAdditionalNoCid));
       expect(out.written, isEmpty);
+    });
+
+    // 这一组是 2026-10-11 真机匿名档撞出来的：标签那一次请求把**整个**附加文件
+    // 步骤掀掉了，封面明明已经落到盘上、弹幕明明还能取，一起没登记。
+    test('一族失败只让它自己缺席：元数据挂了，封面照落', () async {
+      final out = await biliProduceAdditional(
+        cfg: cfgOf()
+          ..saveMetadata = true
+          ..saveCover = true,
+        saveDir: tmp.path,
+        outBase: '冬天',
+        video: video(cid: '777'),
+        deps: BiliAdditionalDeps(
+          signedData: (path, params) async =>
+              throw StateError('/x/web-interface/wbi/view 挂了'),
+          plainData: (path, params) async => const <dynamic>[],
+          jsonAtUrl: (url) async => const {},
+          bytesAtUrl: (url) async => pngMagic,
+          danmakuSegment: (cid, i) async => const <int>[],
+        ),
+      );
+      expect(out.written, ['冬天.封面.jpg'], reason: '封面不该被元数据拖下去');
+      expect(out.missing.any((m) => m.startsWith('元数据')), isTrue);
+      expect(out.missing.any((m) => m.startsWith('封面')), isFalse);
+    });
+
+    test('弹幕取段挂了，也只让它自己缺席', () async {
+      final out = await biliProduceAdditional(
+        cfg: cfgOf()
+          ..saveDanmaku = true
+          ..saveCover = true,
+        saveDir: tmp.path,
+        outBase: '冬天',
+        video: video(cid: '777'),
+        deps: BiliAdditionalDeps(
+          signedData: (path, params) async => const {},
+          plainData: (path, params) async => const <dynamic>[],
+          jsonAtUrl: (url) async => const {},
+          bytesAtUrl: (url) async => pngMagic,
+          danmakuSegment: (cid, i) async =>
+              throw StateError('seg.so 412'),
+        ),
+      );
+      expect(out.written, ['冬天.封面.jpg']);
+      expect(out.missing.any((m) => m.startsWith('弹幕')), isTrue);
     });
   });
 }

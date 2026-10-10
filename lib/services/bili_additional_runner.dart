@@ -16,6 +16,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'app_logger.dart';
 import '../models/bili_config.dart';
 import '../models/bili_meta.dart';
 import '../models/media.dart';
@@ -43,11 +44,8 @@ class BiliAdditionalDeps {
   )
   signedData;
 
-  /// 不签名的 `GET path`（标签接口这一支匿名即可，实测 code=0）。
-  final Future<Map<String, dynamic>> Function(
-    String path,
-    Map<String, dynamic> params,
-  )
+  /// 不签名的 `GET path`，回 `data` **本体原样**（标签那一支的 data 是数组）。
+  final Future<Object?> Function(String path, Map<String, dynamic> params)
   plainData;
 
   /// 直接 GET 一个完整 URL 的 JSON —— 字幕正文 `subtitle_url` 是绝对地址。
@@ -104,54 +102,64 @@ Future<BiliAdditionalOutcome> biliProduceAdditional({
   }
 
   if (cid != null && cfg.saveSubtitle) {
-    written.addAll(
-      await _subtitles(cfg, saveDir, outBase, player, deps, tracks, missing),
-    );
+    await _family('字幕', missing, () async {
+      written.addAll(
+        await _subtitles(cfg, saveDir, outBase, player, deps, tracks, missing),
+      );
+    });
   }
   if (cid != null && cfg.saveChapter) {
-    chapterMetadataPath = await _chapters(
-      saveDir,
-      outBase,
-      player,
-      durationSeconds,
-      missing,
-    );
+    await _family('章节', missing, () async {
+      chapterMetadataPath = await _chapters(
+        saveDir,
+        outBase,
+        player,
+        durationSeconds,
+        missing,
+      );
+    });
   }
   if (cfg.saveCover) {
-    final name = await biliWriteCover(
-      cfg: cfg,
-      saveDir: saveDir,
-      outBase: outBase,
-      pic: video.previewUrl ?? '',
-      fetch: deps.bytesAtUrl,
-    );
-    if (name == null) {
-      missing.add('封面：取不到原图');
-    } else {
-      written.add(name);
-    }
+    await _family('封面', missing, () async {
+      final name = await biliWriteCover(
+        cfg: cfg,
+        saveDir: saveDir,
+        outBase: outBase,
+        pic: video.previewUrl ?? '',
+        fetch: deps.bytesAtUrl,
+      );
+      if (name == null) {
+        missing.add('封面：取不到原图');
+      } else {
+        written.add(name);
+      }
+    });
   }
   if (cfg.saveMetadata) {
-    written.addAll(
-      await _metadata(bvid, meta, cfg, saveDir, outBase, deps, missing),
-    );
+    await _family('元数据', missing, () async {
+      written.addAll(
+        await _metadata(bvid, meta, cfg, saveDir, outBase, deps, missing),
+      );
+    });
   }
   if (cid != null && cfg.saveDanmaku) {
     if (durationSeconds <= 0) {
       missing.add(kBiliAdditionalNoDuration);
     } else {
-      final run = await buildBiliDanmakuSideFile(
-        saveDir: saveDir,
-        base: outBase,
-        cid: cid,
-        durationSeconds: durationSeconds,
-        cfg: cfg,
-        fetchSegment: deps.danmakuSegment,
-        onProgress: onDanmakuProgress,
-      );
-      tracks.addAll(run.outcome.tracks);
-      written.addAll(run.outcome.written);
-      missing.addAll(run.outcome.missing);
+      await _family('弹幕', missing, () async {
+        final run = await buildBiliDanmakuSideFile(
+          saveDir: saveDir,
+          base: outBase,
+          cid: cid,
+          durationSeconds: durationSeconds,
+          cfg: cfg,
+          fetchSegment: deps.danmakuSegment,
+          onProgress: onDanmakuProgress,
+        );
+        tracks.addAll(run.outcome.tracks);
+        written.addAll(run.outcome.written);
+        missing.addAll(run.outcome.missing);
+      });
     }
   }
 
@@ -163,6 +171,25 @@ Future<BiliAdditionalOutcome> biliProduceAdditional({
     missing: missing,
     chapterMetadataPath: chapterMetadataPath,
   );
+}
+
+/// 一族一个隔离圈：**单族失败只让它自己缺席**。
+///
+/// 2026-10-11 真机匿名档撞出来的：标签接口对没标签的稿件不给 `data`，
+/// 那一句异常当时直接把**整个附加文件步骤**掀掉 —— 封面已经落到盘上、弹幕明明
+/// 还能取，结果一起没登记，界面上那一行就成了「什么都没勾到」。
+/// 附加文件之间没有依赖，没有理由共沉。
+Future<void> _family(
+  String label,
+  List<String> missing,
+  Future<void> Function() run,
+) async {
+  try {
+    await run();
+  } catch (e) {
+    AppLogger.log('BILI', '附加文件「$label」这一族没跑成：$e');
+    missing.add('$label：这一族没取成');
+  }
 }
 
 Future<List<String>> _subtitles(
@@ -302,12 +329,22 @@ Future<List<String>> _metadata(
     partTitle: meta?.partTitle ?? '',
     partIndex: meta?.partTotal ?? 1,
     fetchTags: cfg.metadataFormat == BiliMetadataFormat.nfo
-        ? (id) async => biliTagsFromData(
-            (await deps.plainData(
+        ? (id) async {
+          try {
+            // `plainData` 回的**就是 `data` 本体**（一个 `tag_name` 的列表）。
+            // 这条稿件没标签时接口直接不给 `data`，`BiliApi` 那边报的是「响应里没有
+            // data」—— 那是「没标签」，不是「元数据没拿到」，所以这里吞成空列表，
+            // 由 nfo 少写几行 `<tag>` 来表达。
+            final data = await deps.plainData(
               '/x/web-interface/view/detail/tag',
               {'bvid': id},
-            ))['data'],
-          )
+            );
+            return biliTagsFromData(data);
+          } catch (e) {
+            AppLogger.log('BILI', '标签接口没给东西，nfo 按无标签写：$e');
+            return const <String>[];
+          }
+        }
         : null,
   );
 }

@@ -215,7 +215,7 @@ Future<void> main() async {
       signedData: (path, params) =>
           biliApiForFiles.getSignedData(path, params, what: path),
       plainData: (path, params) =>
-          biliApiForFiles.getData(path, params, what: path),
+          biliApiForFiles.getRawData(path, params, what: path),
       jsonAtUrl: biliApiForFiles.jsonAtUrl,
       bytesAtUrl: biliApiForFiles.bytesAtUrl,
       danmakuSegment: (cid, segmentIndex) => biliApiForFiles.danmakuSegment(

@@ -899,6 +899,28 @@ class BiliApi {
   // 合成一个口就得让调用方去猜该不该签，而猜错的现场是 HTTP 412（实测
   // `x/space/wbi/arc/search` 不签名直接被拒），从报错里看不出是签名的锅。
 
+  /// 不签名取 `data`，**不要求它是对象**。
+  ///
+  /// `x/web-interface/view/detail/tag` 的 `data` 就是一个数组，而 [_unwrap] 只认
+  /// 对象 —— 拿它取标签会把「有标签」报成「响应里没有 data」（2026-10-11 真机撞上）。
+  /// `data` 缺失（稿件真没标签）回 null，那是「没有」而不是失败；
+  /// 业务 code 非 0 照旧抛。
+  Future<Object?> getRawData(
+    String path,
+    Map<String, dynamic> params, {
+    String what = '接口',
+  }) async {
+    final body = await _getJson(() => _uri(kBiliApiHost, path, params));
+    final code = _int(body['code']);
+    if (code != 0) {
+      throw BiliApiException(
+        '$what失败：${biliCodeHint(code, body['message'])}',
+        code: code,
+      );
+    }
+    return body['data'];
+  }
+
   /// 不签名取 `data`。合集 / 系列 / `card` / 收藏夹这几支实测匿名即可。
   Future<Map<String, dynamic>> getData(
     String path,
