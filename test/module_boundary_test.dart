@@ -60,8 +60,27 @@ const _douyinOnlyFiles = [
   'lib/models/douyin_auto_task.dart',
 ];
 
-/// B 站模块独占的文件（这一期只有设置分区，其余由集成方补进来）
-const _biliOnlyFiles = ['lib/widgets/bili_section.dart'];
+/// B 站模块独占的文件。
+///
+/// 判据取的是**字符串字面量**（注释与标识符不算），所以服务层也在扫描范围内：
+/// B 站的接口层若在提示文案里冒出「抖音 / 推文」，用户在 B 站页面上就会看到
+/// 另一个模块的说法。`bili_page.dart` 落地后一并加进来。
+const _biliOnlyFiles = [
+  'lib/widgets/bili_section.dart',
+  'lib/widgets/download_history_section.dart',
+  'lib/services/bili_api.dart',
+  'lib/services/bili_wbi.dart',
+  'lib/services/bili_web.dart',
+  'lib/services/bili_link.dart',
+  'lib/services/bili_feed.dart',
+  'lib/services/bili_store.dart',
+  'lib/services/bili_ledger.dart',
+  'lib/services/bili_merger.dart',
+  'lib/services/bili_download_plan.dart',
+  'lib/services/bili_ffmpeg.dart',
+  'lib/models/bili_config.dart',
+  'lib/models/bili_meta.dart',
+];
 
 /// X 侧界面里不能出现的说法
 const _xForbidden = ['抖音', '作品', 'aweme', 'douyin'];
@@ -75,8 +94,21 @@ const _douyinForbidden = ['推文', '帖子', 'tweet', 'twitter'];
 /// 串门的判据是**对方的平台名与对方的专有术语**，不是共用的中文普通名词。
 const _biliForbidden = ['推文', '帖子', 'tweet', 'twitter', '抖音', 'aweme', 'douyin'];
 
-/// 取源码里的**字符串字面量**内容（注释、标识符都不算）。
+/// `import` / `export` / `part` 指令行 —— 引号里是文件路径，不是界面文案。
+final RegExp _directiveLine =
+    RegExp('^\\s*(import|export|part)\\s+[\'"]');
+
+/// 取源码里的**字符串字面量**内容（注释、标识符、导入路径都不算）。
 List<String> stringLiterals(String src) {
+  // 先把 `import` / `export` / `part` 整行抹掉：那里的引号是**文件路径**，
+  // 不是界面文案。不抹的话，`bili_config.dart` 里那句
+  // `import 'douyin_config.dart' show DouyinConfig;` 会被判成「B 站文件串了抖音」——
+  // 跨模块复用类型是这个仓库刻意的设计（三套配置同构），串门管的是用户看得见的字。
+  src = src
+      .split('\n')
+      .map((line) => _directiveLine.hasMatch(line) ? '' : line)
+      .join('\n');
+
   final out = <String>[];
   final sb = StringBuffer();
   var i = 0;
@@ -269,7 +301,25 @@ void main() {
       expect(_scan(_biliOnlyFiles, _biliForbidden), isEmpty);
     });
 
-    test('字面量提取器跳过注释与插值、认得转义', () {
+    test('提取器跳过 import 路径，但不放过同文件里的界面串', () {
+      final src = r"""
+import 'douyin_config.dart';
+// 注释里写 抖音 也不算
+  const label = '抖音号';
+  const x = 'B 站'.length;
+""";
+      final got = stringLiterals(src);
+      expect(got, isNot(contains('douyin_config.dart')));
+      expect(got, contains('抖音号'));
+      expect(got, contains('B 站'));
+      // 正控制：只改行首关键字，同一个引号串就必须被当成普通字面量收进来 ——
+      // 证明起作用的是「指令行」这条规则，不是整个文件被跳过
+      expect(
+        stringLiterals(src.replaceFirst('import ', 'weird ')),
+        contains('douyin_config.dart'),
+      );
+    });
+  test('字面量提取器跳过注释与插值、认得转义', () {
       const src = "/// 注释里的 '假文案'\n"
           "const a = '真文案'; // 尾注 '也是假的'\n"
           "const b = \"跨行\\n还有 TWITTER 字样\";\n"
