@@ -9,6 +9,22 @@ import 'package:parse_dl/services/bili_additional_runner.dart';
 
 /// 编排层：它唯一的价值是「汇总」，所以测的全是汇总规则，
 /// 渲染细节归 `bili_danmaku_test.dart`，解码细节归 `bili_dm_proto_test.dart`。
+/// 这一族的编排只吃 [BiliAdditionalDeps]；本文件只开弹幕一族，
+/// 所以其余四个口一律给「一发就炸」的桩 —— 它们被叫到了就是回归。
+BiliAdditionalDeps danmakuDeps(
+  Future<List<int>> Function(int cid, int segmentIndex) segment,
+) => BiliAdditionalDeps(
+  signedData: (path, params) async {
+    throw StateError('弹幕这一族不该发签名请求：$path');
+  },
+  plainData: (path, params) async {
+    throw StateError('弹幕这一族不该发明文请求：$path');
+  },
+  jsonAtUrl: (url) async => throw StateError('不该取 JSON：$url'),
+  bytesAtUrl: (url) async => throw StateError('不该取字节：$url'),
+  danmakuSegment: segment,
+);
+
 void main() {
   late Directory tmp;
   setUp(() => tmp = Directory.systemTemp.createTempSync('bili_addl_runner'));
@@ -68,10 +84,10 @@ void main() {
         saveDir: tmp.path,
         outBase: '冬天',
         video: part(cid: '777'),
-        fetchDanmakuSegment: (cid, segmentIndex) async {
+        deps: danmakuDeps((cid, segmentIndex) async {
           calls++;
           return realBytes;
-        },
+        }),
       );
       expect(calls, 0);
       expect(out.tracks, isEmpty);
@@ -89,10 +105,10 @@ void main() {
         saveDir: tmp.path,
         outBase: '冬天',
         video: part(cid: null),
-        fetchDanmakuSegment: (cid, segmentIndex) async {
+        deps: danmakuDeps((cid, segmentIndex) async {
           calls++;
           return realBytes;
-        },
+        }),
       );
       expect(calls, 0);
       expect(out.missing, contains(kBiliAdditionalNoCid));
@@ -106,10 +122,10 @@ void main() {
         saveDir: tmp.path,
         outBase: '冬天',
         video: part(cid: '777', durationMs: 0),
-        fetchDanmakuSegment: (cid, segmentIndex) async {
+        deps: danmakuDeps((cid, segmentIndex) async {
           calls++;
           return realBytes;
-        },
+        }),
       );
       expect(calls, 0);
       expect(out.missing, contains(kBiliAdditionalNoDuration));
@@ -123,7 +139,7 @@ void main() {
         saveDir: tmp.path,
         outBase: '冬天',
         video: part(cid: '777'),
-        fetchDanmakuSegment: (cid, segmentIndex) async => realBytes,
+        deps: danmakuDeps((cid, segmentIndex) async => realBytes),
       );
       expect(out.written, hasLength(1));
       expect(
@@ -142,7 +158,7 @@ void main() {
         saveDir: tmp.path,
         outBase: '冬天',
         video: part(cid: '777'),
-        fetchDanmakuSegment: (cid, segmentIndex) async => realBytes,
+        deps: danmakuDeps((cid, segmentIndex) async => realBytes),
       );
       expect(out.tracks, isEmpty);
       expect(out.missing.any((m) => m.contains('MKV')), isTrue,
@@ -155,7 +171,7 @@ void main() {
         saveDir: tmp.path,
         outBase: '冬天',
         video: part(cid: '777'),
-        fetchDanmakuSegment: (cid, segmentIndex) async => realBytes,
+        deps: danmakuDeps((cid, segmentIndex) async => realBytes),
       );
       expect(out.written.single, endsWith('.xml'));
       expect(out.tracks, isEmpty);
@@ -168,10 +184,10 @@ void main() {
         saveDir: tmp.path,
         outBase: '冬天',
         video: part(cid: '777', durationMs: 7 * 60 * 1000),
-        fetchDanmakuSegment: (cid, segmentIndex) async {
+        deps: danmakuDeps((cid, segmentIndex) async {
           seen.add(segmentIndex);
           return realBytes;
-        },
+        }),
       );
       expect(seen, [1, 2], reason: '7 分钟 = 2 段；段号从 1 起（实测口径）');
     });
@@ -187,7 +203,7 @@ void main() {
         saveDir: tmp.path,
         outBase: '冬天',
         video: part(cid: '777'),
-        fetchDanmakuSegment: (cid, segmentIndex) async => realBytes,
+        deps: danmakuDeps((cid, segmentIndex) async => realBytes),
       );
       expect(out.tracks.single.fromDanmaku, isTrue);
       expect(out.tracks.single.iso639, isEmpty, reason: '弹幕没有语言标签，别乱填 chi');

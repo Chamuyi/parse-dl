@@ -906,6 +906,58 @@ class BiliApi {
     required String what,
   }) => _data(path, params, what: what);
 
+  /// 签名取**字节**。弹幕分段 `seg.so` 回的是 protobuf，不是 JSON。
+  Future<List<int>> getSignedBytes(
+    String path,
+    Map<String, dynamic> params, {
+    String what = '字节接口',
+  }) async {
+    final keys = await _cachedWbiKeys();
+    return _getBytes(biliSignedUri(path, params, keys.mixinKey), what);
+  }
+
+  /// 弹幕一段的原始字节。`segmentIndex` 从 **1** 起（实测口径）。
+  Future<List<int>> danmakuSegment({
+    required int cid,
+    required int segmentIndex,
+  }) => getSignedBytes(
+    '/x/v2/dm/wbi/web/seg.so',
+    // 参数名按实测与参照实现：是 `segment_index`（下划线），
+    // 写成 camelCase 会被接口当成「没给段号」而只回第 1 段。
+    {'type': 1, 'oid': cid, 'segment_index': segmentIndex},
+    what: '弹幕分段',
+  );
+
+  /// 不签名取一个**绝对 URL** 的 JSON（字幕正文 `subtitle_url` 是完整地址）。
+  Future<Map<String, dynamic>> jsonAtUrl(String url, {String what = '字幕正文'}) async {
+    final body = await _getJson(() => Uri.parse(url));
+    return _unwrap(body, what);
+  }
+
+  /// 取一个绝对 URL 的字节（封面图床）。
+  Future<List<int>> bytesAtUrl(String url, {String what = '封面'}) =>
+      _getBytes(Uri.parse(url), what);
+
+  Future<List<int>> _getBytes(Uri uri, String what) async {
+    final client = _httpClient();
+    try {
+      final res = await client.get(uri, headers: _apiHeaders()).timeout(kBiliTimeout);
+      AppLogger.log('BILI', 'GET ${_logUri(uri)} -> ${res.statusCode}');
+      if (res.statusCode >= 400) {
+        throw BiliApiException(
+          '$what失败：HTTP ${res.statusCode}',
+          statusCode: res.statusCode,
+        );
+      }
+      if (res.bodyBytes.isEmpty) {
+        throw BiliApiException('$what失败：响应是空的');
+      }
+      return res.bodyBytes;
+    } finally {
+      client.close();
+    }
+  }
+
   /// WBI 签名取 `data`。`path` 形如 `/x/space/wbi/arc/search`。
   ///
   /// `-403` 会清掉密钥缓存重取一次再试（密钥按天轮换），这个行为在私有的

@@ -13,6 +13,8 @@ import 'services/app_state.dart';
 import 'services/aria2_coordinator.dart';
 import 'services/auto_task_store.dart';
 import 'services/bili_ledger.dart';
+import 'services/bili_additional_runner.dart';
+import 'services/bili_api.dart';
 import 'services/bili_ledger_bridge.dart';
 import 'services/bili_store.dart';
 import 'services/creation_task_store.dart';
@@ -187,6 +189,38 @@ Future<void> main() async {
 
   // 合并结局 → 台账转 done。**这是唯一的转 done 入口**。
   bindBiliLedgerToSettled(coordinator, biliLedger);
+
+  // B 站附加文件（弹幕 / 字幕 / 封面 / 章节 / 元数据）的装配点。
+  //
+  // 这一层只认「取数口」，编排逻辑在 `bili_additional_runner.dart` 里；
+  // 以后要换成页内 fetch（AI 字幕、个性化收藏夹那些需要登录态的）就改这几行，
+  // 编排层与协调器都不动。**凭据不进 aria2 那条红线也在这里守住**：
+  // 这些请求全走 Dart 侧，一次都不经过下载器，下载器的 per-task header
+  // 会被 --save-session 明文写进会话文件。
+  final biliApiForFiles = BiliApi();
+  coordinator.biliAdditional = ({
+    required cfg,
+    required saveDir,
+    required outBase,
+    required video,
+  }) => biliProduceAdditional(
+    cfg: cfg,
+    saveDir: saveDir,
+    outBase: outBase,
+    video: video,
+    deps: BiliAdditionalDeps(
+      signedData: (path, params) =>
+          biliApiForFiles.getSignedData(path, params, what: path),
+      plainData: (path, params) =>
+          biliApiForFiles.getData(path, params, what: path),
+      jsonAtUrl: biliApiForFiles.jsonAtUrl,
+      bytesAtUrl: biliApiForFiles.bytesAtUrl,
+      danmakuSegment: (cid, segmentIndex) => biliApiForFiles.danmakuSegment(
+        cid: cid,
+        segmentIndex: segmentIndex,
+      ),
+    ),
+  );
 
   // 内嵌浏览器环境：必须赶在任何 WebviewController 创建之前，
   // 且全局只能初始化一次（用户数据目录定了就不能再改）。
