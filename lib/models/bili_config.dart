@@ -60,6 +60,129 @@ enum BiliCodec {
   );
 }
 
+/// 合并产物用的容器。
+///
+/// **只有开了合并才有意义**：DASH 的两条裸流各自落成 `.video.m4s` /
+/// `.audio.m4s`，容器名是 ffmpeg 那一步才用上的（见 [BiliConfig.mergeAfterDownload]）。
+/// MKV 相对 MP4 的唯一硬优势是装得下 ASS 字幕轨，画质与兼容性都不占便宜，
+/// 所以默认仍是 MP4。
+enum BiliContainer {
+  mp4('mp4', 'MP4（兼容性最好）'),
+  mkv('mkv', 'MKV（可内封字幕轨）');
+
+  const BiliContainer(this.id, this.label);
+
+  /// 持久化标识，同时就是产物扩展名 —— 进了 `settings.json` 就不能改。
+  final String id;
+
+  final String label;
+
+  static BiliContainer fromId(String? id) => BiliContainer.values.firstWhere(
+    (e) => e.id == id,
+    orElse: () => BiliContainer.mp4,
+  );
+}
+
+/// 弹幕落盘格式。
+///
+/// 只有 [ass] 能作为字幕轨内封进 MKV，xml 与 json 永远是侧文件
+/// —— 这不是实现没做到，是容器只认 text_ass/vobsub 这类字幕轨。
+enum BiliDanmakuFormat {
+  ass('ass', 'ASS（可内封）'),
+  xml('xml', 'XML（弹姬格式）'),
+  json('json', 'JSON');
+
+  const BiliDanmakuFormat(this.id, this.label);
+
+  final String id;
+
+  final String label;
+
+  static BiliDanmakuFormat fromId(String? id) =>
+      BiliDanmakuFormat.values.firstWhere(
+        (e) => e.id == id,
+        orElse: () => BiliDanmakuFormat.ass,
+      );
+}
+
+/// 字幕落盘格式。同样只有 [ass] 谈得上内封。
+enum BiliSubtitleFormat {
+  srt('srt', 'SRT'),
+  ass('ass', 'ASS（可内封）'),
+  txt('txt', 'TXT（纯文本）');
+
+  const BiliSubtitleFormat(this.id, this.label);
+
+  final String id;
+
+  final String label;
+
+  static BiliSubtitleFormat fromId(String? id) =>
+      BiliSubtitleFormat.values.firstWhere(
+        (e) => e.id == id,
+        orElse: () => BiliSubtitleFormat.srt,
+      );
+}
+
+/// 封面格式。B 站图床按 `@.{后缀}` 的缩放语法出图，四种都能直接要到。
+enum BiliCoverFormat {
+  jpg('jpg', 'JPG'),
+  png('png', 'PNG'),
+  webp('webp', 'WebP'),
+  avif('avif', 'AVIF');
+
+  const BiliCoverFormat(this.id, this.label);
+
+  final String id;
+
+  final String label;
+
+  static BiliCoverFormat fromId(String? id) =>
+      BiliCoverFormat.values.firstWhere(
+        (e) => e.id == id,
+        orElse: () => BiliCoverFormat.jpg,
+      );
+}
+
+/// 元数据格式。nfo 给媒体库软件读，json 是我们自己那份解析结果的完整转储。
+enum BiliMetadataFormat {
+  nfo('nfo', 'NFO（媒体库）'),
+  json('json', 'JSON');
+
+  const BiliMetadataFormat(this.id, this.label);
+
+  final String id;
+
+  final String label;
+
+  static BiliMetadataFormat fromId(String? id) =>
+      BiliMetadataFormat.values.firstWhere(
+        (e) => e.id == id,
+        orElse: () => BiliMetadataFormat.nfo,
+      );
+}
+
+/// 弹幕与字幕同名时的先后。
+///
+/// 两族都是 ASS 时会在同一个目录里撞名（同一语言标签），谁在前谁占 0 号字幕轨，
+/// 文件名限定词也按这个顺序排。
+enum BiliTrackPriority {
+  subtitleFirst('subtitle', '字幕优先'),
+  danmakuFirst('danmaku', '弹幕优先');
+
+  const BiliTrackPriority(this.id, this.label);
+
+  final String id;
+
+  final String label;
+
+  static BiliTrackPriority fromId(String? id) =>
+      BiliTrackPriority.values.firstWhere(
+        (e) => e.id == id,
+        orElse: () => BiliTrackPriority.subtitleFirst,
+      );
+}
+
 /// B 站页的下载配置。
 class BiliConfig {
   /// 画质上限
@@ -101,6 +224,71 @@ class BiliConfig {
   /// 文件模板。
   String fileNameTemplate;
 
+  // ── 容器与限速 ──────────────────────────────────────────────
+
+  /// 合并产物容器。关合并时这个字段不参与落名。
+  BiliContainer container;
+
+  /// 每条任务的下载限速，单位 KB/s。**0 = 不限**。
+  ///
+  /// 走 aria2 的 per-task option `max-download-limit`，不是全局启动参数 ——
+  /// 全局那条会牵连 X 与抖音两个队列。
+  int speedLimitKbps;
+
+  // ── 附加文件 ────────────────────────────────────────────────
+
+  /// 弹幕总开关。关掉时下面几个弹幕字段一律不参与任何请求。
+  bool saveDanmaku;
+
+  BiliDanmakuFormat danmakuFormat;
+
+  /// 弹幕渲染样式。**只在 [danmakuFormat] == [BiliDanmakuFormat.ass] 时生效**，
+  /// xml 与 json 是把接口给的原样信息落盘，没有排版这一步。
+  String danmakuFontFace;
+  int danmakuFontSize;
+
+  /// 不透明度，0~100 的整数百分比（与界面滑条同一口径，避免两处各存一套小数）。
+  int danmakuOpacity;
+
+  /// 底部边距（像素，ASS 的 MarginV）。
+  int danmakuMarginV;
+
+  /// 字幕总开关。
+  bool saveSubtitle;
+
+  BiliSubtitleFormat subtitleFormat;
+
+  /// 只要这几种语言；**空列表 = 不做筛选，有几条取几条**。
+  List<String> subtitleLangs;
+
+  /// 「仅人工字幕」：AI 生成的那条语言码带 `ai-` 前缀，关掉它就不取。
+  ///
+  /// 需要登录 —— 未登录时 B 站根本不返回 AI 字幕，所以这个开关在匿名态下
+  /// 没有可观测效果，不要为了它去提示用户登录。
+  bool subtitleManualOnly;
+
+  /// 封面总开关。
+  bool saveCover;
+
+  BiliCoverFormat coverFormat;
+
+  /// 章节总开关：把稿件的分段信息写进成品的章节表。
+  bool saveChapter;
+
+  /// 元数据总开关。
+  bool saveMetadata;
+
+  BiliMetadataFormat metadataFormat;
+
+  /// 把 ass 字幕作为内封轨塞进成品，而不是只留侧文件。
+  ///
+  /// 生效前提有三个：容器是 MKV、开了合并、格式是 ass。缺任何一条这个开关都
+  /// 是无效项 —— 界面上要**写明缺的是哪一条**，不许像参照实现那样静默跳过。
+  bool embedSubtitleTrack;
+
+  /// 弹幕与字幕撞名时的先后。
+  BiliTrackPriority trackPriority;
+
   BiliConfig({
     this.quality = BiliQuality.highest,
     this.codec = BiliCodec.auto,
@@ -113,6 +301,25 @@ class BiliConfig {
     this.enableSaveFolder = true,
     this.dirTemplate = kBiliDefaultDirTemplate,
     this.fileNameTemplate = kBiliDefaultFileNameTemplate,
+    this.container = BiliContainer.mp4,
+    this.speedLimitKbps = 0,
+    this.saveDanmaku = false,
+    this.danmakuFormat = BiliDanmakuFormat.ass,
+    this.danmakuFontFace = kBiliDefaultDanmakuFontFace,
+    this.danmakuFontSize = kBiliDefaultDanmakuFontSize,
+    this.danmakuOpacity = kBiliDefaultDanmakuOpacity,
+    this.danmakuMarginV = kBiliDefaultDanmakuMarginV,
+    this.saveSubtitle = false,
+    this.subtitleFormat = BiliSubtitleFormat.srt,
+    this.subtitleLangs = const [],
+    this.subtitleManualOnly = false,
+    this.saveCover = false,
+    this.coverFormat = BiliCoverFormat.jpg,
+    this.saveChapter = false,
+    this.saveMetadata = false,
+    this.metadataFormat = BiliMetadataFormat.nfo,
+    this.embedSubtitleTrack = false,
+    this.trackPriority = BiliTrackPriority.subtitleFirst,
   });
 
   factory BiliConfig.fromJson(Map<String, dynamic> j) => BiliConfig(
@@ -128,6 +335,31 @@ class BiliConfig {
     dirTemplate: j['dirTemplate'] as String? ?? kBiliDefaultDirTemplate,
     fileNameTemplate: j['fileNameTemplate'] as String? ??
         kBiliDefaultFileNameTemplate,
+    container: BiliContainer.fromId(j['container'] as String?),
+    speedLimitKbps: (j['speedLimitKbps'] as num?)?.toInt() ?? 0,
+    saveDanmaku: j['saveDanmaku'] as bool? ?? false,
+    danmakuFormat: BiliDanmakuFormat.fromId(j['danmakuFormat'] as String?),
+    danmakuFontFace: j['danmakuFontFace'] as String? ??
+        kBiliDefaultDanmakuFontFace,
+    danmakuFontSize: (j['danmakuFontSize'] as num?)?.toInt() ??
+        kBiliDefaultDanmakuFontSize,
+    danmakuOpacity: (j['danmakuOpacity'] as num?)?.toInt() ??
+        kBiliDefaultDanmakuOpacity,
+    danmakuMarginV: (j['danmakuMarginV'] as num?)?.toInt() ??
+        kBiliDefaultDanmakuMarginV,
+    saveSubtitle: j['saveSubtitle'] as bool? ?? false,
+    subtitleFormat: BiliSubtitleFormat.fromId(j['subtitleFormat'] as String?),
+    subtitleLangs: (j['subtitleLangs'] as List?)?.whereType<String>().toList() ??
+        const [],
+    subtitleManualOnly: j['subtitleManualOnly'] as bool? ?? false,
+    saveCover: j['saveCover'] as bool? ?? false,
+    coverFormat: BiliCoverFormat.fromId(j['coverFormat'] as String?),
+    saveChapter: j['saveChapter'] as bool? ?? false,
+    saveMetadata: j['saveMetadata'] as bool? ?? false,
+    metadataFormat:
+        BiliMetadataFormat.fromId(j['metadataFormat'] as String?),
+    embedSubtitleTrack: j['embedSubtitleTrack'] as bool? ?? false,
+    trackPriority: BiliTrackPriority.fromId(j['trackPriority'] as String?),
   );
 
   Map<String, dynamic> toJson() => {
@@ -142,7 +374,115 @@ class BiliConfig {
     'enableSaveFolder': enableSaveFolder,
     'dirTemplate': dirTemplate,
     'fileNameTemplate': fileNameTemplate,
+    'container': container.id,
+    'speedLimitKbps': speedLimitKbps,
+    'saveDanmaku': saveDanmaku,
+    'danmakuFormat': danmakuFormat.id,
+    'danmakuFontFace': danmakuFontFace,
+    'danmakuFontSize': danmakuFontSize,
+    'danmakuOpacity': danmakuOpacity,
+    'danmakuMarginV': danmakuMarginV,
+    'saveSubtitle': saveSubtitle,
+    'subtitleFormat': subtitleFormat.id,
+    'subtitleLangs': subtitleLangs,
+    'subtitleManualOnly': subtitleManualOnly,
+    'saveCover': saveCover,
+    'coverFormat': coverFormat.id,
+    'saveChapter': saveChapter,
+    'saveMetadata': saveMetadata,
+    'metadataFormat': metadataFormat.id,
+    'embedSubtitleTrack': embedSubtitleTrack,
+    'trackPriority': trackPriority.id,
   };
+
+  /// 覆盖副本 —— 下载选项弹窗返回的就是这个：只改点到的格子，其余原样带走。
+  ///
+  /// 传 null 表示「这一格没动」，所以字段值本身不能以 null 为合法取值。
+  /// [subtitleLangs] 给空列表是合法的「清空筛选」，靠 `??` 区分不了没动和清空，
+  /// 所以它不带 null 语义：要么传新列表，要么整个不写。
+  BiliConfig copyWith({
+    BiliQuality? quality,
+    BiliCodec? codec,
+    bool? mergeAfterDownload,
+    bool? skipDownloaded,
+    bool? groupByWork,
+    int? concurrency,
+    String? customText,
+    String? saveDirBase,
+    bool? enableSaveFolder,
+    String? dirTemplate,
+    String? fileNameTemplate,
+    BiliContainer? container,
+    int? speedLimitKbps,
+    bool? saveDanmaku,
+    BiliDanmakuFormat? danmakuFormat,
+    String? danmakuFontFace,
+    int? danmakuFontSize,
+    int? danmakuOpacity,
+    int? danmakuMarginV,
+    bool? saveSubtitle,
+    BiliSubtitleFormat? subtitleFormat,
+    List<String>? subtitleLangs,
+    bool? subtitleManualOnly,
+    bool? saveCover,
+    BiliCoverFormat? coverFormat,
+    bool? saveChapter,
+    bool? saveMetadata,
+    BiliMetadataFormat? metadataFormat,
+    bool? embedSubtitleTrack,
+    BiliTrackPriority? trackPriority,
+  }) => BiliConfig(
+    quality: quality ?? this.quality,
+    codec: codec ?? this.codec,
+    mergeAfterDownload: mergeAfterDownload ?? this.mergeAfterDownload,
+    skipDownloaded: skipDownloaded ?? this.skipDownloaded,
+    groupByWork: groupByWork ?? this.groupByWork,
+    concurrency: concurrency ?? this.concurrency,
+    customText: customText ?? this.customText,
+    saveDirBase: saveDirBase ?? this.saveDirBase,
+    enableSaveFolder: enableSaveFolder ?? this.enableSaveFolder,
+    dirTemplate: dirTemplate ?? this.dirTemplate,
+    fileNameTemplate: fileNameTemplate ?? this.fileNameTemplate,
+    container: container ?? this.container,
+    speedLimitKbps: speedLimitKbps ?? this.speedLimitKbps,
+    saveDanmaku: saveDanmaku ?? this.saveDanmaku,
+    danmakuFormat: danmakuFormat ?? this.danmakuFormat,
+    danmakuFontFace: danmakuFontFace ?? this.danmakuFontFace,
+    danmakuFontSize: danmakuFontSize ?? this.danmakuFontSize,
+    danmakuOpacity: danmakuOpacity ?? this.danmakuOpacity,
+    danmakuMarginV: danmakuMarginV ?? this.danmakuMarginV,
+    saveSubtitle: saveSubtitle ?? this.saveSubtitle,
+    subtitleFormat: subtitleFormat ?? this.subtitleFormat,
+    subtitleLangs: subtitleLangs ?? this.subtitleLangs,
+    subtitleManualOnly: subtitleManualOnly ?? this.subtitleManualOnly,
+    saveCover: saveCover ?? this.saveCover,
+    coverFormat: coverFormat ?? this.coverFormat,
+    saveChapter: saveChapter ?? this.saveChapter,
+    saveMetadata: saveMetadata ?? this.saveMetadata,
+    metadataFormat: metadataFormat ?? this.metadataFormat,
+    embedSubtitleTrack: embedSubtitleTrack ?? this.embedSubtitleTrack,
+    trackPriority: trackPriority ?? this.trackPriority,
+  );
+
+  /// 内封字幕轨的前提缺了哪一条。
+  ///
+  /// 返回 null = 可以内封；否则给出还差什么，**由界面原样显示**。
+  /// 参照实现在这里的做法是「条件不满足就静默跳过」，用户勾了内封却在成品里
+  /// 找不到轨，也没有任何地方告诉他为什么 —— 我们不跟这一条。
+  ///
+  /// 三个前提都是硬的：MP4 容器装不下 ASS 字幕轨；不合并就没有成品容器可塞；
+  /// 非 ass 格式（srt / xml / json）ffmpeg 塞不进 matroska 的文本字幕轨。
+  List<String>? embedBlockReason({required bool forDanmaku}) {
+    final missing = <String>[];
+    if (container != BiliContainer.mkv) missing.add('容器要选 MKV');
+    if (!mergeAfterDownload) missing.add('要开「合并音视频流」');
+    if (forDanmaku) {
+      if (danmakuFormat != BiliDanmakuFormat.ass) missing.add('弹幕格式要选 ASS');
+    } else {
+      if (subtitleFormat != BiliSubtitleFormat.ass) missing.add('字幕格式要选 ASS');
+    }
+    return missing.isEmpty ? null : missing;
+  }
 
   /// 是否全部保持默认值。
   ///
@@ -160,8 +500,36 @@ class BiliConfig {
       saveDirBase.isEmpty &&
       enableSaveFolder &&
       dirTemplate == kBiliDefaultDirTemplate &&
-      fileNameTemplate == kBiliDefaultFileNameTemplate;
+      fileNameTemplate == kBiliDefaultFileNameTemplate &&
+      container == BiliContainer.mp4 &&
+      speedLimitKbps == 0 &&
+      !saveDanmaku &&
+      danmakuFormat == BiliDanmakuFormat.ass &&
+      danmakuFontFace == kBiliDefaultDanmakuFontFace &&
+      danmakuFontSize == kBiliDefaultDanmakuFontSize &&
+      danmakuOpacity == kBiliDefaultDanmakuOpacity &&
+      danmakuMarginV == kBiliDefaultDanmakuMarginV &&
+      !saveSubtitle &&
+      subtitleFormat == BiliSubtitleFormat.srt &&
+      subtitleLangs.isEmpty &&
+      !subtitleManualOnly &&
+      !saveCover &&
+      coverFormat == BiliCoverFormat.jpg &&
+      !saveChapter &&
+      !saveMetadata &&
+      metadataFormat == BiliMetadataFormat.nfo &&
+      !embedSubtitleTrack &&
+      trackPriority == BiliTrackPriority.subtitleFirst;
 }
+
+/// 弹幕 ass 默认字体。libass 按系统字体名找，中文环境下这个比字体族名更靠得住。
+const String kBiliDefaultDanmakuFontFace = 'Microsoft YaHei';
+
+const int kBiliDefaultDanmakuFontSize = 25;
+
+const int kBiliDefaultDanmakuOpacity = 100;
+
+const int kBiliDefaultDanmakuMarginV = 10;
 
 /// 默认文件夹模板：一个稿件一个目录。
 const String kBiliDefaultDirTemplate = '%WORK_TITLE%';

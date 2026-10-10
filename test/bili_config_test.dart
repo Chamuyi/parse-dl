@@ -7,6 +7,53 @@ import 'package:parse_dl/models/douyin_config.dart';
 import 'package:parse_dl/models/settings.dart';
 import 'package:parse_dl/services/file_name_template.dart';
 
+/// 每个持久化键对应一种「把它改成非默认值」的写法。
+///
+/// 这张表是 `isDefault` 的覆盖面检查：加字段时若没在这里登记，
+/// 「isDefault 覆盖到 toJson 的每一个键」那条会直接红 —— 而不是让新字段
+/// 悄悄享受「永远算默认」的待遇。
+final Map<String, void Function(BiliConfig c)> kNonDefaultMutators = {
+  'quality': (c) => c.quality = BiliQuality.q480,
+  'codec': (c) => c.codec = BiliCodec.av1,
+  'mergeAfterDownload': (c) => c.mergeAfterDownload = false,
+  'skipDownloaded': (c) => c.skipDownloaded = false,
+  'groupByWork': (c) => c.groupByWork = false,
+  'concurrency': (c) => c.concurrency = 2,
+  'customText': (c) => c.customText = '备注',
+  'saveDirBase': (c) => c.saveDirBase = r'D:\x',
+  'enableSaveFolder': (c) => c.enableSaveFolder = false,
+  'dirTemplate': (c) => c.dirTemplate = '%BVID%',
+  'fileNameTemplate': (c) => c.fileNameTemplate = '%WORK_TITLE%',
+  'container': (c) => c.container = BiliContainer.mkv,
+  'speedLimitKbps': (c) => c.speedLimitKbps = 512,
+  'saveDanmaku': (c) => c.saveDanmaku = true,
+  'danmakuFormat': (c) => c.danmakuFormat = BiliDanmakuFormat.xml,
+  'danmakuFontFace': (c) => c.danmakuFontFace = 'SimHei',
+  'danmakuFontSize': (c) => c.danmakuFontSize = 18,
+  'danmakuOpacity': (c) => c.danmakuOpacity = 80,
+  'danmakuMarginV': (c) => c.danmakuMarginV = 20,
+  'saveSubtitle': (c) => c.saveSubtitle = true,
+  'subtitleFormat': (c) => c.subtitleFormat = BiliSubtitleFormat.ass,
+  'subtitleLangs': (c) => c.subtitleLangs = ['zh-CN'],
+  'subtitleManualOnly': (c) => c.subtitleManualOnly = true,
+  'saveCover': (c) => c.saveCover = true,
+  'coverFormat': (c) => c.coverFormat = BiliCoverFormat.png,
+  'saveChapter': (c) => c.saveChapter = true,
+  'saveMetadata': (c) => c.saveMetadata = true,
+  'metadataFormat': (c) => c.metadataFormat = BiliMetadataFormat.json,
+  'embedSubtitleTrack': (c) => c.embedSubtitleTrack = true,
+  'trackPriority': (c) => c.trackPriority = BiliTrackPriority.danmakuFirst,
+};
+
+/// 全部字段都改成非默认值的那一份。
+BiliConfig allNonDefault() {
+  final c = BiliConfig();
+  for (final m in kNonDefaultMutators.values) {
+    m(c);
+  }
+  return c;
+}
+
 void main() {
   group('画质与编码枚举', () {
     test('画质上限与 B 站 qn 对齐', () {
@@ -34,9 +81,31 @@ void main() {
       for (final ids in [
         BiliQuality.values.map((e) => e.id),
         BiliCodec.values.map((e) => e.id),
+        BiliContainer.values.map((e) => e.id),
+        BiliDanmakuFormat.values.map((e) => e.id),
+        BiliSubtitleFormat.values.map((e) => e.id),
+        BiliCoverFormat.values.map((e) => e.id),
+        BiliMetadataFormat.values.map((e) => e.id),
+        BiliTrackPriority.values.map((e) => e.id),
       ]) {
         expect(ids.toSet().length, ids.length);
       }
+    });
+
+    test('新枚举的 fromId 认不出来一律回默认', () {
+      expect(BiliContainer.fromId('mkv'), BiliContainer.mkv);
+      expect(BiliContainer.fromId('webm'), BiliContainer.mp4);
+      expect(BiliContainer.fromId(null), BiliContainer.mp4);
+      expect(BiliDanmakuFormat.fromId('xml'), BiliDanmakuFormat.xml);
+      expect(BiliDanmakuFormat.fromId('ass'), BiliDanmakuFormat.ass);
+      expect(BiliDanmakuFormat.fromId('nfo'), BiliDanmakuFormat.ass);
+      expect(BiliSubtitleFormat.fromId('vtt'), BiliSubtitleFormat.srt);
+      expect(BiliCoverFormat.fromId('avif'), BiliCoverFormat.avif);
+      expect(BiliCoverFormat.fromId('bmp'), BiliCoverFormat.jpg);
+      expect(BiliMetadataFormat.fromId('json'), BiliMetadataFormat.json);
+      expect(BiliMetadataFormat.fromId('xml'), BiliMetadataFormat.nfo);
+      expect(BiliTrackPriority.fromId('danmaku'), BiliTrackPriority.danmakuFirst);
+      expect(BiliTrackPriority.fromId('both'), BiliTrackPriority.subtitleFirst);
     });
   });
 
@@ -120,11 +189,44 @@ void main() {
       expect(keys, BiliConfig().toJson().keys.toList());
     });
 
+    test('isDefault 覆盖到 toJson 的每一个键', () {
+      expect(
+        kNonDefaultMutators.keys.toSet(),
+        BiliConfig().toJson().keys.toSet(),
+        reason: '加字段就要在 kNonDefaultMutators 登记一种非默认写法，否则 isDefault 漏判没人发现',
+      );
+    });
+
     test('改过任何一项，isDefault 就翻 false', () {
       expect(BiliConfig().isDefault, isTrue);
-      expect((BiliConfig()..codec = BiliCodec.av1).isDefault, isFalse);
-      expect((BiliConfig()..concurrency = 2).isDefault, isFalse);
-      expect((BiliConfig()..skipDownloaded = false).isDefault, isFalse);
+      for (final e in kNonDefaultMutators.entries) {
+        final c = BiliConfig();
+        e.value(c);
+        expect(
+          c.isDefault,
+          isFalse,
+          reason: '${e.key} 被改成非默认值后 isDefault 仍为 true —— 这一项漏在 isDefault 里',
+        );
+      }
+    });
+
+    test('每一格都被改过的那一份，往返后逐键相等', () {
+      final c = allNonDefault();
+      expect(c.isDefault, isFalse);
+      final back = BiliConfig.fromJson(
+        jsonDecode(jsonEncode(c.toJson())) as Map<String, dynamic>,
+      );
+      expect(back.toJson(), c.toJson());
+    });
+
+    test('copyWith 只动点到的格子，其余原样带走', () {
+      final base = allNonDefault();
+      final one = base.copyWith(container: BiliContainer.mp4);
+      expect(one.container, BiliContainer.mp4);
+      // 除 container 之外一律没动 —— 用整张表比对，漏一个字段都会红
+      expect(one.toJson()..remove('container'), base.toJson()..remove('container'));
+      expect(one.saveDirBase, base.saveDirBase);
+      expect(identical(one, base), isFalse, reason: '必须是新对象，弹窗改副本不能碰默认配置');
     });
   });
 

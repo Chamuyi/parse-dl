@@ -82,6 +82,7 @@ const _biliOnlyFiles = [
   'lib/services/bili_ledger_bridge.dart',
   'lib/services/bili_merger.dart',
   'lib/services/bili_download_plan.dart',
+  'lib/services/bili_additional.dart',
   'lib/services/bili_ffmpeg.dart',
   'lib/models/bili_config.dart',
   'lib/models/bili_meta.dart',
@@ -304,6 +305,23 @@ void main() {
 
     test('B 站侧文件的字符串字面量里没有 X 与抖音说法', () {
       expect(_scan(_biliOnlyFiles, _biliForbidden), isEmpty);
+    });
+
+    test('盘上每个 bili_* 文件都登记进了 _biliOnlyFiles', () {
+      // 这张清单是手写的，新文件不登记就**静默逃过**上面那条扫描 ——
+      // 加了多少 B 站文件都不判，正是最容易漏的一步。
+      final onDisk =
+          Directory('lib')
+              .listSync(recursive: true)
+              .whereType<File>()
+              .map((f) => f.path.replaceAll(r'\', '/'))
+              .where((p) => p.split('/').last.startsWith('bili_'))
+              .toSet();
+      expect(
+        onDisk.difference(_biliOnlyFiles.toSet()),
+        isEmpty,
+        reason: '新增 B 站文件要同时加进 _biliOnlyFiles，否则不在术语隔离范围内',
+      );
     });
 
     test('提取器跳过 import 路径，但不放过同文件里的界面串', () {
