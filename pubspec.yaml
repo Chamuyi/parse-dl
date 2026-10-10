@@ -37,6 +37,9 @@ dependencies:
   intl: ^0.20.2
   url_launcher: ^6.3.1
   uuid: ^4.5.1
+  # B 站台账的去重键要算 md5（`services/bili_ledger.dart`）。crypto 本来只是
+  # uuid 的传递依赖；不显式声明就 import 不了 —— 会撞 depend_on_referenced_packages。
+  crypto: ^3.0.7
   # 打开系统文件夹
   process_run: ^1.2.1
 
