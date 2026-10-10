@@ -9,20 +9,18 @@ import 'package:parse_dl/widgets/nav_items.dart';
 /// 是纯静态可判的 —— 少接一条的现场表现是：侧边栏点得到、点进去白屏。
 /// 所以这里直接扫 `app.dart` 的源码。
 void main() {
-  const biliIds = ['bili', 'bili-downloads', 'bili-settings'];
+  const biliIds = ['bili', 'bili-batch', 'bili-downloads', 'bili-settings'];
 
   NavGroup biliGroup() =>
       kNavGroups.firstWhere((g) => g.id == 'bili', orElse: () => kNavGroups.first);
 
   group('导航第三组', () {
-    test('一共三组，B 站那组有 3 个子项', () {
+    test('一共三组，B 站那组的子项**恰好**是这四个', () {
       expect(kNavGroups.map((g) => g.id), ['x', 'douyin', 'bili']);
-      expect(biliGroup().children.map((c) => c.id), biliIds);
-    });
-
-    test('B 站这一期不放「自动下载」入口（点了会白屏）', () {
-      expect(biliIds, isNot(contains('bili-auto')));
-      expect(biliGroup().children, hasLength(3));
+      // 精确集合而不是长度：多一项少一项都要当场报出来，
+      // 而 `hasLength(4)` 会放过一个「少了批量、多了个没接路由的入口」。
+      expect(biliGroup().children.map((c) => c.id).toSet(), biliIds.toSet());
+      expect(biliGroup().children.map((c) => c.id).toList(), biliIds);
     });
 
     test('id 全局不重复，且两个「下载管理」不是同一个导航项', () {
@@ -59,16 +57,33 @@ void main() {
       expect(appSrc, isNot(contains("case 'bili-auto'")));
     });
 
-    test('B 站的三个页面类各自独立，不借用另两个模块的页面', () {
+    test('B 站的页面类各自独立，不借用另两个模块的页面', () {
       // 下载管理页是三模块共用的（靠 feed 分流），这是**唯一**允许的共用
       final biliCases = RegExp(r"case '(bili[^']*)':").allMatches(appSrc);
-      expect(biliCases, hasLength(3));
-      final body = appSrc.substring(
-        biliCases.first.start,
-        appSrc.indexOf('case ', appSrc.indexOf('bili-downloads')),
+      expect(
+        biliCases.map((m) => m.group(1)),
+        biliIds,
+        reason: '路由 case 与导航子项必须一一对应（多一个就是白屏入口）',
       );
-      expect(body, contains('BiliPage'));
-      expect(body, isNot(contains('DouyinPage')));
+      // 每个 case 后面那一小段里出现的是什么页面类，逐个钉住：
+      // 只看「B 站这一段」而不扫全文，是因为 DouyinPage 本来就该出现在抖音的 case 里。
+      const expected = {
+        'bili': 'BiliPage',
+        'bili-batch': 'BiliBatchPage',
+        'bili-downloads': 'DownloadManagementPage',
+        'bili-settings': '_settingsPage',
+      };
+      for (final m in biliCases) {
+        final id = m.group(1)!;
+        final body = appSrc.substring(m.end, m.end + 160);
+        expect(
+          body,
+          contains(expected[id]!),
+          reason: '$id 的 case 后面没接上 $expected${expected[id]}：$body',
+        );
+        expect(body, isNot(contains('DouyinPage')), reason: '$id 借用了抖音的页面');
+        expect(body, isNot(contains('XPage')), reason: '$id 借用了 X 的页面');
+      }
     });
   });
 

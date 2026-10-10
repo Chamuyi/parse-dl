@@ -239,6 +239,9 @@ final _lowerBvRe = RegExp(r'^bv([1-9A-HJ-NP-Za-km-z]{10})$');
 /// 短链域名。只认这一个：别自己拼重定向地址。
 const String kBiliShortHost = 'b23.tv';
 
+/// 直接贴的收藏夹 media_id（没有任何前缀与协议，纯数字）。
+final _digitsRe = RegExp(r'^\d+$');
+
 /// 收藏夹 id 的另一种写法：`/medialist/detail/ml1234567890`。
 final _mlRe = RegExp(r'^ml(\d+)$', caseSensitive: false);
 
@@ -263,6 +266,17 @@ BiliRef? parseBiliRef(String raw) {
   final av = _avRe.firstMatch(text);
   if (av != null) {
     return BiliRef._(aid: int.tryParse(av.group(1)!));
+  }
+  // 裸数字 = 收藏夹的 media_id（D8 说的「贴链接直抓」也接受直接贴 id）。
+  // `av123` 上面那条分支已经吃掉，而稿件从来没有「裸数字」这种写法，
+  // 所以这一支不会把稿件 id 误认成收藏夹 id。
+  if (_digitsRe.hasMatch(text)) {
+    final id = int.tryParse(text);
+    if (id != null && id > 0) {
+      return BiliRef._(
+        list: BiliListTarget(kind: BiliListKind.fav, favId: id),
+      );
+    }
   }
 
   final uri = Uri.tryParse(text);

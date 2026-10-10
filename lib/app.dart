@@ -7,6 +7,7 @@ import 'l10n/l10n.dart';
 import 'models/settings.dart';
 import 'pages/about_page.dart';
 import 'pages/auto_task_page.dart';
+import 'pages/bili_batch_page.dart';
 import 'pages/bili_page.dart';
 import 'pages/download_management_page.dart';
 import 'pages/douyin_auto_page.dart';
@@ -17,6 +18,7 @@ import 'services/app_logger.dart';
 import 'services/app_state.dart';
 import 'services/aria2_coordinator.dart';
 import 'services/auto_task_store.dart';
+import 'services/bili_batch_store.dart';
 import 'services/bili_ledger.dart';
 import 'services/bili_store.dart';
 import 'services/creation_task_store.dart';
@@ -71,6 +73,7 @@ class XDownloaderApp extends StatelessWidget {
   final DouyinStore douyinStore;
   final DouyinAutoStore douyinAutoStore;
   final BiliStore biliStore;
+  final BiliBatchStore biliBatchStore;
   final BiliLedger biliLedger;
 
   const XDownloaderApp({
@@ -84,6 +87,7 @@ class XDownloaderApp extends StatelessWidget {
     required this.douyinStore,
     required this.douyinAutoStore,
     required this.biliStore,
+    required this.biliBatchStore,
     required this.biliLedger,
   });
 
@@ -106,6 +110,8 @@ class XDownloaderApp extends StatelessWidget {
         // 「下载管理（B 站）」那一片历史直接 `watch<BiliLedger>()`，
         // 漏挂就是 ProviderNotFound。
         ChangeNotifierProvider<BiliStore>.value(value: biliStore),
+        // 批量页的目标与进度：跑一半切页面不该丢（与抖音自动下载同构）。
+        ChangeNotifierProvider<BiliBatchStore>.value(value: biliBatchStore),
         ChangeNotifierProvider<BiliLedger>.value(value: biliLedger),
       ],
       child: Consumer<SettingsStore>(
@@ -338,6 +344,9 @@ class _AppShellState extends State<_AppShell> {
         return DouyinPage(onNavigate: _setRoute);
       case 'bili':
         return BiliPage(onNavigate: _setRoute);
+      case 'bili-batch':
+        // 批量页：多行目标 → 列表接口翻到尽 → 逐条稿件投队列
+        return BiliBatchPage(onNavigate: _setRoute);
       case 'download-management':
         return const DownloadManagementPage();
       case 'douyin-downloads':
@@ -416,6 +425,7 @@ class _AppShellState extends State<_AppShell> {
     // B 站那一项的导航标签与抖音同字（都叫「解析下载」），所以标题栏
     // 必须带模块名，否则切过去看不出自己在哪一个模块里。
     'bili' => t('B 站解析下载'),
+    'bili-batch' => t('B 站批量下载'),
     'bili-downloads' => t('下载管理'),
     'bili-settings' => t('B 站解析下载设置'),
     'settings' => t('设置'),

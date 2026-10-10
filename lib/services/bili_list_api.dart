@@ -92,6 +92,7 @@ class BiliListResult<T> {
     required this.pageNum,
     required this.pageSize,
     this.listTitle = '',
+    this.skippedUnsupported = 0,
   });
 
   final List<T> items;
@@ -104,6 +105,11 @@ class BiliListResult<T> {
 
   /// 列表自身的标题（合集名 / 系列名 / 收藏夹名），接口没给则 `''`。
   final String listTitle;
+
+  /// 这一页里**认不出 BV 号**而被丢掉的条目数（收藏夹会混进音频 / 番剧 / 直播间）。
+  /// 上层要把它如实说成「跳过 N 条本期不支持的条目」，静默吞掉的话用户会以为
+  /// 「我 120 条的收藏夹怎么只下到 90 条，是漏了」。
+  final int skippedUnsupported;
 
   /// 累计口径由 [BiliListApi.allPages] 掌握，这里只回答「这一页算不算翻到头」。
   bool get pageIsEmpty => items.isEmpty;
@@ -118,6 +124,23 @@ class BiliListResult<T> {
   @override
   String toString() =>
       'BiliListResult(p$pageNum/$pages, items=${items.length}, total=$total)';
+}
+
+/// 一个列表翻到尽之后的汇总。
+class BiliArcsSummary {
+  const BiliArcsSummary({
+    required this.items,
+    required this.listTitle,
+    required this.skipped,
+  });
+
+  final List<BiliArchive> items;
+
+  /// 接口给的列表名；没有则空串（界面自己按目标类型兜一句）。
+  final String listTitle;
+
+  /// 各页累计的「本期不支持、已丢掉」条数。
+  final int skipped;
 }
 
 /// 列表里的一条稿件。
@@ -632,13 +655,14 @@ class BiliListApi {
       }),
       '/x/v3/fav/resource/list',
     );
-    final items = _archives(
+    final parsed = _archiveRows(
       _rows(data, ['medias']),
       fallbackMid: 0,
       fallbackName: '',
     );
     return BiliListResult(
-      items: items,
+      items: parsed.items,
+      skippedUnsupported: parsed.skipped,
       // 总数只认 info.media_count（实测 data.page 是 null）
       total: _asInt(_at(data, ['info', 'media_count'])) ?? 0,
       pageNum: pn,
@@ -773,6 +797,7 @@ class BiliListApi {
   Future<List<T>> allPages<T>(
     Future<BiliListResult<T>> Function(int pageNum) fetchPage, {
     int maxPages = kBiliListMaxPages,
+    void Function(BiliListResult<T> page)? onPage,
   }) async {
     final out = <T>[];
     for (var pn = 1; pn <= maxPages; pn++) {
@@ -780,6 +805,7 @@ class BiliListApi {
         await Future<void>.delayed(_pageDelay);
       }
       final page = await fetchPage(pn);
+      onPage?.call(page);
       out.addAll(page.items);
       if (page.pageIsEmpty) return out; // 判据二
       if (page.totalKnown && out.length >= page.total) return out; // 判据一
@@ -959,6 +985,26 @@ class BiliListApi {
   }) =>
       allPages((pn) => arcs(target, pn: pn), maxPages: maxPages);
 
+  /// [allArcs] 的带汇总版：批量页除了稿件还要**列表标题**（合集名 / 收藏夹名，
+  /// 界面那一行要显示它）与**被丢掉的条数**（见 [BiliListResult.skippedUnsupported]）。
+  /// 分页循环仍然只在 [allPages] 一处，终止判据不会被复制出第二份口径。
+  Future<BiliArcsSummary> allArcsSummary(
+    BiliListTarget target, {
+    int maxPages = kBiliListMaxPages,
+  }) async {
+    var skipped = 0;
+    var title = '';
+    final items = await allPages(
+      (pn) => arcs(target, pn: pn),
+      maxPages: maxPages,
+      onPage: (page) {
+        skipped += page.skippedUnsupported;
+        if (title.isEmpty) title = page.listTitle;
+      },
+    );
+    return BiliArcsSummary(items: items, listTitle: title, skipped: skipped);
+  }
+
   /// 列表项 → 界面那一行的 [Media]（薄封装，页面少写一层循环）。
   ///
   /// 顺序保持接口给的顺序；`id` 是 bvid，所以**接口要是连着给了两条同一个
@@ -976,30 +1022,44 @@ class BiliListApi {
 
 // ── 解析小工具 ────────────────────────────────────────────────
 
-/// 一批原始列表项 → [BiliArchive]。
+/// 一批原始列表项 → [BiliArchive]（不关心被丢掉几条时用这一支）。
+List<BiliArchive> _archives(
+  Object? rows, {
+  required int fallbackMid,
+  required String fallbackName,
+}) =>
+    _archiveRows(rows, fallbackMid: fallbackMid, fallbackName: fallbackName)
+        .items;
+
+/// 一批原始列表项 → [BiliArchive]，外加「丢了几条」。
 ///
 /// `rows` 给 null 或空都回空列表（收藏夹为空、合集不存在都是这个形状）。
 ///
-/// 各接口的字段名不齐（`pic`/`cover`、`aid`/`id`、`pubdate`/`pubtime`、
-/// `duration` 给过秒也给过 `"12:34"`），这里一次抹平，
-/// 免得五个方法各写一遍映射再各写错一处。
 /// 各接口的字段名不齐（`pic` / `cover`、`aid` / `id` / `media_id`、
 /// `pubdate` / `pubtime`、`bvid` / `bv_id`、`duration` 给过秒也给过 `"12:34"`），
 /// 这里一次抹平，免得五个方法各写一遍映射再各写错一处。
 ///
 /// 「列表项自己带的 UP」优先于 `fallback*`：合集 / 系列的 `archives` **不带作者名**
 /// （实测只有 `upMid`），那两支的名字靠调用方传进来的 [card] 结果兜住。
-List<BiliArchive> _archives(
+({List<BiliArchive> items, int skipped}) _archiveRows(
   Object? rows, {
   required int fallbackMid,
   required String fallbackName,
 }) {
-  if (rows is! List) return const [];
+  if (rows is! List) {
+    return (items: const <BiliArchive>[], skipped: 0);
+  }
   final out = <BiliArchive>[];
+  var skipped = 0;
   for (final e in rows.whereType<Map>()) {
     final j = e.cast<String, dynamic>();
     final bvid = _firstBvid(j);
-    if (bvid.isEmpty) continue; // 认不出 BV 号的行（广告位、直播间）一律跳过
+    // 认不出 BV 号的行（广告位、直播间、收藏夹里的音频与番剧）一律跳过，
+    // 但条数要留给上层说人话。
+    if (bvid.isEmpty) {
+      skipped++;
+      continue;
+    }
     final upper = _asMap(j['upper']) ?? _asMap(j['owner']);
     // 统计量在两支里叫法不同：列表类给 `stat`（view / like / reply / favorite /
     // share），收藏夹给 `cnt_info`（play / danmaku / collect / reply / share）。
@@ -1028,7 +1088,7 @@ List<BiliArchive> _archives(
       shareCount: _asInt(stat?['share']),
     ));
   }
-  return out;
+  return (items: out, skipped: skipped);
 }
 
 /// `bvid` 有两种写法：`bvid`（多数接口）与 `bv_id`（收藏夹的 `medias`）。

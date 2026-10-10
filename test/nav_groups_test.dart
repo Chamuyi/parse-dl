@@ -32,13 +32,15 @@ void main() {
       );
     });
 
-    test('B 站组按同一套 id 命名规则，但**没有自动下载**（那是 P2/P3）', () {
+    test('B 站组的 id 命名与另两组同规则，批量入口叫 bili-batch', () {
       expect(
         kNavGroups[2].children.map((e) => e.id).toList(),
-        ['bili', 'bili-downloads', 'bili-settings'],
+        ['bili', 'bili-batch', 'bili-downloads', 'bili-settings'],
       );
-      // 「自动下载」现在挂上来就是一个点进去白屏的入口，宁可少一项。
+      // 抖音那一路的入口叫「自动下载」（要滚页面抓），B 站这批是「批量下载」
+      // （列表接口直接翻），两种行为不该共用一个名字。
       expect(kNavGroups[2].children.map((e) => e.id), isNot(contains('bili-auto')));
+      expect(kNavGroups[2].children.map((e) => e.id), isNot(contains('bili-downloads-auto')));
     });
 
     test('三组各自的 badge 是一个单字，且组 id 与 badge 不同名', () {

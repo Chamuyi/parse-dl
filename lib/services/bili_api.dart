@@ -916,6 +916,19 @@ class BiliApi {
     return _getBytes(biliSignedUri(path, params, keys.mixinKey), what);
   }
 
+  /// 给**页内 fetch** 用的完整签名 URL（签名在 Dart 侧算，凭据留在浏览器）。
+  ///
+  /// 只给地址，不给「顺手替页面发一次请求」的口：那种写法等于让 Dart 侧带着
+  /// cookie 直连，`--save-session` 明文落盘那类风险换个地方重现。
+  Future<String> signedPageUrl(
+    String path,
+    Map<String, dynamic> params,
+  ) async => (await _signedUri(path, params)).toString();
+
+  /// 不签名那一支的页内地址（`created/list-all` 这类要登录态但不签名的接口）。
+  String plainPageUrl(String path, Map<String, dynamic> params) =>
+      _uri(kBiliApiHost, path, params).toString();
+
   /// 弹幕一段的原始字节。`segmentIndex` 从 **1** 起（实测口径）。
   Future<List<int>> danmakuSegment({
     required int cid,

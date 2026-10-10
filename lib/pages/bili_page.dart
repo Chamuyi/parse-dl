@@ -6,11 +6,11 @@ import 'package:webview_windows/webview_windows.dart';
 
 import '../l10n/l10n.dart';
 import '../models/bili_config.dart';
-import '../models/bili_meta.dart';
 import '../models/media.dart';
 import '../services/aria2_coordinator.dart';
 import '../services/app_logger.dart';
 import '../services/bili_api.dart';
+import '../services/bili_batch_runner.dart';
 import '../services/bili_download_plan.dart';
 import '../services/bili_feed.dart';
 import '../services/bili_ledger.dart';
@@ -40,7 +40,7 @@ import '../widgets/app_toast.dart';
 ///
 /// **刻意没有的东西**（相对抖音页）：拦截脚本、无限滚动、按页面分桶、自动下滑。
 /// B 站这一路是「粘一条链接 → 展开这个稿件的分 P」，一次一批，没有滚动。
-/// 「自动下载」属 P2/P3，现在挂上来就是个白屏入口，所以导航里也没有它。
+/// 批量跑列表是 `bili_batch_page.dart`（导航第 4 项），不在这一页。
 class BiliPage extends StatefulWidget {
   /// 页面内跳转（"去下载管理"用），与抖音页同签名。
   final void Function(String routeId)? onNavigate;
@@ -91,40 +91,6 @@ String biliClockText(int? ms) {
 /// 单 P 稿件 `%P%` 取到 0 → 整段消失 → 这里回空串，界面就不画这枚标记。
 String biliPartBadgeText(Media m) => resolveVariables('<P%P%>', m).trim();
 
-/// 把选流结果里的画质 / 编码标签补进这条分 P。
-///
-/// 为什么必须在**选流之后**：`%QUALITY%` / `%CODEC%` 读的是 `Media.bili` 里这两个
-/// 标签（见 `file_name_template.dart`），而它们只有等 `planBiliStreams` 挑出实际
-/// 档位才知道该写什么 —— 列表里那批 `biliPartMedia()` 刻意不带标签，
-/// 因为「上限 1080P60」与「这次真拿到 1080P」是两件事，写早了就是替用户说谎。
-Media biliPartWithLabels(
-  Media part, {
-  required int videoQn,
-  required BiliCodec? codec,
-  required BiliPlayUrl r,
-}) {
-  final b = part.bili;
-  if (b == null) return part;
-  // 档位文案优先用响应里 `support_formats` 给的那一份（它才是 B 站自己怎么说这一档的），
-  // 查不到才退回内置的短标签表。
-  final fromResponse = r.video
-      .where((s) => s.id == videoQn && !s.isAudio)
-      .map((s) => s.qualityLabel)
-      .firstWhere((label) => label.isNotEmpty, orElse: () => '');
-  return part.copyWith(
-    bili: BiliMeta(
-      workTitle: b.workTitle,
-      partTitle: b.partTitle,
-      bvid: b.bvid,
-      aid: b.aid,
-      cid: b.cid,
-      partTotal: b.partTotal,
-      qualityLabel:
-          fromResponse.isNotEmpty ? fromResponse : (kBiliQualityNames[videoQn] ?? ''),
-      codecLabel: codec == null ? '' : biliCodecLabel(codec),
-    ),
-  );
-}
 
 class _BiliPageState extends State<BiliPage> {
   WebviewController? _web;
@@ -430,24 +396,7 @@ class _BiliPageState extends State<BiliPage> {
       }
 
       final view = await api.view(bvid: ref.bvid, aid: ref.aid?.toString());
-      final parts = <Media>[
-        for (final pg in view.pages)
-          if (pg.cid > 0)
-            biliPartMedia(
-              bvid: view.bvid,
-              aid: view.aid,
-              workTitle: view.title,
-              upperName: view.upperName,
-              upperMid: view.upperMid,
-              publishTime: view.publishTime,
-              cover: pg.pic.isNotEmpty ? pg.pic : view.cover,
-              partTotal: view.partTotal,
-              partIndex: pg.index,
-              cid: pg.cid,
-              partTitle: pg.partTitle,
-              durationMs: pg.durationMs,
-            ),
-      ];
+      final parts = biliPartsOfView(view);
       if (parts.isEmpty) {
         _failParse(t('这个稿件没有可下载的分 P（已下架或仅自己可见）'), raw);
         return;
@@ -477,7 +426,7 @@ class _BiliPageState extends State<BiliPage> {
 
   // ── 下载 ────────────────────────────────────────────────────
 
-  /// 对勾选的每条分 P：**取流 → 选流 → 摊成两条 Media → 入队**。
+  /// 对勾选的每条分 P 下载。真正的循环在 `bili_batch_runner.dart`（批量页共用）。
   ///
   /// 台账时序（红线，改这里之前先读完 `bili_ledger.dart` 与
   /// `bili_ledger_bridge.dart` 的文件头）：
@@ -534,99 +483,15 @@ class _BiliPageState extends State<BiliPage> {
 
     setState(() => _working = true);
     store.setBusy(true);
-    var queued = 0;
-    var skippedLedger = 0;
-    var skippedDisk = 0;
-    var failed = 0;
-    final notes = <String>[];
-
+    late final BiliRunTally run;
     try {
-      // 并发数是 aria2 的全局选项，入队前同步一次（幂等）
-      await coordinator.applyConcurrency(cfg.concurrency);
-
-      for (final part in chosen) {
-        final key = biliPartKey(
-          bvid: part.bili?.bvid,
-          cid: part.bili?.cid,
-        );
-        // 「跳过已下载」= 台账（`pending` 与 `done` 都算处理过，见 bili_ledger.dart
-        // 的 `contains` 注释：手快再点一次不该重复提交同一个分 P）。
-        // 磁盘上有没有成品是协调器那一步的事（见下 sameFileSkip）。
-        if (cfg.skipDownloaded && biliKeyGroupUsable(key) && ledger.contains(key)) {
-          skippedLedger++;
-          continue;
-        }
-
-        final cid = int.tryParse(part.bili?.cid ?? '');
-        if (cid == null || cid <= 0) {
-          failed++;
-          AppLogger.log('BILI', '这条分 P 没有 cid，投不出去：${part.id}');
-          continue;
-        }
-
-        try {
-          final r = await api.playurl(
-            cid: cid,
-            qn: cfg.quality.qn,
-            codec: cfg.codec,
-            bvid: part.bili?.bvid,
-            aid: int.tryParse(part.bili?.aid ?? ''),
-          );
-          final pair = planBiliStreams(r, cfg.quality, cfg.codec);
-          final why = pair.message;
-          if (!pair.usable || why != null) {
-            // 选流层已经算出人话了（要登录 / 要大会员 / 分段没做），原样带出去
-            failed++;
-            AppLogger.log('BILI', '选流失败（${part.id}）：$why');
-            _addNote(notes, why);
-            continue;
-          }
-
-          // 文件名里的 %QUALITY% / %CODEC% 只有到这一步才知道，
-          // 所以 base 名必须在选流**之后**算（见 biliPartWithLabels）。
-          final labeled = biliPartWithLabels(
-            part,
-            videoQn: pair.videoQn,
-            codec: pair.videoCodec,
-            r: r,
-          );
-          final base =
-              Aria2Coordinator.biliOutBase(cfg.fileNameTemplate, labeled, cfg);
-          final medias = biliPairToMedias(part: labeled, pair: pair);
-          final audio = medias.audio;
-          final res = await coordinator.enqueueBiliMedia(
-            medias.video,
-            // durl 退化路径没有第二条流：给一条空地址的音频占位，
-            // 协调器据此走「投一条、不建配对、不合并」。
-            audio ?? _noStreamAudio(part),
-            base,
-            cfg,
-          );
-
-          switch (res.outcome) {
-            case EnqueueOutcome.queued:
-              queued++;
-              await _markPending(ledger, key, res, labeled);
-              if (res.message != null) _addNote(notes, res.message);
-            case EnqueueOutcome.skippedExisting:
-              // 「同名跳过」看的是**成品**在不在（不是裸流），这条口径由协调器持有。
-              skippedDisk++;
-            case EnqueueOutcome.notReady:
-            case EnqueueOutcome.rejected:
-            case EnqueueOutcome.removeFailed:
-              failed++;
-              AppLogger.log(
-                'BILI',
-                '入队失败（${res.outcome.name}，${part.id}）：${res.message ?? '无说明'}',
-              );
-              _addNote(notes, res.message);
-          }
-        } catch (e) {
-          failed++;
-          AppLogger.log('BILI', '取流/入队异常（${part.id}）：$e');
-          _addNote(notes, '$e');
-        }
-      }
+      run = await biliDownloadParts(
+        api: api,
+        cfg: cfg,
+        parts: chosen,
+        ledger: ledger,
+        coordinator: coordinator,
+      );
     } finally {
       if (mounted) {
         store.setBusy(false);
@@ -637,22 +502,24 @@ class _BiliPageState extends State<BiliPage> {
     if (!mounted) return;
     AppLogger.log(
       'BILI',
-      '本批入队完成：提交 $queued / 台账跳过 $skippedLedger / 成品已在磁盘 $skippedDisk / 失败 $failed',
+      '本批入队完成：提交 ${run.queued} / 台账跳过 ${run.skippedLedger} / '
+      '成品已在磁盘 ${run.skippedDisk} / 失败 ${run.failed}',
     );
-    final parts = <String>[tf('已提交 {n} 条', {'n': queued})];
-    if (skippedLedger > 0) {
-      parts.add(tf('跳过 {n} 条（台账里已处理过）', {'n': skippedLedger}));
+    final parts = <String>[tf('已提交 {n} 条', {'n': run.queued})];
+    if (run.skippedLedger > 0) {
+      parts.add(tf('跳过 {n} 条（台账里已处理过）', {'n': run.skippedLedger}));
     }
-    if (skippedDisk > 0) {
-      parts.add(tf('成品已在磁盘 {n} 条', {'n': skippedDisk}));
+    if (run.skippedDisk > 0) {
+      parts.add(tf('成品已在磁盘 {n} 条', {'n': run.skippedDisk}));
     }
-    if (failed > 0) parts.add(tf('失败 {n} 条', {'n': failed}));
+    if (run.failed > 0) parts.add(tf('失败 {n} 条', {'n': run.failed}));
+    final notes = run.notes;
     final msg = notes.isEmpty ? parts.join('，') : '${parts.join('，')}：${notes.first}';
 
     AppToast.show(
       context,
       msg,
-      kind: failed > 0 ? AppToastKind.error : AppToastKind.success,
+      kind: run.failed > 0 ? AppToastKind.error : AppToastKind.success,
       duration: const Duration(seconds: 5),
       actionLabel: widget.onNavigate == null ? null : t('去下载管理'),
       // 必须落在**本模块的**路由上：跳到 X 或抖音那份下载管理，用户看到的
@@ -663,42 +530,8 @@ class _BiliPageState extends State<BiliPage> {
     );
   }
 
-  /// 入队成功之后记一笔「在下」（等收口回调转 done）。
-  Future<void> _markPending(
-    BiliLedger ledger,
-    BiliKeyGroup key,
-    BiliEnqueueResult res,
-    Media labeled,
-  ) async {
-    if (!biliKeyGroupUsable(key)) {
-      AppLogger.log('BILI', '键组不完整，这条不记台账：${labeled.id}');
-      return;
-    }
-    final ids = [res.videoLocalId, res.audioLocalId].whereType<String>().toList();
-    final hash = ledger.hashOf(key);
-    await ledger.markPending(
-      [key],
-      meta: {hash: (title: labeled.bili?.workTitle, author: labeled.userName)},
-      taskIds: {hash: ids},
-    );
-  }
 
-  /// durl 退化路径的音频占位：`url` 为空 + `chosen` 为空，正是协调器判
-  /// 「没有第二条流」的那两个条件（见 `enqueueBiliMedia` 的 `single`）。
-  Media _noStreamAudio(Media part) => Media(
-        id: '${part.id}_audio',
-        type: MediaType.audio,
-        url: '',
-        tweetId: part.tweetId,
-        source: 'bili',
-      );
 
-  /// 失败原因只留**第一条**并且去重 —— 几十条分 P 撞同一个风控时，
-  /// 提示条里不该出现三十遍同一句话（其余的都在日志里）。
-  void _addNote(List<String> notes, String? why) {
-    if (why == null || why.isEmpty) return;
-    if (!notes.contains(why)) notes.add(why);
-  }
 
   // ── 界面 ────────────────────────────────────────────────────
 

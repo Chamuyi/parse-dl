@@ -62,6 +62,7 @@ const kNavGroups = <NavGroup>[
   // 当场把它撞出来了。组里的子项已经写明是「解析下载」，标题不必再重复一遍。
   NavGroup('bili', 'B 站下载', Icons.live_tv_rounded, [
     NavItem('bili', '解析下载', Icons.play_circle_outline_rounded),
+    NavItem('bili-batch', '批量下载', Icons.playlist_play_rounded),
     NavItem('bili-downloads', '下载管理', Icons.download_rounded),
     NavItem('bili-settings', 'B 站设置', Icons.tune_rounded),
   ], '站'),

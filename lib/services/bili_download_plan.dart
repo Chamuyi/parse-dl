@@ -362,3 +362,40 @@ Media _withStream(
           ),
   );
 }
+
+// ── 分 P 的媒体形状 ──────────────────────────────────────────────
+
+/// 把选流结果里的画质 / 编码标签补进这条分 P。
+///
+/// 为什么必须在**选流之后**：`%QUALITY%` / `%CODEC%` 读的是 `Media.bili` 里这两个
+/// 标签（见 `file_name_template.dart`），而它们只有等 `planBiliStreams` 挑出实际
+/// 档位才知道该写什么 —— 列表里那批 `biliPartMedia()` 刻意不带标签，
+/// 因为「上限 1080P60」与「这次真拿到 1080P」是两件事，写早了就是替用户说谎。
+Media biliPartWithLabels(
+  Media part, {
+  required int videoQn,
+  required BiliCodec? codec,
+  required BiliPlayUrl r,
+}) {
+  final b = part.bili;
+  if (b == null) return part;
+  // 档位文案优先用响应里 `support_formats` 给的那一份（它才是 B 站自己怎么说这一档的），
+  // 查不到才退回内置的短标签表。
+  final fromResponse = r.video
+      .where((s) => s.id == videoQn && !s.isAudio)
+      .map((s) => s.qualityLabel)
+      .firstWhere((label) => label.isNotEmpty, orElse: () => '');
+  return part.copyWith(
+    bili: BiliMeta(
+      workTitle: b.workTitle,
+      partTitle: b.partTitle,
+      bvid: b.bvid,
+      aid: b.aid,
+      cid: b.cid,
+      partTotal: b.partTotal,
+      qualityLabel:
+          fromResponse.isNotEmpty ? fromResponse : (kBiliQualityNames[videoQn] ?? ''),
+      codecLabel: codec == null ? '' : biliCodecLabel(codec),
+    ),
+  );
+}

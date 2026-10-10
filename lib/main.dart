@@ -12,6 +12,7 @@ import 'services/app_paths.dart';
 import 'services/app_state.dart';
 import 'services/aria2_coordinator.dart';
 import 'services/auto_task_store.dart';
+import 'services/bili_batch_store.dart';
 import 'services/bili_ledger.dart';
 import 'services/bili_additional_runner.dart';
 import 'services/bili_api.dart';
@@ -186,6 +187,8 @@ Future<void> main() async {
   final biliLedger = BiliLedger();
   await biliLedger.load();
   final biliStore = BiliStore();
+  // 批量页的目标与进度同样挂 app 级：跑一半切页面不丢。
+  final biliBatchStore = BiliBatchStore();
 
   // 合并结局 → 台账转 done。**这是唯一的转 done 入口**。
   bindBiliLedgerToSettled(coordinator, biliLedger);
@@ -268,6 +271,7 @@ Future<void> main() async {
     douyinStore: douyinStore,
     douyinAutoStore: douyinAutoStore,
     biliStore: biliStore,
+    biliBatchStore: biliBatchStore,
     biliLedger: biliLedger,
   ));
 }

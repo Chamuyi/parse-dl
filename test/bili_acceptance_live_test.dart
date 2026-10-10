@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parse_dl/models/bili_config.dart';
-import 'package:parse_dl/pages/bili_page.dart' show biliPartWithLabels;
 import 'package:parse_dl/services/aria2.dart';
 import 'package:parse_dl/services/aria2_coordinator.dart';
 import 'package:parse_dl/services/app_logger.dart';

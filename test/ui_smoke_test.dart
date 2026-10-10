@@ -8,6 +8,7 @@ import 'package:parse_dl/models/media.dart';
 import 'package:parse_dl/models/settings.dart';
 import 'package:parse_dl/pages/about_page.dart';
 import 'package:parse_dl/pages/auto_task_page.dart';
+import 'package:parse_dl/pages/bili_batch_page.dart';
 import 'package:parse_dl/pages/download_management_page.dart';
 import 'package:parse_dl/pages/douyin_auto_page.dart';
 import 'package:parse_dl/pages/homepage_page.dart';
@@ -16,6 +17,7 @@ import 'package:parse_dl/services/app_paths.dart';
 import 'package:parse_dl/services/app_state.dart';
 import 'package:parse_dl/services/aria2_coordinator.dart';
 import 'package:parse_dl/services/auto_task_store.dart';
+import 'package:parse_dl/services/bili_batch_store.dart';
 import 'package:parse_dl/services/bili_ledger.dart';
 import 'package:parse_dl/services/creation_task_store.dart';
 import 'package:parse_dl/services/download_store.dart';
@@ -53,6 +55,7 @@ void main() {
   late CreationTaskStore creationTasks;
   late DouyinAutoStore douyinAuto;
   late BiliLedger biliLedger;
+  late BiliBatchStore biliBatch;
 
   setUp(() async {
     AppPrefs.setMockInitialValues({});
@@ -77,6 +80,7 @@ void main() {
     // 「下载管理（B 站）」那个 Tab 的角标读 `BiliLedger`，树上没有它就直接抛
     // ProviderNotFound —— 与 `main.dart` 里必须挂上它是同一件事的两侧。
     biliLedger = BiliLedger();
+    biliBatch = BiliBatchStore();
   });
 
   tearDown(() async {
@@ -164,6 +168,7 @@ void main() {
             ChangeNotifierProvider<DouyinStore>.value(value: douyin),
             ChangeNotifierProvider<DouyinAutoStore>.value(value: douyinAuto),
             ChangeNotifierProvider<BiliLedger>.value(value: biliLedger),
+            ChangeNotifierProvider<BiliBatchStore>.value(value: biliBatch),
           ],
           child: MaterialApp(home: Scaffold(body: page)),
         ),
@@ -188,6 +193,9 @@ void main() {
     'B 站下载管理': () => const DownloadManagementPage(feed: DownloadFeed.bili),
     '自动执行': () => const AutoTaskPage(),
     '抖音自动下载': () => const DouyinAutoPage(),
+    // 批量页这一屏：WebView 在测试里起不来，走的正是那块「没有运行时」的占位面板，
+    // 所以这里能验右侧面板在三种窗口尺寸下不撑破。
+    'B 站批量下载': () => const BiliBatchPage(),
     '全局设置': () => SettingsPage(
         brightness: Brightness.dark, onMaterialChanged: (_) async {}),
     'X 下载设置': () => SettingsPage(
