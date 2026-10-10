@@ -31,6 +31,13 @@ class TemplateVar {
   final String desc;
   final List<TemplateParam> params;
 
+  /// 该变量的值是**序号类整数**（分P号、季号、集号…）。
+  ///
+  /// 只影响可选段 `<...>` 的判空口径：数值型变量里的 `0` 表示"没有这一项"
+  /// （单 P 视频没有 P 号），所以按空处理；非数值型变量哪怕内容就是字符 `0`
+  /// 也不算空 —— 标题真叫「0」的作品是存在的。
+  final bool numeric;
+
   /// 给定媒体数据 + 解析后的参数，返回替换文本。
   final String Function(Media media, Map<String, String> params) replacer;
 
@@ -39,6 +46,7 @@ class TemplateVar {
     required this.desc,
     required this.replacer,
     this.params = const [],
+    this.numeric = false,
   });
 
   /// 带参数时给 UI 展示的提示文本，无参数返回 null。
@@ -417,11 +425,38 @@ String formatCreateTime(DateTime? t, {bool dateOnly = false}) {
   return '$date${p2(t.hour)}${p2(t.minute)}${p2(t.second)}';
 }
 
-/// 把模板里的 `%VAR%` 全部替换成实际值。
+/// 可选段 `<...>` 内部出现了"空值"的信号（仅供 [resolveVariables] 内部使用）。
+class _OptionalSegmentEmpty {
+  const _OptionalSegmentEmpty();
+}
+
+/// 成对的 `<...>`，段内不再嵌套尖括号（本期只支持一层，B 站的模板用不到嵌套）。
+final _optionalSegmentRe = RegExp(r'<([^<>]*)>');
+
+/// 可选段的占位符边界字符。控制字符在两条清洗路径里都会被换成 `_`/`!`，
+/// 所以用户手打的模板里不可能出现它，回填时不会误伤。
+const String _segmentMark = '\u0001';
+
+/// 可选段里"这一项算不算没有"。
+///
+/// 判据必须看**变量的原始值**，不能看渲染后的文本：单 P 视频的 P 号原始值是 `0`，
+/// 但渲染出来是 `"00"`，按文本判空就漏掉了 —— 参照实现正是栽在这里，
+/// 结果所有单 P 作品都多出一个 `P00`。
+bool _isEmptyForOptionalSegment(TemplateVar v, String raw) {
+  if (raw.isEmpty) return true;
+  if (!v.numeric) return false;
+  final n = int.tryParse(raw.trim());
+  return n == 0;
+}
+
+/// 把模板里的 `%VAR%` 全部替换成实际值，并处理可选段 `<...>`。
 ///
 /// **只对「变量替换出来的值」做文件名净化**，模板里的字面字符原样保留 ——
 /// 这样文件夹模板里的 `/` 才能当作路径分隔符用（原版就是这个行为）。
-/// 把模板里的 `%VAR%` 全部替换成实际值。
+///
+/// 可选段：段内**任一**变量按 [_isEmptyForOptionalSegment] 判为空，整段连同
+/// 其中的字面字符一起丢弃（`<P%P%>-%TITLE%` 在单 P 时得到 `标题` 而不是 `-标题`）。
+/// 不成对的 `<` / `>` 原样保留，交给后续的整串清洗处理。
 ///
 /// [perVar] 是**逐个变量值**的净化函数，默认 X 侧那套 [unicodeFilenamify]
 /// （非法字符换 `!`）。抖音侧要传 `(s) => s` 跳过它 —— 抖音那套清洗是整串拼好之后
@@ -433,18 +468,53 @@ String resolveVariables(
   String Function(String)? perVar,
 }) {
   final clean = perVar ?? unicodeFilenamify;
-  var text = template;
-  for (final v in kAllTemplateVars) {
-    final re = RegExp(
-      '%${v.name}((?:,[a-z]+=[^%]+?)+)?%',
-      caseSensitive: false,
+
+  /// [strict] 为真时任一空值变量都抛 [_OptionalSegmentEmpty]（用于可选段判空）。
+  String expand(String text, {bool strict = false}) {
+    var out = text;
+    for (final v in kAllTemplateVars) {
+      final re = RegExp(
+        '%${v.name}((?:,[a-z]+=[^%]+?)+)?%',
+        caseSensitive: false,
+      );
+      if (!re.hasMatch(out)) continue;
+      out = out.replaceAllMapped(re, (match) {
+        final params = _parseParams(match.group(1));
+        final raw = v.replacer(media, params);
+        if (strict && _isEmptyForOptionalSegment(v, raw)) {
+          throw const _OptionalSegmentEmpty();
+        }
+        return clean(raw);
+      });
+    }
+    return out;
+  }
+
+  // ① 先把成对的可选段摘出来，用占位符顶替。
+  //    顺序很关键：**只扫模板，不扫注入结果** —— 变量值里出现 `<x>` 时
+  //    （`test/file_name_template_test.dart:118` 就有 `a<b>c:d"e/f\g|h?i*j` 这种输入），
+  //    若先展开再找尖括号，那段注入文本会被当成可选段吞掉。
+  final segments = <String>[];
+  var text = template.replaceAllMapped(_optionalSegmentRe, (m) {
+    String body;
+    try {
+      body = expand(m.group(1)!, strict: true);
+    } on _OptionalSegmentEmpty {
+      body = ''; // 段内有空值 → 整段（含字面字符）丢弃
+    }
+    segments.add(body);
+    return '$_segmentMark${segments.length - 1}$_segmentMark';
+  });
+
+  // ② 主展开（与改动前完全同一条循环、同一套顺序）
+  text = expand(text);
+
+  // ③ 回填摘出来的段。占位符里的控制字符会被清洗掉，所以不会被别的路径碰到。
+  if (segments.isNotEmpty) {
+    text = text.replaceAllMapped(
+      RegExp('$_segmentMark(\\d+)$_segmentMark'),
+      (m) => segments[int.parse(m.group(1)!)],
     );
-    if (!re.hasMatch(text)) continue;
-    text = text.replaceAllMapped(re, (match) {
-      final params = _parseParams(match.group(1));
-      final raw = v.replacer(media, params);
-      return clean(raw);
-    });
   }
   return text;
 }
