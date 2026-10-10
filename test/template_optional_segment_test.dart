@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parse_dl/models/media.dart';
 import 'package:parse_dl/services/file_name_template.dart';
@@ -84,6 +86,69 @@ void main() {
         ),
         isNotEmpty,
       );
+    });
+  });
+
+  group('全路径 260 保护', () {
+    const dir = r'D:\demo\dl\把一年的海边拍成十二段';
+
+    test('放得下时原名一字不动', () {
+      final name = 'P03-第3P 冬天-1080P60-AV1.mp4';
+      expect(clampNameForFullPath(dir, name), name);
+      expect(pathFitsWindowsMax(dir, name), isTrue);
+    });
+
+    test('超出时只裁文件名，扩展名保住', () {
+      final long = '${'标' * 300}.mp4';
+      final out = clampNameForFullPath(dir, long);
+      expect(out.endsWith('.mp4'), isTrue);
+      expect(out.length, lessThan(long.length));
+      expect(pathFitsWindowsMax(dir, out), isTrue);
+    });
+
+    test('计数按 UTF-16 码元，不是 UTF-8 字节（中文不按字节多砍）', () {
+      // 250 个汉字 = 750 字节，但 Windows 计 250 个码元；配合这个目录刚好放得下
+      final cjk = '${'汉' * 200}.mp4';
+      final dir2 = r'D:\demo\dl';
+      expect(pathFitsWindowsMax(dir2, cjk), isTrue);
+      expect(utf8.encode(cjk).length, greaterThan(260), reason: '字节数早就超了');
+      expect(clampNameForFullPath(dir2, cjk), cjk);
+    });
+
+    test('不把代理对切成半个（emoji 结尾不能留下高代理）', () {
+      // 目录 4 个码元 → 名字预算 260-8-4-1=247，去掉 `.mp4` 后主体剩 243。
+      // 故意把 emoji 摆在第 243/244 码元上：不处理就会留下半个高代理。
+      final withEmoji = '${'x' * 242}\u{1F600}.mp4';
+      final out = clampNameForFullPath(r'D:\d', withEmoji);
+      expect(out.length, lessThanOrEqualTo(247));
+      // 关键判据：结果里不许有落单的高代理
+      for (var i = 0; i < out.length; i++) {
+        final u = out.codeUnitAt(i);
+        if (u >= 0xD800 && u <= 0xDBFF) {
+          expect(out.codeUnitAt(i + 1) >= 0xDC00 && out.codeUnitAt(i + 1) <= 0xDFFF,
+              isTrue,
+              reason: '位置 $i 留下半个代理对：${out.codeUnits}');
+        }
+      }
+    });
+
+    test('开头的点不算扩展名（`.gitignore` 式名字整串都是主体）', () {
+      final dotted = '.${'x' * 300}';
+      final out = clampNameForFullPath(r'D:\d', dotted);
+      expect(out.startsWith('.'), isTrue);
+      expect(out.length, lessThan(dotted.length));
+    });
+
+    test('目录本身已经长到放不下时，压到最短并如实报放不下', () {
+      final hugeDir = 'D:/${'深' * 250}';
+      final out = clampNameForFullPath(hugeDir, 'a.mp4');
+      expect(pathFitsWindowsMax(hugeDir, out), isFalse);
+      expect(out, isNotEmpty, reason: '不能交回空名字，aria2 的 out: 没有二次补救机会');
+    });
+
+    test('留了余量：正好 260 也算放不下（要给 .aria2 与控制文件腾地方）', () {
+      final name = '${'x' * (260 - 1 - r'D:\demo'.length)}.mp4';
+      expect(pathFitsWindowsMax(r'D:\demo', name), isFalse);
     });
   });
 }

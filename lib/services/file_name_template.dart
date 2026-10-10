@@ -881,3 +881,63 @@ Media biliExampleMedia() => Media(
     dataSize: 377487360,
   ),
 );
+
+// ── 全路径长度保护 ─────────────────────────────────────────────
+//
+// 为什么要有这一段：文件名整串只截 200 个码元（`kDouyinFileNameMax`），
+// 但 200 个**汉字**的名字配上「UP 主 / 作品」两级模板目录，再加上保存根目录，
+// 很容易越过 Windows 传统 API 的 `MAX_PATH = 260`。跨过去的表现不是报错，
+// 是 aria2 建文件失败、或者资源管理器里那个文件打不开也删不掉。
+//
+// 参照实现两家都**不做**这件事（Bili23 只在模板编辑器里提示一句风险，
+// DownKyi 连提示都没有），所以这是我们这边补上的保护，不是抄来的。
+//
+// **调用点**：`aria2_coordinator.enqueueMedia` 把 `saveDir` 与 `out` 拼成
+// `fullPath` 那一段 —— 只有在那里才同时知道目录和名字。
+
+/// Windows 传统路径上限（`MAX_PATH`，含结尾的 NUL 位）。
+const int kWindowsMaxPath = 260;
+
+/// 留给 aria2 的余量：它会在旁边写 `xxx.aria2` 控制文件，
+/// `--auto-file-renaming` 生效时还要能塞下 ` (1)` 之类的后缀。
+const int kPathSlack = 8;
+
+/// 整条路径（目录 + 文件名）是否放得下。
+bool pathFitsWindowsMax(String saveDir, String fileName) =>
+    _joinedLength(saveDir, fileName) <= kWindowsMaxPath - kPathSlack;
+
+/// 把文件名裁到整条路径放得下，**保住扩展名**。
+///
+/// 只动文件名、不动目录：目录是用户自己用模板选的，程序擅自改目录层级
+/// 会让人在盘上找不到东西。目录本身已经长到放不下时，这里只能把名字压到
+/// 最短（保住扩展名与一个字符），并由调用方用 [pathFitsWindowsMax] 决定是否提示用户。
+///
+/// 计数用 UTF-16 码元（`String.length`）—— 这才是 Windows 内核量的单位；
+/// 按 UTF-8 字节算会把中文名字无谓地砍短一半。
+String clampNameForFullPath(String saveDir, String fileName) {
+  // 目录与文件名之间还有一个分隔符；`_joinedLength(saveDir, '')` 是不算它的，
+  // 照它算预算会多留一格，正好把名字放到超限（测试抓出来的 off-by-one）。
+  final budget = kWindowsMaxPath - kPathSlack - saveDir.length - 1;
+  if (fileName.length <= budget && budget >= 1) return fileName;
+  if (budget < 1) return fileName;
+
+  final dot = fileName.lastIndexOf('.');
+  // 开头的点不算扩展名（`.gitignore` 这类整串都是名字）
+  final hasExt = dot > 0;
+  final ext = hasExt ? fileName.substring(dot) : '';
+  final stem = hasExt ? fileName.substring(0, dot) : fileName;
+  final stemBudget = budget - ext.length;
+  if (stemBudget <= 0) return fileName;
+
+  var cut = stem.substring(0, stem.length > stemBudget ? stemBudget : stem.length);
+  // 不要正好切在代理对中间：那样会留下半个 emoji，Windows 那边变成非法字符
+  if (cut.isNotEmpty && _isHighSurrogate(cut.codeUnitAt(cut.length - 1))) {
+    cut = cut.substring(0, cut.length - 1);
+  }
+  return '$cut$ext';
+}
+
+int _joinedLength(String dir, String name) =>
+    dir.length + (name.isEmpty ? 0 : 1) + name.length;
+
+bool _isHighSurrogate(int unit) => unit >= 0xD800 && unit <= 0xDBFF;
