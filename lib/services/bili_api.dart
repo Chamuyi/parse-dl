@@ -893,6 +893,29 @@ class BiliApi {
     return _unwrap(body, what);
   }
 
+  // ── 对外露出的两个取数口（列表类接口用，见 `bili_list_api.dart`）──
+  //
+  // 刻意做成两个而不是一个：B 站的接口分成「要 WBI 签名」与「不要签名」两类。
+  // 合成一个口就得让调用方去猜该不该签，而猜错的现场是 HTTP 412（实测
+  // `x/space/wbi/arc/search` 不签名直接被拒），从报错里看不出是签名的锅。
+
+  /// 不签名取 `data`。合集 / 系列 / `card` / 收藏夹这几支实测匿名即可。
+  Future<Map<String, dynamic>> getData(
+    String path,
+    Map<String, dynamic>? params, {
+    required String what,
+  }) => _data(path, params, what: what);
+
+  /// WBI 签名取 `data`。`path` 形如 `/x/space/wbi/arc/search`。
+  ///
+  /// `-403` 会清掉密钥缓存重取一次再试（密钥按天轮换），这个行为在私有的
+  /// [_signedData] 里，这里只是把它露出来。
+  Future<Map<String, dynamic>> getSignedData(
+    String path,
+    Map<String, dynamic> params, {
+    required String what,
+  }) => _signedData(path, params, what: what);
+
   Map<String, dynamic> _unwrap(Map<String, dynamic> body, String what) {
     final code = _int(body['code']);
     if (code != 0) {
