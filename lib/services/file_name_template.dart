@@ -1,3 +1,4 @@
+import '../models/bili_meta.dart';
 import '../models/media.dart';
 import '../models/media_variant.dart';
 import '../l10n/l10n.dart';
@@ -62,13 +63,13 @@ class TemplateVar {
   }
 }
 
-/// **全部**模板变量（X + 抖音），**顺序即替换顺序**（与原版 REPLACER_MAP 的
+/// **全部**模板变量（X + 抖音 + B 站），**顺序即替换顺序**（与原版 REPLACER_MAP 的
 /// 插入顺序一致）。
 ///
 /// 解析模板时用这一份全集：用户可能在任一模块里存了带另一个平台变量的旧模板，
 /// 用全集解析才不会出现「变量原样留在文件名里」。**界面上不直接展示它** ——
-/// 两个模块各自只显示属于自己语义的那一份（见下方 [kXTemplateVars] /
-/// [kDouyinTemplateVars]），免得 X 设置里冒出抖音变量、或反过来。
+/// 三个模块各自只显示属于自己语义的那一份（见下方 [kXTemplateVars] /
+/// [kDouyinTemplateVars] / [kBiliTemplateVars]），免得 X 设置里冒出抖音变量、或反过来。
 final List<TemplateVar> kAllTemplateVars = [
   TemplateVar(
     name: 'POST_ID',
@@ -291,17 +292,97 @@ final List<TemplateVar> kAllTemplateVars = [
     desc: '分享数',
     replacer: (m, _) => '${formatStatCount(m.shareCount)}分享',
   ),
+
+  // ── B 站专有变量 ─────────────────────────────────────────────
+  //
+  // 取值全部来自 `Media.bili`（见 `models/bili_meta.dart`）；非 B 站媒体上
+  // 这个块是 null，一律回空串 —— 用户把 B 站变量手打进 X 模板里也不会崩，
+  // 只会得到空值，而空值正好让可选段 `<...>` 整段消失。
+  //
+  // `numeric: true` 的两个（P / PART_TOTAL）：`0` 表示「没有这一项」，
+  // 可选段按空处理。单 P 视频的 `%P%` 就是 0 —— 参照实现把它渲染成 `P00`
+  // 的那个坑，靠这个标记堵住。
+  TemplateVar(
+    name: 'WORK_TITLE',
+    desc: '作品标题',
+    replacer: (m, _) => m.bili?.workTitle ?? '',
+  ),
+  TemplateVar(
+    name: 'PART_TITLE',
+    desc: '分P标题',
+    replacer: (m, _) => m.bili?.partTitle ?? '',
+  ),
+  TemplateVar(
+    name: 'P',
+    desc: '分P序号',
+    numeric: true,
+    params: const [TemplateParam('w', '补零位数（0=按分P总数自动）', '0')],
+    replacer: (m, p) {
+      // **没有 bili 块 ≠ 单 P**：X / 抖音的媒体上这两个序号类变量出空串，
+      // 与其余 B 站变量口径一致；单 P 稿件才是 `'0'`（配合 numeric 让可选段消失）。
+      final b = m.bili;
+      if (b == null) return '';
+      if (b.isSinglePart) return '0';
+      final wParam = int.tryParse(p['w'] ?? '');
+      final width = (wParam != null && wParam > 0)
+          ? wParam
+          : b.partTotal.toString().length;
+      return m.mediaIndex.toString().padLeft(width < 1 ? 1 : width, '0');
+    },
+  ),
+  TemplateVar(
+    name: 'PART_TOTAL',
+    desc: '分P总数',
+    numeric: true,
+    replacer: (m, _) => m.bili == null ? '' : '${m.bili!.partTotal}',
+  ),
+  TemplateVar(
+    name: 'BVID',
+    desc: 'BV号',
+    replacer: (m, _) => m.bili?.bvid ?? '',
+  ),
+  TemplateVar(
+    name: 'AVID',
+    desc: 'av号',
+    replacer: (m, _) => m.bili?.aid ?? '',
+  ),
+  TemplateVar(
+    name: 'CID',
+    desc: '内容ID',
+    replacer: (m, _) => m.bili?.cid ?? '',
+  ),
+  TemplateVar(
+    name: 'UP_NAME',
+    desc: 'UP主昵称',
+    replacer: (m, _) => m.userName ?? '',
+  ),
+  TemplateVar(
+    name: 'UP_MID',
+    desc: 'UP主ID',
+    replacer: (m, _) => m.userId ?? '',
+  ),
+  TemplateVar(
+    name: 'QUALITY',
+    desc: '画质',
+    replacer: (m, _) => m.bili?.qualityLabel ?? '',
+  ),
+  TemplateVar(
+    name: 'CODEC',
+    desc: '编码格式',
+    replacer: (m, _) => m.bili?.codecLabel ?? '',
+  ),
 ];
 
-// ── 按平台划分的变量视图（设置页的「可用变量」表用这两份）──────────
+// ── 按平台划分的变量视图（设置页的「可用变量」表用这三份）──────────
 //
-// 为什么要分：两个模块的业务术语完全不同。X 侧说「推文 / 用户名 / 推文内容」，
-// 抖音侧说「作品 / 作者 / 作品描述」。把 30 个变量混在一张表里，用户会在
-// X 设置里看到 %AWEME_ID%，在抖音设置里看到「推文内容」——都是噪音。
+// 为什么要分：三个模块的业务术语完全不同。X 侧说「推文 / 用户名 / 推文内容」，
+// 抖音侧说「作品 / 作者 / 作品描述」，B 站侧说「作品 / 分P / UP 主」。把 42 个
+// 变量混在一张表里，用户会在 X 设置里看到 %AWEME_ID%，在 B 站设置里看到「推文
+// 内容」——都是噪音。
 //
 // 只是**视图**：底层定义仍是 [kAllTemplateVars] 一份，解析行为不受影响。
 
-/// 两个平台共有的、只跟「文件」有关的变量。
+/// 三个平台共有的、只跟「文件」有关的变量。
 const Set<String> kCommonVarNames = {'MEDIA_INDEX', 'MEDIA_TYPE', 'EXT'};
 
 /// X 下载设置里显示的变量名。**不含任何抖音术语**。
@@ -352,6 +433,41 @@ const Set<String> kDouyinVarNames = {
   // ── 通用 ──
   ...kCommonVarNames,
 };
+
+
+/// B 站解析下载设置里显示的变量名。**不含 X 与抖音的术语**
+/// （`test/platform_terms_test.dart` 会盯这条边界）。
+///
+/// 其中 11 个是 B 站专有；`RESOLUTION`/`DURATION`/`FILE_SIZE`/`CUSTOM_TEXT`
+/// 是跟文件本身有关的中性变量，三个模块共用同一份定义。
+const Set<String> kBiliVarNames = {
+  // ── 作品与分P ──
+  'WORK_TITLE',
+  'PART_TITLE',
+  'P',
+  'PART_TOTAL',
+  'BVID',
+  'AVID',
+  'CID',
+  // ── UP 主 ──
+  'UP_NAME',
+  'UP_MID',
+  // ── 下载配置 ──
+  'QUALITY',
+  'CODEC',
+  'CUSTOM_TEXT',
+  // ── 文件属性 ──
+  'RESOLUTION',
+  'DURATION',
+  'FILE_SIZE',
+  // ── 通用 ──
+  ...kCommonVarNames,
+};
+
+/// B 站解析下载设置页的「可用变量」表。
+final List<TemplateVar> kBiliTemplateVars = kAllTemplateVars
+    .where((v) => kBiliVarNames.contains(v.name))
+    .toList(growable: false);
 
 /// X 下载设置页的「可用变量」表。
 final List<TemplateVar> kXTemplateVars = kAllTemplateVars
@@ -657,9 +773,10 @@ String unicodeFilenamify(String str) {
 
 /// ── 示例数据：设置页「输出示例」用它预览模板效果 ──
 //
-// **两个平台各一份，不共用。** 原因不只是术语：抖音的变量语义（作者 / 作品
-// 描述 / 抖音号 / 作品数据）跟 X（推文 / 用户名 / 转推标签）完全是两套，
-// 拿 X 的样例去预览抖音模板，输出示例会是一堆空值，看不出模板对不对。
+// **三个平台各一份，不共用。** 原因不只是术语：抖音的变量语义（作者 / 作品
+// 描述 / 抖音号 / 作品数据）、B 站的（作品 / 分P / UP 主 / BV 号）跟 X（推文 /
+// 用户名 / 转推标签）是三套，拿 X 的样例去预览它们的模板，输出示例会是一堆空值，
+// 看不出模板对不对。
 
 /// X 下载设置里预览模板用的示例媒体（一条推文里的图片）。
 ///
@@ -718,5 +835,49 @@ Media douyinExampleMedia() => Media(
     fps: 30,
     bitrate: 2400000,
     dataSize: 12582912,
+  ),
+);
+
+/// B 站解析下载设置里预览模板用的示例媒体（一条 12 分 P 稿件的第 3 P）。
+///
+/// 刻意选**多 P**：`%P%` 在单 P 时按空处理，用单 P 样例预览会让 `<P%P%>` 这段
+/// 直接消失，用户在设置页里就看不出补零到底生效没有。
+Media biliExampleMedia() => Media(
+  id: 'BV1y4411o7Kp-3',
+  type: MediaType.video,
+  url: 'https://upos-sz-mirrorhw.bilivideo.com/example/video.m4s',
+  previewUrl: 'https://i0.hdslb.com/bfs/archive/example_cover.jpg',
+  width: 1920,
+  height: 1080,
+  tweetId: 'BV1y4411o7Kp',
+  tweetText: '【4K】把一年的海边拍成十二段，第 3 段是冬天。',
+  createdAt: DateTime.fromMillisecondsSinceEpoch(1705756536000),
+  userId: '349326425505',
+  userName: '海边的猫',
+  tags: const ['旅行', 'vlog'],
+  mediaIndex: 3,
+  source: 'bili',
+  durationMs: 632000,
+  likeCount: 12345,
+  commentCount: 678,
+  shareCount: 89,
+  bili: const BiliMeta(
+    workTitle: '把一年的海边拍成十二段',
+    partTitle: '第3P 冬天',
+    bvid: 'BV1y4411o7Kp',
+    aid: '426593054',
+    cid: '765432109',
+    partTotal: 12,
+    qualityLabel: '1080P60',
+    codecLabel: 'AV1',
+  ),
+  chosen: const MediaVariant(
+    urls: ['https://upos-sz-mirrorhw.bilivideo.com/example/video.m4s'],
+    kind: VariantKind.bitRate,
+    width: 1920,
+    height: 1080,
+    fps: 60,
+    bitrate: 4800000,
+    dataSize: 377487360,
   ),
 );

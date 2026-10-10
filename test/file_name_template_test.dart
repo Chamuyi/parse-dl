@@ -200,7 +200,7 @@ void main() {
   });
 
   group('可用变量表', () {
-    test('14 个原版变量 + 16 个抖音变量，顺序即替换顺序', () {
+    test('14 个原版变量 + 17 个抖音变量 + 11 个 B 站变量，顺序即替换顺序', () {
       expect(kAllTemplateVars.map((v) => v.name).toList(), [
         // ── 原版 X-Spider 的 14 个 ──
         'POST_ID',
@@ -235,14 +235,29 @@ void main() {
         'COMMENT_COUNT',
         'COLLECT_COUNT',
         'SHARE_COUNT',
+        // ── B 站专有 11 个，顺序 = 变量块里的声明顺序 ──
+        'WORK_TITLE',
+        'PART_TITLE',
+        'P',
+        'PART_TOTAL',
+        'BVID',
+        'AVID',
+        'CID',
+        'UP_NAME',
+        'UP_MID',
+        'QUALITY',
+        'CODEC',
       ]);
-      expect(kAllTemplateVars, hasLength(31));
+      expect(kAllTemplateVars, hasLength(42));
     });
 
-    test('只有 POST_TIME / CONTENT / CREATE_TIME / DESCRIPTION 带参数', () {
+    test('只有 POST_TIME / CONTENT / CREATE_TIME / DESCRIPTION / P 带参数', () {
       final withParams =
           kAllTemplateVars.where((v) => v.params.isNotEmpty).map((v) => v.name);
-      expect(withParams, ['POST_TIME', 'CONTENT', 'CREATE_TIME', 'DESCRIPTION']);
+      expect(
+        withParams,
+        ['POST_TIME', 'CONTENT', 'CREATE_TIME', 'DESCRIPTION', 'P'],
+      );
     });
 
     test('变量名不重复（否则模板替换会互相覆盖）', () {

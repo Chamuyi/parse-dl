@@ -69,20 +69,25 @@ void main() {
       }
     });
 
-    test('两张表各取所需，且都是全集的子集', () {
+    test('三张表各取所需，且都是全集的子集', () {
       final all = kAllTemplateVars.map((v) => v.name).toSet();
       final x = kXTemplateVars.map((v) => v.name).toSet();
       final d = kDouyinTemplateVars.map((v) => v.name).toSet();
+      final b = kBiliTemplateVars.map((v) => v.name).toSet();
 
       expect(all.containsAll(x), isTrue);
       expect(all.containsAll(d), isTrue);
-      // 抖音表 17 个专有 + 3 个共用 = 20；X 表 10 个专有 + 3 个共用 = 13
+      expect(all.containsAll(b), isTrue);
+      // 抖音表 17 个专有 + 3 个共用 = 20；X 表 10 个专有 + 3 个共用 = 13；
+      // B 站表 11 个专有 + 4 个文件属性 + 3 个共用 = 18（见 bili_template_vars_test）
       expect(d.length, 20);
       expect(x.length, 13);
-      // SOURCE 是唯一「只存在于全集、两边都不展示」的变量
+      expect(b.length, 18);
+      // SOURCE 是唯一「只存在于全集、三张表都不展示」的变量
       expect(all.contains('SOURCE'), isTrue);
       expect(x.contains('SOURCE'), isFalse);
       expect(d.contains('SOURCE'), isFalse);
+      expect(b.contains('SOURCE'), isFalse);
     });
   });
 
