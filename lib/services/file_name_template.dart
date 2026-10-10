@@ -159,7 +159,7 @@ final List<TemplateVar> kAllTemplateVars = [
   TemplateVar(name: 'TAGS', desc: '推文标签', replacer: (m, _) => m.tags.join(',')),
   TemplateVar(
     name: 'SOURCE',
-    desc: '来源平台（x / douyin）',
+    desc: '来源平台（x / douyin / bili）',
     replacer: (m, _) => m.source,
   ),
 

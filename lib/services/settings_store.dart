@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../models/bili_config.dart';
 import '../models/douyin_config.dart';
 import '../models/settings.dart';
 import 'app_paths.dart';
@@ -91,6 +92,9 @@ class SettingsStore extends ChangeNotifier {
 
   Future<void> setDouyin(void Function(DouyinConfig d) mutate) =>
       update((s) => mutate(s.douyin));
+
+  Future<void> setBili(void Function(BiliConfig b) mutate) =>
+      update((s) => mutate(s.bili));
 
   Future<void> setApp(void Function(AppOptions a) mutate) =>
       update((s) => mutate(s.app));

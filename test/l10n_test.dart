@@ -8,6 +8,7 @@ import 'package:parse_dl/l10n/app_locale.dart';
 import 'package:parse_dl/l10n/l10n.dart';
 import 'package:parse_dl/l10n/strings_en.dart';
 import 'package:parse_dl/models/douyin_auto_task.dart';
+import 'package:parse_dl/models/bili_config.dart';
 import 'package:parse_dl/models/douyin_config.dart';
 import 'package:parse_dl/models/settings.dart';
 import 'package:parse_dl/services/douyin_filter.dart';
@@ -228,11 +229,21 @@ final d = t(variable);
         'DateQuickRange': DateQuickRange.values.map((e) => e.label).toList(),
         'DouyinAutoStatus':
             DouyinAutoStatus.values.map((e) => e.label).toList(),
-        '模板预设': kDouyinTemplatePresets.map((e) => e.label).toList(),
+        '模板预设': [
+          ...kDouyinTemplatePresets.map((e) => e.label),
+          ...kBiliTemplatePresets.map((e) => e.label),
+        ],
+        'BiliQuality': BiliQuality.values.map((e) => e.label).toList(),
+        'BiliCodec': BiliCodec.values.map((e) => e.label).toList(),
         '模板变量说明': [
           ...kXTemplateVars.map((e) => e.desc),
           ...kDouyinTemplateVars.map((e) => e.desc),
-          for (final v in [...kXTemplateVars, ...kDouyinTemplateVars])
+          ...kBiliTemplateVars.map((e) => e.desc),
+          for (final v in [
+            ...kXTemplateVars,
+            ...kDouyinTemplateVars,
+            ...kBiliTemplateVars,
+          ])
             for (final p in v.params) p.desc,
         ],
       }.entries) {

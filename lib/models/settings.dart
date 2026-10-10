@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../l10n/app_locale.dart';
 import '../theme/window_material.dart';
+import 'bili_config.dart';
 import 'douyin_config.dart';
 
 /// 代理设置
@@ -192,17 +193,25 @@ class Settings {
   /// 旧配置缺该字段时用默认值，不影响升级。
   DouyinConfig douyin;
 
+  /// B 站页的下载配置。形状与 [douyin] 同构，同样缺字段走默认值。
+  ///
+  /// 里面**不含 cookie**：B 站登录态只在运行时存在于内嵌 WebView2 的
+  /// 会话里，不落 `settings.json`。
+  BiliConfig bili;
+
   Settings({
     ProxySettings? proxy,
     DownloadSettings? download,
     AppOptions? app,
     AppearanceSettings? appearance,
     DouyinConfig? douyin,
+    BiliConfig? bili,
   }) : proxy = proxy ?? ProxySettings(),
        download = download ?? DownloadSettings(),
        app = app ?? AppOptions(),
        appearance = appearance ?? AppearanceSettings(),
-       douyin = douyin ?? DouyinConfig();
+       douyin = douyin ?? DouyinConfig(),
+       bili = bili ?? BiliConfig();
 
   factory Settings.fromJson(Map<String, dynamic> j) => Settings(
     proxy: ProxySettings.fromJson(
@@ -218,6 +227,9 @@ class Settings {
     douyin: DouyinConfig.fromJson(
       (j['douyin'] as Map?)?.cast<String, dynamic>() ?? {},
     ),
+    bili: BiliConfig.fromJson(
+      (j['bili'] as Map?)?.cast<String, dynamic>() ?? {},
+    ),
   );
 
   Map<String, dynamic> toJson() => {
@@ -226,6 +238,7 @@ class Settings {
     'app': app.toJson(),
     'appearance': appearance.toJson(),
     'douyin': douyin.toJson(),
+    'bili': bili.toJson(),
   };
 
   /// 持久化包装：{ state: {...}, version: 3 }

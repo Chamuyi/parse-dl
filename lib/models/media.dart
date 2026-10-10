@@ -17,7 +17,7 @@
 ///   - userId / userName / userScreenName  发布者
 ///   - tags                                话题标签
 ///   - mediaIndex                          本条媒体在作品内的序号（从 1 起）
-///   - source                              来源平台（`x` / `douyin`），`%SOURCE%` 用它
+///   - source                              来源平台（`x` / `douyin` / `bili`），`%SOURCE%` 用它
 ///   - durationMs / likeCount / commentCount / collectCount / shareCount
 ///                                         抖音统计字段，供文件名组件使用
 ///
@@ -45,7 +45,7 @@ class Media {
   final List<String> tags;
   final int mediaIndex;
 
-  /// 来源平台标识：`x`（默认，保持旧行为）或 `douyin`。
+  /// 来源平台标识：`x`（默认，保持旧行为）、`douyin` 或 `bili`。
   final String source;
 
   /// 备用下载地址（同一条媒体在其它 CDN 节点 / 其它码率上的直链）。

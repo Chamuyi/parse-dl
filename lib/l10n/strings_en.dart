@@ -528,4 +528,10 @@ const Map<String, String> kStringsEn = {
   '画质': 'Quality',
   '编码格式': 'Codec',
   '补零位数（0=按分P总数自动）': 'Zero-pad width (0 = auto by part count)',
+  '最高可用': 'Highest available',
+  '1080P 60帧': '1080P 60fps',
+  '自动（兼容性优先）': 'Auto (compatibility first)',
+  '按作品分文件夹（推荐）': 'Folder per video (recommended)',
+  '按「UP 主 / 作品」两级文件夹': 'Two-level folder (uploader / video)',
+  '按 BV 号分文件夹': 'Folder by BV id',
 };
