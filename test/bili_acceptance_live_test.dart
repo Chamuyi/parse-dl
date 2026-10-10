@@ -37,11 +37,15 @@ import 'package:parse_dl/services/settings_store.dart';
 ///     PD_BILI_ACCEPT=F:/qoder/_tools/bili/live \
 ///       flutter test test/bili_acceptance_live_test.dart
 ///
-/// `PD_BILI_SMOKE=1`：不扫码、匿名只取 480P、且只跑前 [kBiliSmokePicks] 条。
+/// `PD_BILI_SMOKE=1`：不扫码，匿名跑**计划里的全部条目**，并把前 [kBiliSmokePicks] 条
+/// 的档位强制压到 480P。剩下的条目不压：匿名请求高档位时 B 站自己会裁一刀
+/// （2026-10-11 实测这批 9 条：请求 720P/4K 的两条落在 `gotQn=64`=720P，其余落在 32），
+/// 文件名里的 `%QUALITY%` 写的是**实际拿到的**那一档 —— 这正好把「上限不等于结果」
+/// 那条口径一并跑到了。**别把匿名口径当成恒为 480P**：它按稿件给，裁到哪算哪。
 /// 存在的理由是**登录这一步要人在屏幕前点确认**，而等待窗口里我应该先把
 /// 「取流之后那段」（aria2 起进程、两条流入队、收口、ffmpeg 合并、台账）
 /// 跑通一遍 —— 那半段与登录态无关，出错却不该等到他点完确认才暴露。
-/// 它**不是**验收本身：档位是匿名的，题面要的随机高清档位仍要登录那一跑。
+/// 它**不是**验收本身：题面要的随机高清档位（1080P/1080P60/真 4K）仍要登录那一跑。
 void main() {
   const int kBiliSmokePicks = 2;
   final live = Platform.environment['PD_BILI_ACCEPT'];
