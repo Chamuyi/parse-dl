@@ -77,6 +77,7 @@ const _biliOnlyFiles = [
   'lib/services/bili_wbi.dart',
   'lib/services/bili_web.dart',
   'lib/services/bili_link.dart',
+  'lib/services/bili_list_api.dart',
   'lib/services/bili_feed.dart',
   'lib/services/bili_store.dart',
   'lib/services/bili_ledger.dart',
