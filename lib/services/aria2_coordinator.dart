@@ -4,10 +4,14 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../models/bili_config.dart';
 import '../models/douyin_config.dart';
 import '../models/media.dart';
 import 'app_logger.dart';
 import 'aria2.dart';
+import 'bili_api.dart';
+import 'bili_download_plan.dart';
+import 'bili_merger.dart';
 import 'douyin_ledger.dart';
 import 'download_store.dart';
 import 'file_name_template.dart';
@@ -55,6 +59,67 @@ typedef EnqueueResult = ({String? localId, EnqueueOutcome outcome});
 /// （与 × 那条路径同一个口径）。
 typedef RetryResult =
     ({String? localId, EnqueueOutcome outcome, String? message});
+
+/// B 站一条分 P 的入队结果。
+///
+/// **刻意不给 [EnqueueOutcome] 新增「需要凭据」那一格。** 指令里给了两个选项
+/// （新增枚举值 / 带 message），这里选 message，理由是可枚举的结局在界面侧
+/// 有四处**穷尽 switch**（`douyin_page.dart` 的下载统计、`homepage_page.dart`
+/// 的创建任务、`download_management_page.dart` 的重试文案、以及
+/// `douyin_auto_page.dart` 的计数），加一格就得同时改那四个文件 ——
+/// 而这一期的改动范围钉在协调器 + 任务表两个文件上。
+/// 枚举值不够用时 message 本来就是给用户看的那句话（`rejected` 走的就是这条路）。
+typedef BiliEnqueueResult = ({
+  /// queued / rejected / notReady / skippedExisting 四条老结局照旧
+  EnqueueOutcome outcome,
+
+  /// 视频流那一行的本地 id（`rejected` 时也带着 —— 失败的任务也要能反查）
+  String? videoLocalId,
+
+  /// 音频流那一行的本地 id；durl 退化路径（单文件）时是 null
+  String? audioLocalId,
+
+  /// 合并产物的完整路径；不合并 / durl 时就是那条单文件的落盘路径
+  String? outPath,
+
+  /// 给用户看的补充说明（需要凭据、只进去一半等）。null = 一切正常
+  String? message,
+});
+
+/// B 站一条分 P **收口**时的结局种类。
+enum BiliSettleKind {
+  /// 两条流都下完并且合并成功（产物 `<base>.mp4` 已就位、音频行已收掉）。
+  /// durl 退化路径的那一条完整 mp4 也归这一档 —— 对用户来说结局是同一个。
+  merged,
+
+  /// 流都下完了，但按设置**没有**合并（`mergeAfterDownload = false`）：
+  /// 两行留在「已完成」，界面上就该写「这是裸流」。
+  streamsKept,
+
+  /// 合并失败：两条原始流与两个文件**都保留**，原因与可复现命令行进日志。
+  mergeFailed,
+}
+
+/// B 站一条分 P 收口时回给页面的东西。
+///
+/// 为什么要回调而不是让页面自己轮任务表：台账的 `markDone` 必须卡在
+/// **「合并成功之后」**那一刻 —— 入队时记 = 把没到手的分 P 标成已下载，
+/// 之后开着「跳过已下载」就永远不再重下它（抖音那边就栽过这个）。
+/// 页面只有这里能同时拿到「收口了」+「收口成什么样」+「该记哪个分 P」。
+typedef BiliSettleInfo = ({
+  BiliSettleKind kind,
+  String outBase,
+  String saveDir,
+
+  /// 视频流那侧的 Media（`bili.bvid` / `bili.cid` 是台账键组的来源）
+  Media media,
+
+  /// 给用户看的一句话（失败时是原因）
+  String message,
+
+  /// 合并失败时 ffmpeg 的可复现命令行；其余情形 null
+  String? commandLine,
+});
 
 /// 失败后自动重试的次数。 里的
 /// `ariaRetryCountRemains: 5`。
@@ -239,6 +304,74 @@ Map<String, DouyinQueuedAweme> queuedTasksByAweme(
   return out;
 }
 
+/// B 站「一条分 P = 视频流行 + 音频流行」的配对记录。
+///
+/// **为什么放在协调器里而不是 `Media` / `DownloadTask` 上**：`Media` 只有
+/// 一条下载候选链（`url` + `altUrls` + `chosen`），X 与抖音全部路径都按它走；
+/// 为 B 站把它改成「装两条流」会牵连所有下载路径。配对是**下载链路此刻的
+/// 编排状态**（谁和谁要合成一个文件），归持有下载链路的这一层管正好，
+/// 也刻意只在进程内存在 —— 重启后的重建见 [_rebuildBiliPairs]。
+///
+/// **刻意不存 localId，只存 base 名**：任务行会被换 id —— 失败自动重试
+/// （[_resubmitAfterBackoff]）与手动重试（[retryTask]）都是「删旧行 + 重新
+/// `_submit`」，那一步会给出**新的 localId**、但 `saveDir` 与 `fileName` 原样沿用
+/// （见 [retryTask] 里那段「沿用当初解析好的那份」）。按 id 记配对的话，
+/// 一次重试就把它变成孤儿，两条流永远等不齐；按名字找行则两条路径都不用补锅。
+class _BiliPair {
+  _BiliPair({
+    required this.outBase,
+    required this.saveDir,
+    required this.merge,
+    this.single = false,
+  });
+
+  /// 不含扩展名的 base 名。三个名字（`.video.m4s` / `.audio.m4s` / `.mp4`）
+  /// 全部由它派生，见 `bili_download_plan.dart` 的那组 `biliXxxName()`。
+  final String outBase;
+  final String saveDir;
+
+  /// 这条要不要合并。入队时取 `BiliConfig.mergeAfterDownload`；
+  /// 重启重建时取的是**当前设置**里那一份（当初的开关值没落盘，
+  /// 也不给 `DownloadTask` 加字段）—— 这是明知要说清的取舍，见 [_rebuildBiliPairs]。
+  final bool merge;
+
+  /// true = 这一条压根只有一行（durl 退化路径给的就是完整 mp4）。
+  ///
+  /// 必须与「两条流、但音频行被用户删掉了」**分开**：前者一行下完就是成品，
+  /// 后者是不能合（缺一路输入）。靠「查不到音频行」去推断会把后者判成前者，
+  /// 于是那一行会被标成已合并、界面上报一个不存在的成品。
+  final bool single;
+
+  String get videoName => biliVideoStreamName(outBase);
+  String get audioName => biliAudioStreamName(outBase);
+  String get mergedName => biliMergedName(outBase);
+  String get mergedPath => p.join(saveDir, mergedName);
+  String get videoPath => p.join(saveDir, videoName);
+  String get audioPath => p.join(saveDir, audioName);
+
+  /// 已经排过 / 正在跑合并 —— 挡住「两条流的完成事件各触发一次合并」。
+  bool mergeStarted = false;
+
+  /// 已经收口（成功、或按设置不合并），不再重复通知。
+  /// 合并**失败**时刻意不置 true：用户补好 ffmpeg 或重下其中一条之后还得能再合一次。
+  bool settled = false;
+
+  /// 按（目录 + 文件名）找回任务行。同名多行（重复入队留下的）取**最新**那条。
+  DownloadTask? taskFor(DownloadStore store, String fileName) {
+    DownloadTask? found;
+    for (final t in store.tasks) {
+      if (t.fileName != fileName || t.saveDir != saveDir) continue;
+      if (found == null || t.createdAt.isAfter(found.createdAt)) found = t;
+    }
+    return found;
+  }
+
+  /// 配对表的键。目录也要进来：同一个 base 名可以落在不同目录里
+  /// （文件夹模板按 UP 主分目录时，两个 UP 主的同名分 P 就是两个 base），
+  /// 只用 base 当键会把它们并成一条，然后互相当对方的另一条流。
+  String get key => '$saveDir|$outBase';
+}
+
 /// aria2 ↔ DownloadStore 之间的桥接器。
 ///
 /// 职责：
@@ -269,10 +402,26 @@ class Aria2Coordinator {
   /// 只替换传输层 —— [bootstrap] 里的 store 绑定、事件订阅、并发下发
   /// 仍走生产代码路径，这样 `_submit` 的成功 / 失败两条分支都能被钉住
   /// （原报告 §7 指出的测试盲区）。
+  ///
+  /// [biliMerger] 同样只为测试留的缝隙：合并是「起真 ffmpeg 子进程」的事，
+  /// 单测里要钉住的是「什么时候调、带哪三个路径、成/败各怎么收口」，
+  /// 用一个假 merger 记调用就够，不该把真进程拉起来。
+  /// 刻意做成**实例注入**而不是全局可换的单例 —— 换全局会把并发跑的
+  /// 其他测试文件一起污染。
   @visibleForTesting
-  Aria2Coordinator.withAria2(Aria2 aria) : _aria = aria;
+  Aria2Coordinator.withAria2(Aria2 aria, {BiliMerger? biliMerger})
+      : _aria = aria {
+    if (biliMerger != null) _biliMerger = biliMerger;
+  }
 
   final Aria2 _aria;
+
+  /// B 站 DASH 合并器。默认就是随包 ffmpeg 那一份（`BiliMerger()` 内部
+  /// 已有全局串行闸门，多分 P 一起下完也不会并发起多个 ffmpeg）。
+  BiliMerger _biliMerger = BiliMerger();
+
+  /// B 站的配对表（进程内）。键 = `saveDir|outBase`，见 [_BiliPair.key]。
+  final Map<String, _BiliPair> _biliPairs = {};
 
   StreamSubscription? _startSub;
   StreamSubscription? _pauseSub;
@@ -298,6 +447,14 @@ class Aria2Coordinator {
   /// 任务 id，不续上这个新 id，那条作品就永远查不到自己的结局 —— 既不算已下载、
   /// 也不会被撤销。由 `main()` 接线到 `DouyinLedger.attachTask`。
   void Function(Media media, String localId)? onTaskSubmitted;
+
+  /// B 站一条分 P **收口**时回调一次（合并成功 / 决定不合并 / 合并失败）。
+  ///
+  /// 时序是这个回调存在的全部理由：台账的 `markDone` 只能在**合并成功之后**调，
+  /// 不是入队时 —— 入队时文件还没到手，那时候记账等于把没下载完的分 P 标成
+  /// 「已下载」，用户下次开着「跳过已下载」就再也下载不到它。
+  /// 接线方式照 [onTaskSubmitted]（`main()` 里挂一次）。
+  void Function(BiliSettleInfo info)? onBiliSettled;
 
   bool _booted = false;
   bool get booted => _booted;
@@ -361,6 +518,11 @@ class Aria2Coordinator {
     // （实测），所以本地任务按 gid 就能找回自己。
     await reconcile();
 
+    // 重启之后把 B 站的流配对**按文件名重建**回来。
+    // 放在 `reconcile()` 之后：那一步会把「aria2 说完成」的行落成 complete，
+    // 重建时才能一眼看出这对流是「都下完了等合并」还是「只回来一条」。
+    _rebuildBiliPairs();
+
     // 并发数（参照实现的 `limit`，默认 4）是全局选项，启动时先落一次，
     // 免得用户上次改过的值在重启后失效。
     await applyConcurrency(settings.settings.douyin.concurrency);
@@ -395,6 +557,7 @@ class Aria2Coordinator {
       if (remote == null) {
         if (await _fileHasContent(t.fullPath)) {
           store.markComplete(gid);
+          unawaited(biliStreamFinished(t.localId));
           completed++;
         } else {
           store.markErrorByGid(gid, '重启后未能恢复该任务（aria2 会话里已不存在）');
@@ -408,6 +571,11 @@ class Aria2Coordinator {
           // 与 _onCompleteAsync 同一口径：0 字节不算成功
           if (await _fileHasContent(t.fullPath)) {
             store.markComplete(gid);
+            // 重启对账判定完成的 B 站裸流也要走一次配对检查
+            // （[_rebuildBiliPairs] 在 `bootstrap` 里排在 `reconcile` 之后，
+            // 所以这里这一次只是把「aria2 说下完了」的行落成完成态，
+            // 真正决定合不合的是它那一步）。
+            unawaited(biliStreamFinished(t.localId));
             completed++;
           } else {
             store.markErrorByGid(gid, '服务器返回空内容（0 字节）');
@@ -492,7 +660,17 @@ class Aria2Coordinator {
 
     // ② 文件名模板。抖音侧要过参照实现那套**整串**清洗（换 `_` + 白名单 +
     //   压连续下划线 + 截 200），否则和参照实现下出来的名字对不上。
-    final out = customOut ?? _renderFileName(nameTpl, media, douyin: douyin);
+    //
+    // ②′ 再过一道**全路径 260 保护**（三个模块共用这一处）：模板能拼出 200 码元
+    //   的中文名，配上两级模板目录和保存根目录就越过 Windows 的 `MAX_PATH`。
+    //   跨过去的表现不是报错，是 aria2 建文件失败、或那文件在资源管理器里
+    //   打不开也删不掉 —— 所以宁可在入队前把名字裁短，并留一行日志说明裁过。
+    final rawOut = customOut ?? _renderFileName(nameTpl, media, douyin: douyin);
+    final out = clampNameForFullPath(saveDir, rawOut);
+    if (out != rawOut) {
+      AppLogger.log('DOWNLOAD', '路径超 260，文件名已裁短：'
+          '${rawOut.length} → ${out.length} 码元（目录 ${saveDir.length}）');
+    }
 
     // 确保目录存在
     try {
@@ -564,6 +742,493 @@ class Aria2Coordinator {
     }
   }
 
+  /// 把 B 站一条分 P 的**两条 DASH 流**投给 aria2，并登记配对。
+  ///
+  /// 命名契约（`bili_download_plan.dart` 里那三个函数是唯一定义处）：
+  ///   - 视频流那行 `<outBase>.video.m4s`
+  ///   - 音频流那行 `<outBase>.audio.m4s`
+  ///   - 合并产物   `<outBase>.mp4`
+  /// 两条流走的都是既有的 [_submit]，所以**两行都是正常可见的任务行**：
+  /// 用户看得见「音频流」的进度，也才能单独重试它（合并失败时这是唯一的出路）。
+  ///
+  /// [audioMedia] 没有流（`url` 空或 `chosen` 为空）时按 **durl 退化路径**处理：
+  /// 那是 `playurl` 不给 dash、只给一个完整 mp4 的老稿件，投一条、不建配对，
+  /// 合并这一步整段跳过。
+  ///
+  /// **需要凭据的流不在这里想办法。** 取不到就是取不到，如实回一句
+  /// [BiliEnqueueResult.message]；绝不把 cookie 塞进 header ——
+  /// per-task header 会被 `--save-session` 原样写进磁盘（实测见 [_requestOptions]）。
+  Future<BiliEnqueueResult> enqueueBiliMedia(
+    Media videoMedia,
+    Media audioMedia,
+    String outBase,
+    BiliConfig cfg,
+  ) async {
+    if (!_booted) {
+      AppLogger.log('BILI', 'aria2 未就绪，无法入队：${videoMedia.id}');
+      return (
+        outcome: EnqueueOutcome.notReady,
+        videoLocalId: null,
+        audioLocalId: null,
+        outPath: null,
+        message: '下载引擎还没起来（aria2 未就绪），请稍后重试',
+      );
+    }
+    final store = _store;
+    final settings = _settings;
+    if (store == null || settings == null) {
+      return (
+        outcome: EnqueueOutcome.notReady,
+        videoLocalId: null,
+        audioLocalId: null,
+        outPath: null,
+        message: '下载模块还没初始化完',
+      );
+    }
+
+    var base = outBase.trim();
+    if (base.isEmpty) {
+      AppLogger.log('BILI', 'base 名为空，拒绝入队：${videoMedia.id}');
+      return (
+        outcome: EnqueueOutcome.rejected,
+        videoLocalId: null,
+        audioLocalId: null,
+        outPath: null,
+        message: '算不出这条分 P 的文件名（模板展开结果是空的）。',
+      );
+    }
+    if (videoMedia.url.isEmpty) {
+      // 没有可下地址只有一种来源：选流没选出东西，而 B 站只在
+      // 「要登录 / 要大会员」时才不给流。这句话必须原样带给用户，
+      // 而不是让他对着一个「失败」的红条猜为什么。
+      AppLogger.log('BILI', '没有可下载的视频流，拒绝入队：$base');
+      return (
+        outcome: EnqueueOutcome.rejected,
+        videoLocalId: null,
+        audioLocalId: null,
+        outPath: null,
+        message: '这条分 P 没取到可下载的流。更高画质 / 更高编码通常需要'
+            '登录或大会员凭据，本期不支持带凭据下载。',
+      );
+    }
+
+    final dl = settings.settings.download;
+    final saveDir = _joinTemplateDir(
+      _resolveBiliSaveDir(store, settings, cfg),
+      // 文件夹模板照抖音那条路：关掉「启用保存文件夹」就平铺。
+      cfg.enableSaveFolder
+          ? resolveVariables(cfg.dirTemplate, videoMedia).trim()
+          : '',
+    );
+    // 全路径 260 保护：B 站一条分 P 会派生三个名字（`.video.m4s` / `.audio.m4s`
+    // / 成品 `.mp4`）。压的是 **base**，不是压派生名再反推 —— 反过来做会踩坑：
+    // `biliBaseNameFromFileName('x.video.m4s')` 只剥得掉 `.m4s`，剩下 `x.video`
+    // 再当 base 用，名字就一路加长下去了。
+    // 附加后缀的字符数问 `biliVideoStreamName` 自己拿，不在这里写死 `.video.m4s`。
+    final suffixLen = biliVideoStreamName('a').length - 1;
+    final maxBaseLen = kWindowsMaxPath - kPathSlack - saveDir.length - 1 - suffixLen;
+    if (base.length > maxBaseLen) {
+      AppLogger.log('BILI', '路径超 260，base 已裁短：'
+          '${base.length} → ${maxBaseLen.clamp(1, base.length)} 码元'
+          '（目录 ${saveDir.length}）');
+      base = base.substring(0, maxBaseLen.clamp(1, base.length));
+    }
+    // durl 退化路径的判据是「音频侧压根没有流」。刻意不用 `!cfg.mergeAfterDownload`
+    // 当判据 —— 那是「用户不想合」，这是「没有东西可合」，两件事不能混：
+    // 关掉合并开关时，DASH 仍然要投两条（留下两个裸流是用户明确要的）。
+    final single = audioMedia.url.isEmpty || audioMedia.chosen == null;
+    final pair = _BiliPair(
+      outBase: base,
+      saveDir: saveDir,
+      merge: cfg.mergeAfterDownload && !single,
+      single: single,
+    );
+
+    try {
+      await Directory(saveDir).create(recursive: true);
+    } catch (_) {}
+
+    // 同名跳过（与 [enqueueMedia] 同一条口径）：B 站要看的是**成品**在不在，
+    // 而不是裸流在不在 —— 上次只下完视频流就崩了，这次必须能接着把音频流下回来。
+    if (dl.sameFileSkip && await File(pair.mergedPath).exists()) {
+      AppLogger.log('BILI', '跳过（成品已存在）：${pair.mergedPath}');
+      return (
+        outcome: EnqueueOutcome.skippedExisting,
+        videoLocalId: null,
+        audioLocalId: null,
+        outPath: pair.mergedPath,
+        message: '文件已经在磁盘上，没有重复下载：${pair.mergedName}',
+      );
+    }
+
+    final v = await _submit(
+      videoMedia,
+      saveDir,
+      single ? pair.mergedName : pair.videoName,
+      retryRemains: kAriaRetryTimes,
+    );
+    if (v.outcome != EnqueueOutcome.queued) {
+      return (
+        outcome: v.outcome,
+        videoLocalId: v.localId,
+        audioLocalId: null,
+        outPath: pair.mergedPath,
+        message: '视频流没能进下载队列',
+      );
+    }
+    String? audioId;
+    if (!single) {
+      final a = await _submit(
+        audioMedia,
+        saveDir,
+        pair.audioName,
+        retryRemains: kAriaRetryTimes,
+      );
+      if (a.outcome != EnqueueOutcome.queued) {
+        // 只进去一半：**不回滚视频那条**（它正在下，删掉等于把已到手的字节扔掉），
+        // 两行都留在界面上，用户重试音频那一行就能接上。
+        AppLogger.log('BILI', '音频流入队失败（视频流已在队列里）：$base');
+        return (
+          outcome: a.outcome,
+          videoLocalId: v.localId,
+          audioLocalId: a.localId,
+          outPath: pair.mergedPath,
+          message: '音频流没能进下载队列（视频流那条已经在里面了）。'
+              '重试这一条即可，两条都下完才会合并。',
+        );
+      }
+      audioId = a.localId;
+    }
+
+    _biliPairs[pair.key] = pair;
+    AppLogger.log(
+      'BILI',
+      single
+          ? 'B 站分 P 已入队（durl 单文件，不需要合并）：${pair.mergedPath}'
+          : 'B 站分 P 两条流已入队：${pair.videoName} + ${pair.audioName}'
+                ' → ${pair.mergedName}'
+                '${cfg.mergeAfterDownload ? '' : '（按设置不合并，留裸流）'}',
+    );
+    return (
+      outcome: EnqueueOutcome.queued,
+      videoLocalId: v.localId,
+      audioLocalId: audioId,
+      outPath: pair.mergedPath,
+      message: cfg.mergeAfterDownload || single
+          ? null
+          : '按设置没有合并，留下的是两个 .m4s 裸流（都不能单独播放）。',
+    );
+  }
+
+  /// B 站的保存根目录。
+  ///
+  /// 优先级与 [resolveSaveBase] 完全同一条（自己那份 > 会话记的 > X 下载设的 >
+  /// 兜底），只是把「自己那一头的 `saveDirBase`」换成 [BiliConfig] 的。
+  /// 没有给 `resolveSaveBase` 加一个 `bili` 参数：它的签名同时被 X 与抖音两条路
+  /// 用着，而这一期的改动范围钉在协调器 + 任务表两个文件上。
+  String _resolveBiliSaveDir(
+    DownloadStore store,
+    SettingsStore settings,
+    BiliConfig cfg,
+  ) {
+    final own = cfg.saveDirBase.trim();
+    if (own.isNotEmpty) return own;
+    return resolveSaveBase(
+      sessionSaveDir: store.defaultSaveDir,
+      xSaveDirBase: settings.settings.download.saveDirBase,
+      fallback: _defaultDownloadDir(),
+    );
+  }
+
+  /// 「一条 B 站流下完了」之后要做的事 —— 所有完成落点都汇到这里。
+  ///
+  /// 公开（而不是私有）的原因要说清：**这一层没有别的缝隙**。
+  /// `Aria2` 的事件流是私有 `StreamController`（`_downloadComplete` 那五个），
+  /// 注入假的传输层也发不出 `onDownloadComplete` 事件，所以「两条都完成才合并」
+  /// 这条最要紧的时序想被单测钉住，就只能由外面直接调这个方法。
+  /// 生产路径依旧是三处在调它：[_onCompleteAsync]（aria2 的完成事件）、
+  /// [reconcile]（重启对账判定完成）、[retryTask]（磁盘上已经有文件）。
+  Future<void> biliStreamFinished(String localId) async {
+    final store = _store;
+    if (store == null) return;
+    final t = store.task(localId);
+    if (t == null || t.status != DownloadStatus.complete) return;
+    // X 与抖音的完成也走这个方法（它们共用 [_onCompleteAsync]），但配对表里
+    // 只有 B 站的条目 —— 先按来源挡掉，省得每条 X 图片下完都去扫一遍表。
+    if (t.media.source != 'bili') return;
+    final pairs = _pairsForTask(t, store);
+    for (final pair in pairs) {
+      await _settleOneBiliPair(pair, store);
+    }
+  }
+
+  /// 这个任务行属于哪（几）条配对。按 (目录, 文件名) 认，不按 id —— 理由见
+  /// [_BiliPair] 顶上那段「失败重试会换 id」。
+  ///
+  /// 顺带清理：两条流都不在任务表里了（被用户删掉）的配对从表里忘掉，
+  /// 否则一个长批跑下来这张表只会一直变大。
+  List<_BiliPair> _pairsForTask(DownloadTask t, DownloadStore store) {
+    final out = <_BiliPair>[];
+    for (final pair in _biliPairs.values.toList(growable: false)) {
+      if (pair.saveDir != t.saveDir) continue;
+      if (t.fileName == pair.videoName ||
+          t.fileName == pair.audioName ||
+          (pair.single && t.fileName == pair.mergedName)) {
+        out.add(pair);
+        continue;
+      }
+      if (pair.taskFor(store, pair.videoName) == null &&
+          pair.taskFor(store, pair.audioName) == null) {
+        _biliPairs.remove(pair.key);
+      }
+    }
+    return out;
+  }
+
+  /// 一条配对收口：够不齐就等着，够齐就合（或按设置留裸流）。
+  Future<void> _settleOneBiliPair(_BiliPair pair, DownloadStore store) async {
+    if (pair.settled || pair.mergeStarted) return;
+
+    if (pair.single) {
+      // durl 退化路径：那一条本身就是成品，没有什么可等的。
+      pair.settled = true;
+      _biliPairs.remove(pair.key);
+      AppLogger.log('BILI', 'B 站分 P 完成（单文件，无需合并）：${pair.mergedPath}');
+      _notifyBili(pair, BiliSettleKind.merged, '已下载完成：${pair.mergedName}');
+      return;
+    }
+
+    final video = pair.taskFor(store, pair.videoName);
+    final audio = pair.taskFor(store, pair.audioName);
+    if (video == null || audio == null) {
+      // 只回来一条：**不猜、也不合**（缺音频合出来是个 0 秒空壳）。
+      // 留在表里等另一条 —— 用户把那一行重试成功就会再走到这里。
+      final missing = video == null ? pair.videoName : pair.audioName;
+      AppLogger.log('BILI', '配对还缺一条流（$missing 不在任务表里），先不合并：${pair.outBase}');
+      return;
+    }
+    if (video.status != DownloadStatus.complete ||
+        audio.status != DownloadStatus.complete) {
+      return; // 另一条还在下
+    }
+
+    if (!pair.merge) {
+      pair.settled = true;
+      _biliPairs.remove(pair.key);
+      AppLogger.log('BILI', '两条流都下完了，按设置**不**合并：${pair.videoName} + ${pair.audioName}');
+      _notifyBili(
+        pair,
+        BiliSettleKind.streamsKept,
+        '两条裸流都已下载（没开合并，它们各自都不能单独播放）。',
+      );
+      return;
+    }
+    await _mergeBiliPair(pair, store, video: video, audio: audio);
+  }
+
+  /// 真去起一次 ffmpeg。
+  Future<void> _mergeBiliPair(
+    _BiliPair pair,
+    DownloadStore store, {
+    required DownloadTask video,
+    required DownloadTask audio,
+  }) async {
+    pair.mergeStarted = true;
+    final outPath = pair.mergedPath;
+
+    // 产物已经在（上次合完了但没走到改行名，或用户自己放过同名文件）：
+    // 再合一次会覆盖成品，所以直接按成功收口，只把两行收干净。
+    if (await _fileHasContent(outPath)) {
+      AppLogger.log('BILI', '合并产物已存在，不重复合，只把两行收口：$outPath');
+      _finalizeBiliMerge(pair, store);
+      return;
+    }
+    if (!await _fileHasContent(pair.videoPath) ||
+        !await _fileHasContent(pair.audioPath)) {
+      pair.mergeStarted = false;
+      AppLogger.log('BILI', '合并前发现裸流文件不在磁盘上，保持未合并：${pair.outBase}');
+      _notifyBili(
+        pair,
+        BiliSettleKind.mergeFailed,
+        '合并没做成：磁盘上找不到两条裸流文件（被移走或删掉了？）。'
+        '重新下载这一条分 P 即可。',
+        commandLine: null,
+      );
+      return;
+    }
+
+    AppLogger.log(
+      'BILI',
+      '开始合并：${pair.videoName} + ${pair.audioName} → ${pair.mergedName}',
+    );
+    final r = await _biliMerger.merge(
+      videoPath: pair.videoPath,
+      audioPath: pair.audioPath,
+      outPath: outPath,
+    );
+
+    if (r.ok) {
+      _finalizeBiliMerge(pair, store);
+      AppLogger.log('BILI', '合并成功：$outPath${r.message.isEmpty ? '' : '（${r.message}）'}');
+      _notifyBili(pair, BiliSettleKind.merged, '已合并为 ${pair.mergedName}');
+      return;
+    }
+
+    // 失败：**两条原始流与两个文件一律保留**，界面上两行都还是 `.m4s`。
+    // 合并失败不是下载失败 —— 字节都到手了，把行标成错误反而会让用户重下一遍。
+    // `mergeStarted` 放回去，让「重试其中一条流」或界面上的再次合并还能走到这里。
+    pair.mergeStarted = false;
+    AppLogger.log(
+      'FFMPEG',
+      'B 站合并失败（${r.failure?.name}）：${r.message}\n'
+      '  可复现命令：${r.commandLine}\n'
+      '  stderr 摘要：${r.stderr}',
+    );
+    _notifyBili(
+      pair,
+      BiliSettleKind.mergeFailed,
+      '合并失败：${r.message}',
+      commandLine: r.commandLine,
+    );
+  }
+
+  /// 合并成功之后收口两行：视频行改叫 `<base>.mp4`，音频行删掉。
+  ///
+  /// 音频行走 [DownloadStore.remove]（只删本地行）而**不是**协调器那个会先问
+  /// aria2 的 [remove]：`BiliMerger` 成功时已经把两条 `.m4s` 文件删了，
+  /// 这时候要是 RPC 一失败就「保留行不动」，界面上会永远留着一行指向
+  /// 一个已经不存在于磁盘的文件 —— 那是比多留一行更糟的静默不一致。
+  void _finalizeBiliMerge(_BiliPair pair, DownloadStore store) {
+    pair.settled = true;
+    _biliPairs.remove(pair.key);
+    final video = pair.taskFor(store, pair.videoName);
+    final audio = pair.taskFor(store, pair.audioName);
+    if (video != null) {
+      final renamed = store.renameTaskFile(video.localId, pair.mergedName);
+      AppLogger.log(
+        'BILI',
+        renamed
+            ? '视频行的名字已改成成品：${pair.videoName} → ${pair.mergedName}'
+            : '视频行改名没成（行已不在了？）：${pair.videoName}',
+      );
+    }
+    if (audio != null) {
+      store.remove(audio.localId);
+      AppLogger.log('BILI', '音频行已收掉（裸流文件被合并器删掉了）：${pair.audioName}');
+    }
+  }
+
+  /// 把收口结局回给页面（台账 `markDone` 的时序就挂在这里）。
+  void _notifyBili(
+    _BiliPair pair,
+    BiliSettleKind kind,
+    String message, {
+    String? commandLine,
+  }) {
+    final cb = onBiliSettled;
+    final store = _store;
+    if (cb == null || store == null) return;
+    // 两条名字都要查：合并成功那条路是**先改完行名再回调**的，
+    // 这时候视频行已经叫 `<base>.mp4` 了 —— 只按 `.video.m4s` 找就会找不到，
+    // 于是「合并成功」这个最重要的信号永远发不出去，台账永远转不成 done。
+    final video =
+        pair.taskFor(store, pair.videoName) ?? pair.taskFor(store, pair.mergedName);
+    final media = video?.media;
+    if (media == null) return; // 视频行没了就没有记账对象，别拿空键组去写台账
+    cb((
+      kind: kind,
+      outBase: pair.outBase,
+      saveDir: pair.saveDir,
+      media: media,
+      message: message,
+      commandLine: commandLine,
+    ));
+  }
+
+  /// 重启之后按**文件名**把配对重建回来。
+  ///
+  /// 选了哪条策略、为什么：**重建**，而不是「只记一句日志，两行永远停在
+  /// 已完成（未合并）」。后者的问题是它把补救整个推回给用户 —— 磁盘上明明躺着
+  /// 能合成品的两条流，界面上却是两个点开来放不了的文件，而用户唯一能做的
+  /// 操作是把这一条分 P 重下一遍。
+  ///
+  /// 凭什么是文件名：三个名字都由同一个 base 派生，base 又是模板算出来的，
+  /// 所以「同一个目录里的 `X.video.m4s` 与 `X.audio.m4s`」必然出自同一条分 P。
+  /// 刻意**不去读 `Media` 里的配对字段**：`Media.toJson` 不写 `chosen` / `variants`
+  /// （见 `media.dart` 里那段「刻意不写」的理由），重启后这两样都是空的，
+  /// 能靠的只有名字 —— 这也正是配对不进 `Media`、不进 `DownloadTask` 的代价，
+  /// 写在这里是为了让下一个读这段的人知道这笔账是明算过的。
+  ///
+  /// 「当初开没开合并」没有落盘，所以重建时读**当前设置**里的
+  /// `bili.mergeAfterDownload`。取舍说清：用户在下完之后关掉合并再重启，
+  /// 这两条会按关掉后的语义留着当裸流，而不是被合出一个他现在不想要的文件。
+  ///
+  /// 只回来一条（另一行被删了 / 那条本来就失败）时**如实记一行日志**并保持
+  /// 「已完成（未合并）」—— 不假装它能自己长回来。
+  ///
+  /// durl 退化路径那种「一行就是成品」的 `bili` 任务不在这里重建：
+  /// 它没有配对状态要恢复（文件已经在磁盘上了），重启后也不需要这里补一次
+  /// 收口通知 —— 台账侧本来就有 [BiliLedger.advance] 那条「不看事件顺序、
+  /// 拿任务表对一遍就能纠正」的路，页面启动时推一次即可。
+  void _rebuildBiliPairs() {
+    final store = _store;
+    if (store == null) return;
+
+    final merge = _settings?.settings.bili.mergeAfterDownload ?? true;
+    final rebuilt = <String, _BiliPair>{};
+    var videoSide = 0;
+    var audioSide = 0;
+
+    for (final t in store.tasks) {
+      if (t.media.source != 'bili') continue;
+      final isVideo = t.fileName.endsWith('.video.m4s');
+      final isAudio = !isVideo && t.fileName.endsWith('.audio.m4s');
+      if (!isVideo && !isAudio) continue;
+      final outBase = isVideo
+          ? t.fileName.substring(
+              0, t.fileName.length - '.video.m4s'.length)
+          : t.fileName.substring(
+              0, t.fileName.length - '.audio.m4s'.length);
+      final key = '${t.saveDir}|$outBase';
+      final pair = rebuilt.putIfAbsent(
+        key,
+        () => _BiliPair(outBase: outBase, saveDir: t.saveDir, merge: merge),
+      );
+      if (isVideo) {
+        videoSide++;
+      } else {
+        audioSide++;
+      }
+      // 已经有同名兄弟（重复入队留下的）：`taskFor` 会自己挑最新那条，
+      // 这里不用管，配对照样认得出来。
+      _biliPairs[key] = pair;
+    }
+
+    if (rebuilt.isEmpty) return;
+    AppLogger.log(
+      'FFMPEG',
+      '重启后按文件名重建了 B 站裸流配对：$videoSide 条视频流 / $audioSide 条音频流'
+          '（共 ${rebuilt.length} 组）',
+    );
+
+    // 两条都已经在「已完成」的配对，立刻走一次收口（合并或留裸流）；
+    // 还没下完的那些由后续的完成事件自己走到 [_settleOneBiliPair]。
+    for (final pair in rebuilt.values) {
+      final v = pair.taskFor(store, pair.videoName);
+      final a = pair.taskFor(store, pair.audioName);
+      if (v == null || a == null) {
+        AppLogger.log(
+          'FFMPEG',
+          '配对不全，保持未合并：${pair.outBase} —— '
+          '${v == null ? pair.videoName : pair.audioName} 那一行不在任务表里'
+          '（上次没下完或被删了），需要重新下载这一条分 P。',
+        );
+        continue;
+      }
+      unawaited(_settleOneBiliPair(pair, store));
+    }
+  }
+
   /// 单任务请求头。
   ///
   /// **抖音必须补 Referer。** 实测（2026-09-14）：同一条作品的多个
@@ -576,9 +1241,36 @@ class Aria2Coordinator {
   /// Referer / Origin / cookie；aria2 是站外进程，必须显式补。
   /// 这里用**单任务**选项而不是全局 `changeGlobalOption`，
   /// 避免把来源头污染给 X 的下载。
+  ///
+  /// **B 站只补 Referer + User-Agent，刻意不带 Cookie。**
+  /// 2026-10-10 用随包的 `aria2c.exe` 1.37.0 实测：`addUri` 传的 per-task
+  /// `header` 会被 `--save-session` **逐条原样写进会话文件**，本项目那个会话文件
+  /// 在 `userdata` 里、每 30 秒落一次盘 —— 实测片段就是
+  /// `header=Cookie: SESSDATA=…` 明文躺在盘上。
+  /// （另外那条「完成后就不写了」的现象别当结论：任务**完成后** aria2 确实不再
+  /// 持久化这一条，所以在完成之后去读会话文件会拿到 0 字节，那只说明「这一条已经
+  /// 从会话里掉了」，不说明「从来没写过）。）
+  ///
+  /// 结论：**登录态一律不许经过 aria2 这一层。** 需要凭据才能取的流这一期不支持，
+  /// 由 `planBiliStreams()` 返回可读原因（见 [BiliEnqueueResult.message]），
+  /// 而不是想办法把 cookie 递过去。
   Map<String, String>? _requestOptions(Media media) {
-    if (media.source != 'douyin') return null;
-    return const {'referer': kDouyinReferer, 'user-agent': kBrowserUserAgent};
+    switch (media.source) {
+      case 'douyin':
+        return const {
+          'referer': kDouyinReferer,
+          'user-agent': kBrowserUserAgent,
+        };
+      case 'bili':
+        // 键名按 aria2 的选项写法（小写），值复用接口层那一份常量 ——
+        // 页面取流、下载器取流用的是同一个 UA/Referer，才不会出
+        // 「页面能播、下载 403」这种极难归因的组合。
+        return const {
+          'referer': kBiliReferer,
+          'user-agent': kBiliUserAgent,
+        };
+    }
+    return null; // X 不需要来源头
   }
 
   /// 解析保存根目录。规则见 [resolveSaveBase]（纯函数，可单测）。
@@ -608,19 +1300,50 @@ class Aria2Coordinator {
   /// 抖音侧走 [resolveDouyinFileName]（拼好整串再按参照实现那套清洗），
   /// X 侧保持原有的逐变量净化 —— 两套规则不同（换 `_` 还是 `!`、要不要压
   /// 连续下划线），混用会让两边的文件名都对不上各自的参照物。
+  ///
+  /// **B 站选了「逐变量净化」这一条（[resolveVariables]），不是整串清洗。**
+  /// 三条理由，按分量排：
+  ///  1. **预览必须与落盘同源。** 设置页 B 站分区的「输出示例」用的就是
+  ///     `bili_section.dart` 里的 `kBiliFileNameResolver`，而那个常量此刻就是
+  ///     `resolveVariables`；那个文件自己也写了「输出示例和真实落盘名字必须走
+  ///     同一个函数，否则预览看着对、下出来的名字不一样」。下载侧换成另一套
+  ///     清洗，用户看到的示例立刻开始说谎。
+  ///  2. **整串清洗那套的规则是照抖音的参照物定的**（保留集 `- . @ ： _`、
+  ///     连续下划线归并、200 上限）。B 站照抄会把 B 站的名字洗成谁都没参照的
+  ///     样子 —— `bili_section.dart` 里已经写了这句话，这里执行它。
+  ///  3. **`/` 会被整串清洗吃掉。** 它在文件夹模板里是层级分隔符
+  ///     （`%UP_NAME%/%WORK_TITLE%`），抖音侧已经踩过这个坑；B 站的文件夹模板
+  ///     同样走 [_joinTemplateDir]，一律不许整串清洗碰它。
+  ///
+  /// 落点是 [biliOutBase]：B 站的 base 名从这里出来，再补 `.video.m4s` /
+  /// `.audio.m4s` / `.mp4` 三种后缀，所以模板里 `%EXT%` 那段必须剥掉
+  /// （见 [biliBaseNameFromFileName]）。
   static String _renderFileName(
     String template,
     Media media, {
     required DouyinConfig? douyin,
+    BiliConfig? bili,
   }) {
     if (template.trim().isEmpty) {
       return douyin == null
           ? media.safeFileName
           : douyinFilenamify(media.safeFileName);
     }
+    if (bili != null) return resolveVariables(template, media).trim();
     return douyin == null
         ? resolveVariables(template, media).trim()
         : resolveDouyinFileName(template, media);
+  }
+
+  /// B 站那条分 P 的**不含扩展名**的 base 名（页面与 [enqueueBiliMedia] 都用它）。
+  ///
+  /// 为什么不直接复用 [resolveVariables]：B 站一个分 P 落的是三个名字
+  /// （视频流 / 音频流 / 合并产物），base 只能算一次、三处共用；
+  /// 而默认模板 `<P%P%->%PART_TITLE%-%QUALITY%-%CODEC%%EXT%` 自带 `%EXT%`，
+  /// 不剥掉就会下出 `冬天-1080P.m4s.video.m4s` 这种名字。
+  static String biliOutBase(String template, Media media, BiliConfig cfg) {
+    final full = _renderFileName(template, media, douyin: null, bili: cfg);
+    return biliBaseNameFromFileName(full);
   }
 
   static String? _cached;
@@ -815,6 +1538,9 @@ class Aria2Coordinator {
         !await File('$fullPath.aria2').exists()) {
       final size = await File(fullPath).length();
       store.markCompleteByLocalId(localId, totalBytes: size);
+      // 重试命中「磁盘上已经有了」也算一条流下完 —— B 站的配对要在这里也问一次，
+      // 否则「视频流早就下完、只剩音频流失败」那种局面重下完音频也不会去合。
+      unawaited(biliStreamFinished(localId));
       AppLogger.log('ARIA2',
           '手动重试跳过（文件已在磁盘上，不再下一次）：$fullPath（$size 字节）');
       return (
@@ -1004,6 +1730,10 @@ class Aria2Coordinator {
 
     AppLogger.log('ARIA2', '下载完成 gid=$gid${size > 0 ? '（$size 字节）' : ''}');
     store.markComplete(gid);
+    // B 站的一条分 P 要**两条流都到位**才谈得上合并，这里问一次。
+    // 不 await：完成事件是串行处理的，合并却要起 ffmpeg 子进程（快则几百毫秒、
+    // 慢则几秒），把它挂在事件回调上会把后面所有任务的完成处理一起堵住。
+    unawaited(biliStreamFinished(localId));
   }
 
   void _onError(String gid) {

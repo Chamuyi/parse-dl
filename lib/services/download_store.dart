@@ -436,6 +436,43 @@ class DownloadStore extends ChangeNotifier {
     if (_tasks.remove(localId) != null) _changed();
   }
 
+  /// 换掉一行任务的落盘名，**不改磁盘上的文件**。
+  ///
+  /// 为什么需要：B 站 DASH 先落 `<base>.video.m4s` + `<base>.audio.m4s` 两个裸流，
+  /// ffmpeg 合出 `<base>.mp4` 并把两条裸流删掉之后，界面上那一行还写着
+  /// `.video.m4s` —— 用户看到一个「已完成」的 m4s，而磁盘上那个文件早就不在了
+  /// （双击打不开、右键「打开文件夹」也定位不到）。这一行本身没错，错的只是名字。
+  ///
+  /// [DownloadTask.fileName] 是 `final`（任务行按整体替换来保证「改一处不会漏另一处」，
+  /// 见 [markActive]），所以这里**构造新实例替换**而不是就地改字段：
+  /// 状态 / 进度 / 字节数 / 错误说明 / 重试余量 / 创建时间全部原样带过去，
+  /// 只有名字换掉。
+  ///
+  /// 走 [_changed]：既通知界面重建，也让新名字**落进任务表** ——
+  /// 不落盘的话下次开机那一行又变回 `.video.m4s`，等于白改一次。
+  /// 返回是否改成了（id 不存在或新名为空时 false，调用方据此决定要不要报错）。
+  bool renameTaskFile(String localId, String newName) {
+    final t = _tasks[localId];
+    if (t == null || newName.isEmpty || t.fileName == newName) return false;
+    _tasks[localId] = DownloadTask(
+      localId: t.localId,
+      aria2Gid: t.aria2Gid,
+      media: t.media,
+      saveDir: t.saveDir,
+      fileName: newName,
+      status: t.status,
+      progress: t.progress,
+      totalBytes: t.totalBytes,
+      downloadedBytes: t.downloadedBytes,
+      errorMessage: t.errorMessage,
+      retryRemains: t.retryRemains,
+      attempt: t.attempt,
+      createdAt: t.createdAt,
+    );
+    _changed();
+    return true;
+  }
+
   /// 清空指定状态的任务。
   void clearWhere(bool Function(DownloadTask) pred) {
     final removed = _tasks.entries.where((e) => pred(e.value)).toList();
