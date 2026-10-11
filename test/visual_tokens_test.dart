@@ -31,7 +31,7 @@ void main() {
   /// `material_picker.dart` 的缩略图底色。它们不是"组件绕过色板"。
   const colorHardcodeBaseline = <String, int>{
     'lib/widgets/tint_picker.dart': 21, // 预设色调列表：颜色就是数据
-    'lib/widgets/dock.dart': 4, // 徽标渐变 / Logo 兜底色
+    'lib/widgets/dock.dart': 5, // 徽标品牌色（X 蓝 / 抖音红 / B 站粉）+ Logo 兜底色
     'lib/widgets/material_picker.dart': 3, // 材质缩略图的壁纸渐变
     'lib/widgets/nav_items.dart': 2, // 运行中红点（自带发光，不走语义色）
     'lib/pages/about_page.dart': 1,

@@ -215,10 +215,14 @@ class _GroupBadge extends StatelessWidget {
 
   final NavGroup group;
 
-  /// 识别色：X 用蓝（与全局 accent 同族），抖音用它的品牌红。
+  /// 识别色：按各平台自己的品牌色 —— X 蓝、抖音红、B 站粉。
+  ///
+  /// **三组都要登记**：漏一个不会报错，它会静默落到下面那个兜底灰，
+  /// 而灰色徽标在 Dock 上跟「没有归属」长得一样（B 站这组就漏过一轮）。
   static const Map<String, Color> _tints = {
     'x': Color(0xFF4A90F0),
     'douyin': Color(0xFFFE2C55),
+    'bili': Color(0xFFFB7299),
   };
 
   @override
