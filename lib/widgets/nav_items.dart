@@ -54,18 +54,19 @@ const kNavGroups = <NavGroup>[
     NavItem('douyin-auto', '自动下载', Icons.bolt_rounded),
     NavItem('douyin-settings', '抖音设置', Icons.tune_rounded),
   ], '抖'),
-  // B 站这一组照抖音那组的命名与图标规则，但**只有三项**：
+  // B 站这一组照抖音那组的命名与图标规则，但**只有四项**：
   // 「自动下载」是 P2/P3 的东西，现在挂上来就是一个点进去会白屏的入口，
   // 所以刻意留空而不是先造一个假页面。
   // 组名比页面名短一档（「B 站下载」而不是「B 站解析下载」）：侧边栏中文档
   // 只有 200px，七字标签会被截断 —— `l10n_test` 的「中文导航不许被截断」那条
   // 当场把它撞出来了。组里的子项已经写明是「解析下载」，标题不必再重复一遍。
+  // 角标用大写 B（站点自身的标识就是这个字母），不用「站」。
   NavGroup('bili', 'B 站下载', Icons.live_tv_rounded, [
     NavItem('bili', '解析下载', Icons.play_circle_outline_rounded),
     NavItem('bili-batch', '批量下载', Icons.playlist_play_rounded),
     NavItem('bili-downloads', '下载管理', Icons.download_rounded),
     NavItem('bili-settings', 'B 站设置', Icons.tune_rounded),
-  ], '站'),
+  ], 'B'),
 ];
 
 /// 不属于任何模块的**全局**项（侧边栏里排在三个模块下面）。

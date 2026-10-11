@@ -48,7 +48,7 @@ void main() {
         expect(g.badge.length, 1, reason: '${g.id} 的徽标必须是单字');
         expect(g.id, isNot(g.badge));
       }
-      expect(kNavGroups.map((g) => g.badge).toList(), ['X', '抖', '站']);
+      expect(kNavGroups.map((g) => g.badge).toList(), ['X', '抖', 'B']);
     });
 
     test('三个模块的设置是**三个不同页面**（不合并成一处）', () {
