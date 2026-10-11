@@ -116,9 +116,15 @@ void main() {
       final store = await pumpSection(tester);
       final bvid = kBiliTemplatePresets.firstWhere((e) => e.id == 'bvid');
       expect(bvid.dirTemplate, '%BVID%');
-      expect(bvid.fileNameTemplate, kBiliDefaultFileNameTemplate);
+      // 这条早先只改 dirTemplate 就够，靠的是「bvid 预设的文件名恰好等于
+      // 当时那份默认模板」这个巧合。2026-10-11 默认收窄之后巧合没了，
+      // 所以要**把整份组合都设过去** —— 这也正是这条测试的本意。
+      expect(bvid.fileNameTemplate, isNot(kBiliDefaultFileNameTemplate));
 
-      await store.setBili((b) => b.dirTemplate = bvid.dirTemplate);
+      await store.setBili((b) {
+        b.dirTemplate = bvid.dirTemplate;
+        b.fileNameTemplate = bvid.fileNameTemplate;
+      });
       await tester.pumpAndSettle();
 
       expect(find.text(t(bvid.label)), findsOneWidget);
@@ -276,7 +282,12 @@ void main() {
 
       final expected =
           kBiliFileNameResolver(kBiliDefaultFileNameTemplate, example);
-      expect(expected, contains('P03'));
+      // 这里**不再断言 `P03`**：2026-10-11 起默认模板刻意不带分 P 号
+      // （默认目录模板已经是一稿一目录，文件名再加一遍是冗余）。
+      // 这条测试真正要钉的是「设置页那行预览走的就是生产解析器」，
+      // 所以断言它非空、并以 .m4s 收尾，然后验界面上真的渲染出了它。
+      expect(expected.trim(), isNotEmpty);
+      expect(expected.contains('%'), isFalse, reason: '预览里不许留未替换的变量：$expected');
       expect(expected, endsWith('.m4s'));
 
       // 「输出示例」那行渲染的就是上面这个串 —— 预览与下载同一条路径

@@ -89,8 +89,13 @@ void main() {
         expect(out, isNot(contains('P0-')), reason: '$t → $out');
         expect(out, isNot(matches(RegExp(r'P0\d-'))), reason: '$t → $out');
       }
-      final multi =
-          resolveVariables(kBiliDefaultFileNameTemplate, biliExampleMedia());
+      // 补零要看**带 %P% 的那个预设**，不能看默认模板 ——
+      // 2026-10-11 起默认文件名模板刻意不带 `P%P%`（目录模板已经是一稿一件，
+      // 再在文件名里加一遍分 P 号是冗余）。带 P 号的组合仍然是可用选项，
+      // 所以这条判据转到 `bvid` 预设上继续钉。
+      final bvidPreset =
+          kBiliTemplatePresets.firstWhere((p) => p.id == 'bvid');
+      final multi = resolveVariables(bvidPreset.fileNameTemplate, biliExampleMedia());
       expect(multi, startsWith('P03-'), reason: '示例是 12 分 P 的第 3 P：$multi');
     });
 
@@ -103,12 +108,20 @@ void main() {
       expect(names.values.toSet().length, greaterThan(1), reason: '$names');
     });
 
-    test('画质与编码进名字：换档必须改变渲染结果', () {
+    test('画质进名字：换档必须改变渲染结果', () {
       final a = resolveVariables(kBiliDefaultFileNameTemplate, labeled('1080P60', 'AV1'));
       final b = resolveVariables(kBiliDefaultFileNameTemplate, labeled('480P', 'AVC'));
       expect(a, isNot(equals(b)), reason: '$a vs $b');
       expect(b, contains('480P'));
-      expect(b, contains('AVC'));
+      // 默认模板**刻意不带 %CODEC%**（编码族对用户通常没意义，而且标题里
+      // 本来就常带 4K/3840x2160 字样，再拼编码会让名字长到看不懂）。
+      // 想标编码用带它的预设，所以那条判据转到 `bvid` 预综上继续钉。
+      expect(b, isNot(contains('AVC')),
+          reason: '默认模板不该把编码塞进文件名');
+      final bvidPreset =
+          kBiliTemplatePresets.firstWhere((p) => p.id == 'bvid');
+      expect(resolveVariables(bvidPreset.fileNameTemplate, labeled('480P', 'AVC')),
+          contains('AVC'));
     });
 
     test('渲染结果非空且不超单串上限', () {

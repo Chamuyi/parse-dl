@@ -973,12 +973,12 @@ void main() {
   group('base 名的渲染', () {
     test('模板里的 %EXT% 被剥掉，不会出现 .m4s.mp4 这种名字', () async {
       final env = await boot();
-      final base = Aria2Coordinator.biliOutBase(
-        kBiliDefaultFileNameTemplate,
-        biliVideo(),
-        BiliConfig(),
-      );
-      expect(base, endsWith('-AVC'), reason: '默认模板尾部是 -%QUALITY%-%CODEC%%EXT%');
+      // 用一个**明确带 %EXT% 与 %CODEC%** 的模板：这条测的是「%EXT% 被剥掉、
+      // 不会出现 .m4s.mp4」，与默认模板是哪一份无关 —— 早先它借用了默认模板，
+      // 2026-10-11 默认收窄之后连带红了（新默认已不带 %CODEC%）。
+      const tpl = '<P%P%->%PART_TITLE%-%QUALITY%-%CODEC%%EXT%';
+      final base = Aria2Coordinator.biliOutBase(tpl, biliVideo(), BiliConfig());
+      expect(base, endsWith('-AVC'), reason: '模板尾部是 -%QUALITY%-%CODEC%%EXT%');
       expect(base, isNot(contains('.m4s')));
       expect(base, isNot(contains('.mp4')));
 
