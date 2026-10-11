@@ -104,10 +104,15 @@ void main() {
         ],
       },
     };
+    // ⚠️ 字段名是 `from` / `to`，不是 `start_time` / `end_time`。
+    // 2026-10-11 实测（`probe_subtitle_fields.py`）：真接口每条都是
+    // ['content','from','location','music','sid','to']。原来这份夹具按
+    // `start_time` 写，照抄了实现里的错觉 → 1426 条全绿而真机一条都解不出。
+    // 形状的对照组在 `test/bili_subtitle_body_shape_test.dart`。
     final body = {
       'body': [
-        {'content': '第二句', 'start_time': 2.5, 'end_time': 4.0},
-        {'content': '第一句', 'start_time': 0.5, 'end_time': 2.0},
+        {'content': '第二句', 'from': 2.5, 'to': 4.0},
+        {'content': '第一句', 'from': 0.5, 'to': 2.0},
       ],
     };
 

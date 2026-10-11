@@ -82,6 +82,15 @@ bool biliSubtitleWanted(String lan, List<String> wanted, {bool manualOnly = fals
 
 /// 解析 `subtitle_url` 那份 JSON。字段缺失/形状不对时返回空列表而不是抛 ——
 /// 一条字幕取不到不该让整批下载失败，缺什么由调用方记进 `missing`。
+///
+/// **字段名是 `from` / `to`，不是 `start_time` / `end_time`。**
+/// 2026-10-11 登录档验收现场实测三条稿件（`probe_subtitle_fields.py`），
+/// 每条的键都是 `['content','from','location','music','sid','to']` ——
+/// 原来按 `start_time` 读，于是每一条都在 `s == null` 那行被 continue 掉，
+/// 解析出 0 条，界面上表现为「字幕：ai-zh 是空的」。
+/// 同一个协议在 `bili_chapter.dart` 里读的就是 `from`/`to`（那一支是对的），
+/// 只有这里写错了 —— 而单测的夹具照抄了错的那份，所以 1426 条全绿也抓不到。
+/// 回归测试 `test/bili_subtitle_body_shape_test.dart` 用的是真形状。
 List<(int, int, String)> biliParseSubtitleBody(Object? decoded) {
   if (decoded is! Map) return const [];
   final body = decoded['body'];
@@ -91,9 +100,11 @@ List<(int, int, String)> biliParseSubtitleBody(Object? decoded) {
     if (e is! Map) continue;
     final content = e['content'];
     if (content is! String || content.trim().isEmpty) continue;
-    // start_time / end_time 是**秒**的浮点，四舍五入到毫秒
-    final s = (e['start_time'] as num?)?.toDouble();
-    final t = (e['end_time'] as num?)?.toDouble();
+    // `from` / `to` 是**秒**的浮点，四舍五入到毫秒。
+    // 兼容旧的 `start_time` / `end_time`：只有 ai-zh 这一种字幕被实测过
+    // （人工字幕该账号一条都没有），留一个别名兜住没验过的形状。
+    final s = ((e['from'] ?? e['start_time']) as num?)?.toDouble();
+    final t = ((e['to'] ?? e['end_time']) as num?)?.toDouble();
     if (s == null) continue;
     final endMs = t == null ? s * 1000 + 2000 : t * 1000;
     out.add((
