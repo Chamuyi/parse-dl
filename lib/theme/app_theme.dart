@@ -219,3 +219,34 @@ class AppTheme extends InheritedWidget {
   bool updateShouldNotify(AppTheme oldWidget) =>
       oldWidget.colors != colors || oldWidget.brightness != brightness;
 }
+
+/// 应用级 Material 主题。**从 [AppColors] 派生，别再在别处手搓 ThemeData。**
+///
+/// 抽出来只为了一条可跑的判据：`canvasColor` 必须实心（见下），而它藏在
+/// `app.dart` 的私有方法里就没法被测试钉住。
+ThemeData buildAppTheme(AppColors c, Brightness brightness) {
+  return ThemeData(
+    useMaterial3: true,
+    brightness: brightness,
+    fontFamily: 'Microsoft YaHei',
+    scaffoldBackgroundColor: Colors.transparent,
+    // **这一行不能留 transparent。** Flutter 的 `DropdownButton` 展开层取色是
+    // `widget.dropdownColor ?? Theme.of(context).canvasColor`
+    // （SDK `packages/flutter/lib/src/material/dropdown.dart:341`），
+    // 留透明就等于全应用每一个下拉菜单都是全透的 —— 叠在 B 站 / 抖音的网页上
+    // 直接看不清字（2026-10-11 用户实拍）。
+    // 窗口材质是靠 `scaffoldBackgroundColor: transparent` 透出去的，与此字段无关。
+    canvasColor: c.surfaceSolid,
+    colorScheme:
+        ColorScheme.fromSeed(
+          seedColor: c.accent,
+          brightness: brightness,
+        ).copyWith(
+          primary: c.accent,
+          surface: c.surfaceSolid,
+          onSurface: c.textStrong,
+        ),
+    splashFactory: NoSplash.splashFactory,
+    highlightColor: Colors.transparent,
+  );
+}

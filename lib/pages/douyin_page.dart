@@ -1734,7 +1734,9 @@ class _DouyinFilterDialogState extends State<_DouyinFilterDialog> {
     final c = AppTheme.colorsOf(context);
 
     return AlertDialog(
-      backgroundColor: c.surfaceFloat,
+      // 对话框一律实心：这个浮层是盖在抖音网页上的，`surfaceFloat` 的 0xE0
+      // 会让底下的图透上来（同文件 1340 行那条注释说的就是这件事）。
+      backgroundColor: c.surfaceSolid,
       title: Text(
         t('筛选抓取结果'),
         style: TextStyle(fontSize: 15, color: c.textStrong),

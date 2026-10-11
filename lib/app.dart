@@ -179,27 +179,10 @@ class XDownloaderApp extends StatelessWidget {
     }
   }
 
-  ThemeData _buildMaterialTheme(Brightness brightness) {
-    final c = brightness == Brightness.dark ? AppColors.dark : AppColors.light;
-    return ThemeData(
-      useMaterial3: true,
-      brightness: brightness,
-      fontFamily: 'Microsoft YaHei',
-      scaffoldBackgroundColor: Colors.transparent,
-      canvasColor: Colors.transparent,
-      colorScheme:
-          ColorScheme.fromSeed(
-            seedColor: c.accent,
-            brightness: brightness,
-          ).copyWith(
-            primary: c.accent,
-            surface: c.surfaceSolid,
-            onSurface: c.textStrong,
-          ),
-      splashFactory: NoSplash.splashFactory,
-      highlightColor: Colors.transparent,
-    );
-  }
+  ThemeData _buildMaterialTheme(Brightness brightness) => buildAppTheme(
+    brightness == Brightness.dark ? AppColors.dark : AppColors.light,
+    brightness,
+  );
 }
 
 class _AppShell extends StatefulWidget {
