@@ -525,8 +525,9 @@ String biliAssTime(int milliseconds) {
 /// 不透明度 [BiliConfig.danmakuOpacity]、底部边距 [BiliConfig.danmakuMarginV]。
 ///
 /// 三类弹幕：
-///   - 滚动（mode 1/2/3 与其它未列举档位）：`\an7` + `\move(右进)(左出)`；
-///   - 逆向（mode 6）：同一套行槽位，方向反过来 `\move(左进)(右出)`；
+///   - 滚动（mode 1/2/3 与其它未列举档位）：`\an7` + `\move(x1,y1,x2,y2)`，
+///     从右缘外进、左缘外出；
+///   - 逆向（mode 6）：同一套行槽位，方向反过来。
 ///   - 顶部 `\an8` / 底部 `\an2`：用 `\pos` 定行，停留 [kBiliDanmakuFixedHoldMs]。
 ///
 /// 颜色逐条走 `\c&HAABBGGRR&`（alpha 由配置的不透明度算，见 [biliAssColor]），
@@ -613,7 +614,14 @@ BiliDanmakuAssResult biliDanmakuToAss(
           slot.startMs,
           slot.startMs + durationMs,
           r'\an7'
-          '\\move($from,$y)($to,$y)'
+          // ⚠️ **`\move` 是一对括号四个参数**：`\move(x1,y1,x2,y2)`。
+          // 曾经写成两对括号 `\move(x1,y1)(x2,y2)`（看着更"自然"），
+          // 那不是合法 ASS —— Aegisub 的规范只列了一对括号的两种形
+          // （四参 / 六参带 t1,t2）。播放器认不出来会**整个标签失效**，
+          // 于是文字落在默认位置：VLC 与 PotPlayer 里表现为
+          // **所有滚动弹幕全挤在左上角不动**（2026-10-11 用户实测报的）。
+          // 底部/顶部固定那几支用 `\pos(x,y)` 写法本来就对，所以它们没坏。
+          '\\move($from,$y,$to,$y)'
           '\\c$color&',
           text,
         ),

@@ -106,9 +106,15 @@ void main() {
   }
 
   /// 从覆盖块里取 y（滚动取 `\move` 的 y，固定取 `\pos` 的 y）—— y 相同即同一行
+  ///
+  /// ⚠️ **`\move` 是一对括号四个参数**。这里原来写的是两对括号
+  /// `\move\(…\)\(…\)` —— 那个正则与实现一起错，于是 1400+ 条用例全绿，
+  /// 而 VLC / PotPlayer 里所有滚动弹幕**停在左上角不动**（标签非法被整条忽略）。
+  /// 规范见 Aegisub《ASS Tags》：只列 `\move(x1,y1,x2,y2)` 与带 t1,t2 的六参形。
   int yOf(_AssDialogue d) {
-    final move = RegExp(r'\\move\(([^)]*)\)\(([^)]*)\)').firstMatch(d.override);
-    if (move != null) return int.parse(move.group(1)!.split(',').last);
+    final move =
+        RegExp(r'\\move\((-?\d+),(-?\d+),(-?\d+),(-?\d+)\)').firstMatch(d.override);
+    if (move != null) return int.parse(move.group(2)!);
     final pos = RegExp(r'\\pos\(([^)]*)\)').firstMatch(d.override);
     if (pos != null) return int.parse(pos.group(1)!.split(',').last);
     throw StateError('覆盖块里既没有 \\move 也没有 \\pos：${d.override}');
@@ -476,8 +482,10 @@ void main() {
         expect(d.override, contains(r'\move('));
         expect(d.override, contains(r'\c&H00FFFFFF&'), reason: '夹具六条都是白色');
         expect(d.style, kBiliDanmakuAssStyleName);
+        // 一对括号四个参数 —— 规范形（Aegisub《ASS Tags》）。
+        // 曾写成两对括号，播放器整条标签不认，弹幕全停左上角。
         final move = RegExp(
-          r'\\move\((-?\d+),(-?\d+)\)\((-?\d+),(-?\d+)\)',
+          r'\\move\((-?\d+),(-?\d+),(-?\d+),(-?\d+)\)',
         ).firstMatch(d.override)!;
         expect(int.parse(move.group(1)!), kBiliDanmakuPlayResX, reason: '从右缘进');
         expect(int.parse(move.group(3)!), lessThan(0), reason: '从左侧完全出屏');
@@ -485,6 +493,27 @@ void main() {
         expect(d.endMs, greaterThan(d.startMs));
       }
       expect(dialogues.first.text, '这个文字和声音配的太古代了');
+    });
+
+    test('⚠️ 负控制：\\move 不许写成两对括号（播放器会整条忽略）', () {
+      // 这条是 2026-10-11 用户实测「VLC / PotPlayer 里弹幕停在左上角不动」
+      // 的回归钉。当时的实现与旧断言一起用 `\move(A,B)(C,D)`，
+      // 两边自洽所以全绿 —— 而播放器按规范只认一对括号。
+      final result = biliDanmakuToAss(
+        [item(id: 1, mode: 1, stime: 0)],
+        BiliConfig(),
+      );
+      final d = parseDialogues(result.content).single;
+      expect(
+        RegExp(r'\\move\([^)]*\)\([^)]*\)').hasMatch(d.override),
+        isFalse,
+        reason: '两对括号是非法语法，会让整条 \\move 失效（弹幕不动）',
+      );
+      expect(
+        RegExp(r'\\move\(-?\d+,-?\d+,-?\d+,-?\d+\)').hasMatch(d.override),
+        isTrue,
+        reason: '必须是一对括号四个参数',
+      );
     });
 
     test('顶部用 \\an8、底部用 \\an2，停留 5 秒', () {
@@ -507,7 +536,7 @@ void main() {
         biliDanmakuToAss([item(id: 1, mode: 6, stime: 0)], BiliConfig()).content,
       ).single;
       final move = RegExp(
-        r'\\move\((-?\d+),(-?\d+)\)\((-?\d+),(-?\d+)\)',
+        r'\\move\((-?\d+),(-?\d+),(-?\d+),(-?\d+)\)',
       ).firstMatch(d.override)!;
       expect(int.parse(move.group(1)!), lessThan(0));
       expect(int.parse(move.group(3)!), kBiliDanmakuPlayResX);
