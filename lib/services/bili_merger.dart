@@ -9,10 +9,10 @@
 /// `_ensureSidecar` / `_startOnce`）：路径可注入、`Process.start` 起子进程、
 /// stderr 收全并带进结果、退出码不当唯一判据。
 ///
-/// **本期 ffmpeg 还不在 `assets/` 里**（随包是出包阶段的事），所以
-/// [ffmpegPath] 传 null 时走 [defaultFfmpegPath]（exe 同级 `ffmpeg\ffmpeg.exe`），
-/// 开发期可以把构造参数直接指到本机任何一份 ffmpeg。找不到时报可读失败，
-/// 不返回 null、也不抛。
+/// **随包的 ffmpeg 在 `assets/ffmpeg.exe`，但 Flutter 的 asset 不能直接执行**，
+/// 所以 [BiliMerger.resolvePath] 按两处找：先安装目录同级 `ffmpeg\ffmpeg.exe`
+/// （出包放进去的那份），没有就从 bundle 释放一份到 userdata —— 与 [Aria2]
+/// 释放 `aria2c.exe` 同一套路。两处都没有时报可读失败，不返回 null、也不抛。
 library;
 
 import 'dart:async';
@@ -20,9 +20,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart' as p;
 
 import 'app_logger.dart';
+import 'app_paths.dart';
 
 /// 日志 tag（与 `ARIA2` / `DOWNLOAD` 同一层叫法）。
 const String kBiliMergeLogTag = 'FFMPEG';
@@ -47,21 +49,40 @@ const String kFfmpegMovflags = '+faststart';
 /// 全量原文同时进日志文件（见 [BiliMergeResult.stderr] 的写入处）。
 const int kBiliMergeStderrKeepChars = 4000;
 
-/// ffmpeg 没显式指定路径时的默认位置：**exe 同级的 `ffmpeg\ffmpeg.exe`**。
+/// 随包 ffmpeg 在 bundle 里的 asset 键（与 `pubspec.yaml` 的声明一致）。
+const String kBiliFfmpegAssetKey = 'assets/ffmpeg.exe';
+
+/// 读 bundle 资源的那一层。**刻意做成可注入的 typedef**：单测里没有 asset
+/// bundle，`rootBundle.load` 直接抛，注入一份假字节才能验到「释放」这一步。
+typedef BiliAssetLoader = Future<ByteData> Function(String key);
+
+/// ffmpeg 没显式指定路径时的**第一处**：exe 同级的 `ffmpeg\ffmpeg.exe`。
 ///
-/// 出包阶段把 ffmpeg 放进安装目录的这个子目录里，运行时代码不用改。
+/// 出包时把 ffmpeg 放进安装目录的这个子目录里，装好的那份优先。
 /// 用 [Platform.resolvedExecutable] 而不是当前工作目录 —— 桌面应用的工作目录
 /// 可能是快捷方式指的任何地方。
+///
+/// ⚠️ 但**不能只靠这一处**：开发实例（`build\...\Debug\`）与没跑过出包脚本的
+/// 环境都没有这个子目录，而 2026-10-11 之前全项目没有任何一处会把
+/// `assets/ffmpeg.exe` 落到盘上 —— 于是每一次 B 站合并都稳定报 `ffmpegMissing`，
+/// 成品出不来。兜底见 [sidecarFfmpegPath] 与 [BiliMerger.resolvePath]。
 String defaultFfmpegPath() => p.join(
   p.dirname(Platform.resolvedExecutable),
   kFfmpegDirName,
   kFfmpegExeName,
 );
 
+/// ffmpeg 的**第二处**：userdata 里从 bundle 释放出来的那一份。
+///
+/// 与 `aria2c.exe` 同一个落点（见 `aria2.dart` 的 `_ensureSidecar`）——
+/// 安装目录可能只读（Program Files），userdata 一定可写。
+String sidecarFfmpegPath() => p.join(AppPaths.configDir.path, kFfmpegExeName);
+
 /// 失败的哪一种。三种「没成功」的形状必须分开：界面要给出不同的下一步
 /// （装 ffmpeg / 重试 / 换原始流），光一句「合并失败」等于没说。
 enum BiliMergeFailure {
-  /// 找不到 ffmpeg 可执行文件 —— 用户侧是「装包里没带 / 路径填错了」。
+  /// 找不到 ffmpeg 可执行文件 —— 两处都没有（安装目录那份没放、bundle 里也
+  /// 释放不出来）。用户侧是「包没带全 / 路径填错了 / 目录不可写」。
   ffmpegMissing,
 
   /// 子进程压根没起来，或起不来之后 IO 出异常 —— 拿不到可信的退出码。
@@ -194,31 +215,88 @@ class BiliMergeResult {
 typedef BiliSubtitleInput = ({String path, String title, String lang});
 
 class BiliMerger {
-  /// [ffmpegPath] 为 null 时用 [defaultFfmpegPath]（exe 同级 `ffmpeg\`）。
+  /// [ffmpegPath] 为 null 时走 [resolvePath]：先 exe 同级 `ffmpeg\`，
+  /// 再把 bundle 里那份释放到 userdata。注入它就是为了指到本机任何一份 ffmpeg。
   ///
   /// [commandPrefix] 生产为空；单测传 `['cmd.exe', '/c']` 指到一个假批处理上
   /// （本应用只跑 Windows，前缀是给测试留的唯一缝隙，见 [merge]）。
+  ///
+  /// [loadAsset] 是读 bundle 的那一层，单测里必须注入 —— 测试环境没有 asset
+  /// bundle，`rootBundle.load` 直接抛。
   ///
   /// 字段刻意不叫 `_ffmpegPath`：命名参数 `ffmpegPath` 与同名私有字段直接赋值会
   /// 同时触发 `prefer_initializing_formals` 与 `unnecessary_this`，而
   /// `this._ffmpegPath` 这种初始化形式在 Dart 里又是非法的（命名参数不能对应私有
   /// 字段）。换个字段名把两条 lint 一起绕开，参数名保持任务指定的 `ffmpegPath`。
-  BiliMerger({String? ffmpegPath, this.commandPrefix = const []})
-      : _pathOverride = ffmpegPath;
+  BiliMerger({
+    String? ffmpegPath,
+    this.commandPrefix = const [],
+    BiliAssetLoader? loadAsset,
+  }) : _pathOverride = ffmpegPath,
+       _loadAsset = loadAsset ?? rootBundle.load;
 
   final String? _pathOverride;
+  final BiliAssetLoader _loadAsset;
+
+  /// 解析结果的两级缓存：[_resolving] 让并发请求只释放一次文件，
+  /// [_resolved] 是给同步取值用的。
+  Future<String>? _resolving;
+  String? _resolved;
 
   /// 加在 ffmpeg 可执行文件**之前**的 argv（只用于测试）。
   final List<String> commandPrefix;
 
-  /// 本次实际使用的 ffmpeg 路径（注入值或默认值，**不做存在性判断**）。
-  String get ffmpegPath => _pathOverride ?? defaultFfmpegPath();
+  /// 本次实际使用的 ffmpeg 路径。
+  ///
+  /// **没跑过 [resolvePath] 之前它就是「注入值或安装目录那份」，不做存在性判断**；
+  /// 解析过之后会带上释放出来的 userdata 路径。argv 必须由 [merge] 在
+  /// [resolvePath] **之后**再拼，否则拼进去的是没解析过的那个位置。
+  String get ffmpegPath => _pathOverride ?? _resolved ?? defaultFfmpegPath();
+
+  /// 真正要用的那一份在哪：**安装目录优先，其次 userdata 里释放出来的那份**，
+  /// 两处都没有就把 bundle 里的 `assets/ffmpeg.exe` 写到 userdata。
+  ///
+  /// 为什么必须有这一步：Flutter 的 asset 是打进 bundle 的，**不能直接执行**，
+  /// 而 NSIS 出包脚本里压根没有 ffmpeg（2026-10-11 实测：装机版目录与开发实例
+  /// 都没有 `ffmpeg\` 子目录）。少了兜底，每一次 B 站合并都会稳定报
+  /// `ffmpegMissing`，成品一个也出不来。
+  ///
+  /// 释放失败不抛：回一个不存在的路径，让 [merge] 照原样给那句可读的
+  /// 「没找到 ffmpeg」。
+  Future<String> resolvePath() => _resolving ??= _resolve();
+
+  Future<String> _resolve() async {
+    final override = _pathOverride;
+    if (override != null) return _resolved = override;
+    final installed = defaultFfmpegPath();
+    if (await File(installed).exists()) return _resolved = installed;
+    // 整段都在 try 里：[sidecarFfmpegPath] 要读 AppPaths，而它可能还没 init
+    // （单测、以及任何在 main() 之前就被构造出来的合并器）。
+    try {
+      final sidecar = sidecarFfmpegPath();
+      if (await File(sidecar).exists()) return _resolved = sidecar;
+      final data = await _loadAsset(kBiliFfmpegAssetKey);
+      final f = File(sidecar);
+      await f.create(recursive: true);
+      await f.writeAsBytes(
+        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+        flush: true,
+      );
+      AppLogger.log(kBiliMergeLogTag, '随包 ffmpeg 已释放到 $sidecar');
+      return _resolved = sidecar;
+    } catch (e) {
+      AppLogger.log(kBiliMergeLogTag, '释放随包 ffmpeg 没成，按找不到处理：$e');
+      return _resolved = installed;
+    }
+  }
 
   /// ffmpeg 在不在。**只查文件存在，不跑一次 `-version`** ——
-  /// 给设置页当「ffmpeg 没找到，合并会失败」的提示用，代价是一次磁盘 stat，
-  /// 不联网也不下载。注意它不等于「能跑」：被安全软件拦下时这里仍返回 true，
-  /// 真判据是 [merge] 的返回值。
-  Future<bool> get available => File(ffmpegPath).exists();
+  /// 给设置页当「ffmpeg 没找到，合并会失败」的提示用。注意它不等于「能跑」：
+  /// 被安全软件拦下时这里仍返回 true，真判据是 [merge] 的返回值。
+  ///
+  /// ⚠️ 它会**触发一次释放**（第一次调用时把 bundle 里那 10 MB 写到 userdata）。
+  /// 这是有意的：提示条不该在能自愈的事情上报警，而代价只是一次性的落盘。
+  Future<bool> get available async => File(await resolvePath()).exists();
 
   // ── 全局并发闸门 ──────────────────────────────────────────
   //
@@ -398,6 +476,10 @@ class BiliMerger {
     String? chapterPath,
     void Function(double p)? onProgress,
   }) async {
+    // 先定位二进制，再拼 argv：buildCommand 里的第一项取自 [ffmpegPath]，
+    // 而释放出来的那份只有 resolvePath 跑完才知道 —— 顺序反了就把一个
+    // 不存在的路径拼进了命令行。
+    await resolvePath();
     final argv = buildCommand(
       videoPath,
       audioPath,
@@ -410,10 +492,16 @@ class BiliMerger {
     // ① 先确认二进制在不在。少了这一步，Process.start 只会给一句
     //   「CreateProcess ... 系统找不到指定的文件」，用户看不出是路径问题。
     if (!await File(ffmpegPath).exists()) {
+      // 第二处只有在 AppPaths 已 init 时才说得出路径（单测里它没 init，
+      // 而 sidecarFfmpegPath() 会抛 —— 一句失败提示不该把异常顶出来）。
+      final where = AppPaths.ready
+          ? '找过两处：安装目录的 ${defaultFfmpegPath()}，以及 userdata 里的 '
+                '${sidecarFfmpegPath()}（后者本该由随包资源自动释放）。'
+          : '随包资源里的那一份也没能释放出来。';
       return _failure(
         BiliMergeFailure.ffmpegMissing,
         '没找到 ffmpeg（$ffmpegPath）。B 站下的是 DASH 分开的两条流，'
-        '视频流和音频流各自都不能单独播放，必须先合并成 mp4。',
+        '视频流和音频流各自都不能单独播放，必须先合并成 mp4。$where',
         commandLine,
         '',
       );

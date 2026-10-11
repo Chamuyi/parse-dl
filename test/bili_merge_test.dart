@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:parse_dl/services/app_paths.dart';
 import 'package:parse_dl/services/bili_merger.dart';
 
 /// 假 ffmpeg（批处理）要造出的产物形状。
@@ -719,6 +721,90 @@ void main() {
       final m = BiliMerger(ffmpegPath: bat, commandPrefix: prefix);
       expect(await m.available, isTrue);
       expect(m.ffmpegPath, bat);
+    });
+  });
+
+  // 2026-10-11 的真缺陷：`assets/ffmpeg.exe` 一直只躺在 bundle 里，全项目没有
+  // 任何一处把它落到盘上，而 NSIS 出包脚本里也 0 处提到 ffmpeg —— 于是开发实例
+  // 与装机版**每一次**合并都报 ffmpegMissing（用户侧表现就是「下载完了但成品呢」）。
+  group('随包 ffmpeg 的释放（两处找不到的那一种）', () {
+    late Directory dataDir;
+    late Directory exeDir;
+
+    setUp(() async {
+      dataDir = await Directory.systemTemp.createTemp('bili_ffmpeg_sidecar_');
+      exeDir = Directory('${dataDir.path}\\exe');
+      await exeDir.create(recursive: true);
+      // 两个 override 都要给：不给 fallback 会去调 path_provider 的插件通道。
+      await AppPaths.init(
+        exeDirOverride: exeDir,
+        fallbackOverride: dataDir,
+      );
+    });
+
+    tearDown(() async {
+      try {
+        await dataDir.delete(recursive: true);
+      } on FileSystemException {
+        // 已经没了就算了。
+      }
+    });
+
+    BiliAssetLoader loader(List<int> bytes, {void Function()? onCall}) =>
+        (key) async {
+          onCall?.call();
+          expect(key, kBiliFfmpegAssetKey, reason: '只该读随包那一份资源');
+          return ByteData.sublistView(Uint8List.fromList(bytes));
+        };
+
+    test('两处都没有 → 释放到 userdata，并用那一份', () async {
+      var calls = 0;
+      final m = BiliMerger(
+        loadAsset: loader(const [70, 77, 80, 71], onCall: () => calls++),
+      );
+      final p = await m.resolvePath();
+      expect(p, sidecarFfmpegPath());
+      expect(File(p).existsSync(), isTrue, reason: '释放判据是盘上真有文件，不是返回值');
+      expect(File(p).readAsBytesSync(), const [70, 77, 80, 71]);
+      expect(calls, 1);
+      expect(await m.available, isTrue);
+      // 释放之后 ffmpegPath 这个同步取值也必须跟着变，否则 argv 会拼回旧位置。
+      expect(m.ffmpegPath, p);
+    });
+
+    test('userdata 里已经有一份就不再读资源', () async {
+      var calls = 0;
+      await File(sidecarFfmpegPath()).writeAsBytes(const [1, 2, 3]);
+      final m = BiliMerger(loadAsset: loader(const [9], onCall: () => calls++));
+      expect(await m.resolvePath(), sidecarFfmpegPath());
+      expect(calls, 0, reason: '重复释放会把 10 MB 白写一遍');
+      expect(File(sidecarFfmpegPath()).readAsBytesSync(), const [1, 2, 3]);
+    });
+
+    test('读不到资源时不抛异常，落回「没找到 ffmpeg」那句可读失败', () async {
+      final m = BiliMerger(
+        loadAsset: (key) async => throw StateError('bundle 里没有 $key'),
+      );
+      expect(await m.available, isFalse);
+      final r = await m.merge(
+        videoPath: pathOf('none.m4s'),
+        audioPath: pathOf('none2.m4s'),
+        outPath: pathOf('o11.mp4'),
+      );
+      expect(r.failure, BiliMergeFailure.ffmpegMissing);
+      expect(r.message, contains('没找到 ffmpeg'));
+      expect(r.message, contains('释放'), reason: '要说清随包那一份也没能落盘');
+      expect(File(sidecarFfmpegPath()).existsSync(), isFalse);
+    });
+
+    test('并发只释放一次（两个请求共用同一个 Future）', () async {
+      var calls = 0;
+      final m = BiliMerger(
+        loadAsset: loader(const [4, 5], onCall: () => calls++),
+      );
+      final two = await Future.wait([m.resolvePath(), m.resolvePath()]);
+      expect(two[0], two[1]);
+      expect(calls, 1);
     });
   });
 }
