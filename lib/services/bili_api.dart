@@ -21,6 +21,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
@@ -621,6 +622,21 @@ MediaVariant _variantOf(BiliStream s, {required bool dash}) => MediaVariant(
 
 // ── 客户端 ────────────────────────────────────────────────────
 
+/// 页内 fetch 的签名取数口：**签名在 Dart 侧算，凭据留在浏览器**。
+///
+/// 参数是**已经签好名**的完整 URL（`bili_wbi.dart` 的产物），返回值是接口的
+/// `data` 本体（与 [BiliApi.getSignedData] 同形）。「非 0 就抛」那条契约由
+/// 实现方负责 —— 页内 fetch 拿回的是整份 JSON，判 `code` 再取 `data` 是它的事。
+///
+/// 为什么要有这个口：B 站的登录态是 HttpOnly Cookie，**挖不出来也不该挖**，
+/// 但它就在内嵌 WebView 的会话里。让页面自己带 `credentials:'include'` 去取，
+/// 才能拿到登录态下的档位（1080P/4K）与字幕列表；`dart:io` 那条路没有凭据，
+/// 只到 480P。实现在 `bili_web.dart` 的 [BiliInPage]，接线在页面层。
+typedef BiliPageTransport = Future<Map<String, dynamic>> Function(
+  Uri signedUri,
+  String what,
+);
+
 class BiliApi {
   /// `cookie` 只存进内存字段。传空就是不登录，接口照样能取到 480P。
   ///
@@ -632,6 +648,12 @@ class BiliApi {
 
   String _cookie;
   String? _findProxy;
+
+  /// 装了它，签名请求就走内嵌页的 `fetch`（带登录态）；没装就走 `dart:io`（匿名）。
+  ///
+  /// 只经 [setPageTransport] 装：WebView 是页面级的、创建得比 `BiliApi` 晚，
+  /// 构造参数那条路永远用不上（也免得两处入口语义分叉）。
+  BiliPageTransport? _pageTransport;
 
   /// 匿名设备标识（buvid3/buvid4），只在内存里，进程结束就没了。
   String _anonCookie = '';
@@ -849,12 +871,45 @@ class BiliApi {
     }
   }
 
+  /// 装/卸页内取数口。页面 WebView 就绪后调它，登录态就能用上取流。
+  void setPageTransport(BiliPageTransport? t) {
+    _pageTransport = t;
+  }
+
+  /// 当前是否走页内 fetch（界面可据此如实说明「登录态已接入取流」）。
+  bool get usesPageTransport => _pageTransport != null;
+
+  /// 直接塞一对 wbi 密钥，跳过打 `nav` 那一步。
+  ///
+  /// 只给测试用：单测不该为了验一条「口有没有被调用」去打真接口。
+  /// 形状与 `aria2_coordinator.dart` 那几个 `@visibleForTesting` 入口一致。
+  @visibleForTesting
+  void setWbiKeysForTest({required String imgKey, required String subKey}) {
+    _keys = BiliKeys(imgKey: imgKey, subKey: subKey);
+    _keysAt = DateTime.now();
+  }
+
   /// 签名请求 → `data`。
   Future<Map<String, dynamic>> _signedData(
     String path,
     Map<String, dynamic> params, {
     required String what,
   }) async {
+    final transport = _pageTransport;
+    if (transport != null) {
+      // 页内那一路：**每次签名都重新算**（`wts` 会过期，拿同一串重放只会在
+      // 几轮退避之后再次被拒 —— 与 dart:io 那一路同源）。
+      // 重试由 `_getJson` 那一层管不到（它认的是 Uri），所以这里只处理
+      // 「签名被拒」这一种，重取密钥后重试一次，与下面那条分支同一语义。
+      try {
+        return await transport(await _signedUri(path, params), what);
+      } on BiliApiException catch (e) {
+        if (e.code != -403) rethrow;
+        AppLogger.log('BILI', '$what 签名被拒，重取 wbi 密钥后重试一次（页内）');
+        _keys = null;
+        return transport(await _signedUri(path, params), what);
+      }
+    }
     try {
       return _unwrap(await _getJson(() => _signedUri(path, params)), what);
     } on BiliApiException catch (e) {

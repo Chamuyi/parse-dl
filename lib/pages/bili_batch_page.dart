@@ -138,6 +138,10 @@ class _BiliBatchPageState extends State<BiliBatchPage> {
   /// 只换签名那一个：另外四支匿名就能通，换过去反而多一层「WebView 没就绪」的
   /// 失败面。换口的动作在 [BiliListApi] 那边是构造参数，所以这里重建一个实例，
   /// 不试图热改已经发出去的请求。
+  ///
+  /// **同时把取流口也装上**（`api.setPageTransport`）：批量页这一路
+  /// `biliDownloadParts` 拿的是它自己那个 `BiliApi`，不装的话批量下载仍然
+  /// 走匿名 dart:io，只能到 480P —— 与单条解析页那条通路口径不一致。
   Future<void> _attachInPage() async {
     final ctrl = _web;
     final api = _api;
@@ -154,6 +158,23 @@ class _BiliBatchPageState extends State<BiliBatchPage> {
           return BiliInPage.get(ctrl, url);
         },
       );
+      // 取流（playurl）也切到页内：契约与 getSignedData 一致，非 0 就抛
+      api.setPageTransport((uri, what) async {
+        final body = await BiliInPage.get(ctrl, uri.toString());
+        final code = body['code'];
+        if (code is num && code.toInt() != 0) {
+          throw BiliApiException(
+            '$what失败：${biliCodeHint(code.toInt(), body['message'])}',
+            code: code.toInt(),
+          );
+        }
+        final data = body['data'];
+        if (data is! Map) {
+          throw BiliApiException('$what失败：响应里没有 data');
+        }
+        return data.cast<String, dynamic>();
+      });
+      AppLogger.log('BILI', '批量页取流已切到页内 fetch（登录态生效）');
     } catch (e) {
       AppLogger.log('BILI', '批量页页内取数口接线失败，继续用纯接口：$e');
     }

@@ -111,6 +111,37 @@ class _BiliPageState extends State<BiliPage> {
   /// 它不该被序列化、也不该在切页面时被当成结果一起重建。
   BiliApi? _api;
 
+  /// WebView 就绪后把签名口换成**页内 fetch**，登录态这才真正接进取流。
+  ///
+  /// 这条路不改下载链路：`playurl` 拿到的仍然是一串直链，交给 aria2 的仍然
+  /// 没有 cookie（`_requestOptions` 只给 Referer + UA）。红线的落点是
+  /// 「登录态只用来问『有哪些流』，不用来取流字节」。
+  ///
+  /// 2026-10-11 登录档实测（`probe_tiers.py` + 验收执行器）：带凭据的
+  /// `playurl` 能拿到 1080P/4K，而 `dart:io` 那条匿名路只到 480P。
+  void _attachPageTransport(WebviewController ctrl) {
+    final api = _api;
+    if (api == null) return;
+    api.setPageTransport((uri, what) async {
+      final body = await BiliInPage.get(ctrl, uri.toString());
+      final code = body['code'];
+      if (code is num && code.toInt() != 0) {
+        // 契约与 BiliApi.getSignedData 一致：非 0 就抛，并带上业务码
+        // （-403 那条重取密钥的分支靠它认）。
+        throw BiliApiException(
+          '$what失败：${biliCodeHint(code.toInt(), body['message'])}',
+          code: code.toInt(),
+        );
+      }
+      final data = body['data'];
+      if (data is! Map) {
+        throw BiliApiException('$what失败：响应里没有 data');
+      }
+      return data.cast<String, dynamic>();
+    });
+    AppLogger.log('BILI', '取流已切到页内 fetch（登录态生效，档位不再受匿名 480P 限制）');
+  }
+
   /// 给 [_api] 的 cookie。**由登录层注入，本期不实现** ——
   /// 留这个字段是为了让「cookie 从哪来」只有一处，而不是散在三四个地方。
   /// 本期不做任何读盘 / 导出 cookie 的代码：B 站的登录态只活在 WebView2 的会话里，
@@ -222,6 +253,9 @@ class _BiliPageState extends State<BiliPage> {
         await ctrl.dispose();
         return;
       }
+      // 取流这一条口在 WebView 就绪后立刻换成页内 fetch：晚一步的话，
+      // 用户第一次点「下载」走的仍是匿名的 dart:io，只会拿到 480P。
+      _attachPageTransport(ctrl);
       setState(() => _wvReady = true);
       await ctrl.loadUrl(kBiliHomeUrl);
     } catch (e, st) {
