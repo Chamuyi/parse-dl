@@ -194,11 +194,81 @@ class _AppShell extends StatefulWidget {
   State<_AppShell> createState() => _AppShellState();
 }
 
+/// 所有路由 id 的**权威清单**。
+///
+/// 为什么单独列一份而不是从 `kNavGroups` 推导：导航表是「界面上有哪些入口」，
+/// 而这里是「树里可以同时活着哪些页面」——两者会分叉（设置页有四个 scope、
+/// 首页/关于不在任何分组里）。**加页面时两处都要登记**：漏了这份清单，
+/// 保活会静默退化成单页渲染（不崩，但切回来又是重建）。
+///
+/// 这份清单**只回答「这个 id 是不是一个页面」**，不承担顺序语义 ——
+/// [IndexedStack] 的 children 顺序由 `_visited`（首次访问顺序）决定，
+/// 原因见 `_visited` 的注释。
+const List<String> kAppRoutes = [
+  'home',
+  'douyin',
+  'douyin-downloads',
+  'douyin-auto',
+  'douyin-settings',
+  'bili',
+  'bili-batch',
+  'bili-downloads',
+  'bili-settings',
+  'download-management',
+  'auto-task',
+  'x-settings',
+  'settings',
+  'about',
+];
+
+/// 保活栈的 children 顺序与当前下标 —— **纯函数**，`test/app_shell_keepalive_test.dart`
+/// 直接钉住它（页面本体要真 WebView，widget 测试里起不来，但顺序是纯静态可判的）。
+///
+/// `children` 就是 `visited` 本身：**首次访问序、append-only**，这正是保活成立的
+/// 前提 —— 已活页面的位置恒定，`IndexedStack` 按位置匹配 element 时必然复用同一个。
+///
+/// 返回 null 表示「不该走保活路径」（`current` 不在 [kAppRoutes] 里，或还没被访问过），
+/// 调用方退回单页渲染。
+({List<String> children, int index})? keepAliveStack(
+  List<String> visited,
+  String current,
+) {
+  if (!kAppRoutes.contains(current)) return null;
+  final at = visited.indexOf(current);
+  if (at < 0) return null;
+  return (children: visited, index: at);
+}
+
 class _AppShellState extends State<_AppShell> {
   /// 当前选中的页面（导航 id）。
   String _routeId = 'home';
 
-  void _setRoute(String id) => setState(() => _routeId = id);
+  /// **已经打开过的**路由，**按首次访问顺序**排列 —— 这就是保活的依据。
+  ///
+  /// 为什么要保活：三个解析页里都嵌着 WebView2，而 WebView2 的画面由
+  /// `webview_windows` 通过 `_reportSurfaceSize()` 把 Flutter 的布局尺寸上报给
+  /// 它的 CompositionController（0.4.0 走 `Texture` 合成，**不是**原生子窗口）。
+  /// 以前 `_buildPage` 是「当前路由 → new 一个页面」的 switch，切走即
+  /// `dispose()`、WebView 随之销毁；切回来是全新实例 —— 用户看到的是
+  /// 「切回来没刷新、还停在当前页面」（其实是**重新加载了同一个起始页**），
+  /// 以及「返回按钮点不动」（新实例的 `_canBack` 初始恒为 `false`）。
+  ///
+  /// **顺序为什么必须是「首次访问序」而不能是「清单序」**：[IndexedStack] 的
+  /// children 是**按位置**匹配 element 的（位置相同且 `runtimeType` 相同才复用）。
+  /// 若按 [kAppRoutes] 过滤出存活列表，先开 B 站、再开抖音时 `bili` 的位置会从
+  /// 1 漂到 2 —— 位置 1 的类型从 `BiliPage` 变成 `DouyinPage`，两边都找不到能
+  /// 复用的 element，`BiliPage` 的 State 被 **dispose**，保活静默失效（真机现象
+  /// 与没修时一模一样）。按访问顺序 append-only 则每个页面的位置**恒定**，
+  /// 切回来必然复用同一个 element。回归判据见 `test/app_shell_keepalive_test.dart`。
+  ///
+  /// 保活的代价是 WebView 常驻内存，所以**只保活访问过的**：没点进去过的路由
+  /// 仍然不构造（启动时不会一次性建出三个 WebView）。
+  final List<String> _visited = ['home'];
+
+  void _setRoute(String id) => setState(() {
+    _routeId = id;
+    if (!_visited.contains(id)) _visited.add(id);
+  });
 
   /// 点击模块标题行 —— 切换**该模块自己**的展开状态并落盘。
   ///
@@ -318,9 +388,44 @@ class _AppShellState extends State<_AppShell> {
     );
   }
 
-  /// 按当前路由渲染页面。
+  /// 按当前路由渲染页面 —— **保活版**。
+  ///
+  /// 只把**访问过的**路由放进 [IndexedStack]：访问过的留在树里 → 切走不
+  /// `dispose` → WebView 不销毁、历史与滚动位置都在；没访问过的不构造 →
+  /// 启动时不会一次建出三个 WebView。
+  ///
+  /// **children 必须按 `_visited`（首次访问序）排，不能按 [kAppRoutes] 过滤** ——
+  /// 前者是 append-only，已活页面的位置恒定；后者会让位置随「又访问了谁」漂移，
+  /// 位置一漂 element 就复用不上、State 被 dispose。详见 `_visited` 的注释。
+  ///
+  /// **为什么用 `IndexedStack`**：它把非当前项的绘制与命中测试都跳过
+  /// （`RenderIndexedStack` 只覆写 `paintStack` / `hitTestChildren`，**不覆写
+  /// `performLayout`**），而 `webview_windows` 的 `_reportSurfaceSize()` 读的是
+  /// `RenderBox.size` —— 所以非当前页的尺寸**保持不变**、不会缩成 0，切回来时
+  /// WebView 的尺寸上报是对的。同时它不引入额外的 RenderObject 包装
+  /// （用 `_VisibilityScope` 传递可见性），`Positioned` 这类 ParentDataWidget
+  /// 仍能正确作用。
+  ///
+  /// 为什么不是「记住网址、切回来重载」：那样切回要重新加载几秒，且页面上的
+  /// 临时状态（弹幕列表、滚动位置、正在播放的位置）全丢；保活则原样留着。
   Widget _buildPage(BuildContext context) {
-    switch (_routeId) {
+    // 当前路由不在清单里（加页面时漏登记就会这样）→ 退回不保活的单页渲染，
+    // 至少别整屏空白。
+    final stack = keepAliveStack(_visited, _routeId);
+    if (stack == null) return _pageFor(context, _routeId);
+
+    return IndexedStack(
+      index: stack.index,
+      sizing: StackFit.expand,
+      children: [
+        for (final id in stack.children) _pageFor(context, id),
+      ],
+    );
+  }
+
+  /// 单个路由 → 页面组件。**只有这里知道路由与页面的对应关系**。
+  Widget _pageFor(BuildContext context, String id) {
+    switch (id) {
       case 'home':
         return HomepagePage(onNavigate: _setRoute);
       case 'douyin':
@@ -362,7 +467,7 @@ class _AppShellState extends State<_AppShell> {
       default:
         // 不应到达：所有路由都已迁移。
         return _PagePlaceholder(
-          routeId: _routeId,
+          routeId: id,
           colors: AppTheme.colorsOf(context),
         );
     }
