@@ -354,7 +354,6 @@ class BiliConfig {
     fileNameTemplate: migrateBiliTemplate(
       fileNameTemplate: j['fileNameTemplate'] as String? ??
           kBiliDefaultFileNameTemplate,
-      dirTemplate: j['dirTemplate'] as String? ?? kBiliDefaultDirTemplate,
     ),
     container: BiliContainer.fromId(j['container'] as String?),
     speedLimitKbps: (j['speedLimitKbps'] as num?)?.toInt() ?? 0,
@@ -598,17 +597,25 @@ const int kBiliDefaultDanmakuMarginV = 10;
 /// 默认文件夹模板：一个稿件一个目录。
 const String kBiliDefaultDirTemplate = '%WORK_TITLE%';
 
-/// 默认文件名模板：`冬天-1080P60.mp4`。
+/// 默认文件名模板：`怪东西分享9.0-1080P.mkv`，多 P 时 `怪东西分享9.0P03-1080P.mkv`。
 ///
-/// **刻意不带 `%CODEC%`**：B 站同一个稿件的编码族（AVC / HEVC / AV1）对用户
-/// 来说通常没有意义，而标题里本来就常带 `4K`、`3840x2160` 这类字样 ——
-/// 再拼一个编码后缀，文件名会长到一眼看不懂、也更容易撞 Windows 的 260 字符。
+/// **用 `%WORK_TITLE%` 而不是 `%PART_TITLE%`**：这是 2026-10-11 真机撞出来的。
+/// 实测 `BV1gHps6yEHL`（单 P）两个字段的值：
+///   * `%WORK_TITLE%` = `影视飓风的直升机？怪东西分享9.0`（17 字，人看得懂）
+///   * `%PART_TITLE%` = `2026-10-09_怪东西分享9.0_3840x2160_V04_Bilibili`（42 字）
+/// UP 主常把**分 P 名填成上传时的原始文件名**（带日期 / 分辨率 / 版本号），
+/// 单 P 稿件里这个字段基本是垃圾；而作品标题才是他真正起的那个名字。
+/// 42 字拼进文件名，就是用户说的「这名字怎么长这样」。
+///
+/// **`<P%P%->` 可选段解决多 P 重名**：`%P%` 是数值变量，单 P 时取到 `0` →
+/// 按空处理 → 连同段内的 `P` 与 `-` 一起消失。所以单 P 落 `标题-1080P.mkv`，
+/// 多 P 落 `标题P03-1080P.mkv`，两种场景都对。这个机制本来就有
+/// （参照实现把它渲染成 `P00` 的那个坑就是靠它堵的），这里只是换个变量用。
+///
+/// **刻意不带 `%CODEC%`**：编码族对用户通常没意义，而标题里本来就常带
+/// `4K`、`3840x2160` 这类字样，再拼编码会长到看不懂、也更容易撞 260 字符。
 /// 想标编码的人可以在设置里用「启用模版」预设切到别的组合。
-///
-/// **也没有 `<P%P%->` 前缀**：默认目录模板已经是「一个稿件一个目录」，
-/// 目录名就是作品标题，文件名再加一遍分 P 号是冗余。多 P 稿件想区分分 P 时
-/// 换「按 BV 号分文件夹」那份预设即可（它保留了 `P%P%`）。
-const String kBiliDefaultFileNameTemplate = '%PART_TITLE%-%QUALITY%%EXT%';
+const String kBiliDefaultFileNameTemplate = '%WORK_TITLE%<-P%P%>-%QUALITY%%EXT%';
 
 /// 上一版的默认文件名模板。**只为一次性迁移而存在**（见 [migrateBiliTemplate]）。
 ///
@@ -619,20 +626,21 @@ const String kBiliDefaultFileNameTemplate = '%PART_TITLE%-%QUALITY%%EXT%';
 const String kBiliLegacyFileNameTemplate =
     '<P%P%->%PART_TITLE%-%QUALITY%-%CODEC%%EXT%';
 
-/// 旧文件名模板 → 新默认。**只在值恰好等于旧默认串时才换**，否则原样返回。
+/// 上一版的**第二**个默认串（`%PART_TITLE%-%QUALITY%%EXT%`，只在 2026-10-11
+/// 当天存在过几小时）。留在这里是为了让那天已经落盘的配置也能升到最新默认 ——
+/// 迁移必须把所有历史默认串都认出来，否则「当天迁过一次」的用户会被卡在中间那版。
+const String kBiliLegacyFileNameTemplate2 = '%PART_TITLE%-%QUALITY%%EXT%';
+
+/// 旧文件名模板 → 新默认。**只在值恰好等于某个历史默认串时才换**，否则原样返回。
 ///
 /// 纯函数，可单测：迁移判断最容易写错的地方是「顺手把用户自己的也改了」，
 /// 而那在本机上是不可逆的（他手改过的模板会被悄悄覆盖）。
-String migrateBiliTemplate({
-  required String fileNameTemplate,
-  required String dirTemplate,
-}) {
-  final legacyName = fileNameTemplate == kBiliLegacyFileNameTemplate;
-  final legacyDir = dirTemplate == kBiliDefaultDirTemplate;
-  // 两条都还是出厂值 → 整份升到新默认（目录模板这一版没变，保留原样）
-  if (legacyName && legacyDir) return kBiliDefaultFileNameTemplate;
-  // 只文件名是出厂值 → 单换文件名
-  if (legacyName) return kBiliDefaultFileNameTemplate;
+String migrateBiliTemplate({required String fileNameTemplate}) {
+  const legacy = {
+    kBiliLegacyFileNameTemplate,
+    kBiliLegacyFileNameTemplate2,
+  };
+  if (legacy.contains(fileNameTemplate)) return kBiliDefaultFileNameTemplate;
   return fileNameTemplate;
 }
 

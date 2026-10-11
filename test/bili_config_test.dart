@@ -249,15 +249,17 @@ void main() {
   });
 
   group('默认模板与预设', () {
-    test('默认文件名模板：标题 + 档位，不带分 P 号与编码', () {
-      // 2026-10-11 改：默认模板从 `<P%P%->%PART_TITLE%-%QUALITY%-%CODEC%%EXT%`
-      // 收窄成 `%PART_TITLE%-%QUALITY%%EXT%`。理由两条：
-      //   ① 默认目录模板已经是一稿一个目录，文件名再加一遍分 P 号是冗余；
-      //   ② 标题本身常带 `4K`/`3840x2160` 字样，再拼编码会长到看不懂。
-      // 带 `%P%` 与 `%CODEC%` 的组合仍然是可用选项（`bvid` 预设）。
+    test('默认文件名模板：作品标题 + 档位；多 P 带分 P 号、单 P 不带', () {
+      // 2026-10-11 定稿：`%WORK_TITLE%<P%P%->-%QUALITY%%EXT%`。两处关键决定：
+      //   ① **用 %WORK_TITLE% 而不是 %PART_TITLE%** —— 真机实测 BV1gHps6yEHL：
+      //      作品标题 17 字（人看得懂），分 P 标题 42 字（UP 主填的上传原始文件名）。
+      //      用后者就是用户说的「这名字怎么长这样」。
+      //   ② **保留 `<P%P%->` 可选段** —— 单 P 时 %P%=0 按空处理、整段消失，
+      //      多 P 时才出 P03-，这样多 P 稿件的各分 P 不会互相撞名。
+      // 刻意不带 %CODEC%：编码族对用户没意义，标题里本来就常带 4K 字样。
       expect(
         resolveVariables(kBiliDefaultFileNameTemplate, biliExampleMedia()),
-        '第3P 冬天-1080P60.m4s',
+        '把一年的海边拍成十二段-P03-1080P60.m4s',
       );
       final single = biliExampleMedia().copyWith(
         bili: const BiliMeta(
@@ -281,26 +283,23 @@ void main() {
       // 所以 fromJson 读盘时跑一次一次性迁移。判据必须收窄到「全串相等」——
       // 用户自己改过的模板被悄悄覆盖是不可逆的。
       expect(
-        migrateBiliTemplate(
-          fileNameTemplate: kBiliLegacyFileNameTemplate,
-          dirTemplate: kBiliDefaultDirTemplate,
-        ),
+        migrateBiliTemplate(fileNameTemplate: kBiliLegacyFileNameTemplate),
+        kBiliDefaultFileNameTemplate,
+      );
+      // 两个历史默认串都要认（第二个只在 2026-10-11 当天存在过几小时，
+      // 那天迁过一次的用户不能被卡在中间那版）
+      expect(
+        migrateBiliTemplate(fileNameTemplate: kBiliLegacyFileNameTemplate2),
         kBiliDefaultFileNameTemplate,
       );
       const mine = '%BVID%_%PART_TITLE%%EXT%';
       expect(
-        migrateBiliTemplate(
-          fileNameTemplate: mine,
-          dirTemplate: kBiliDefaultDirTemplate,
-        ),
+        migrateBiliTemplate(fileNameTemplate: mine),
         mine,
         reason: '用户自己改过的模板一个字都不许动',
       );
       expect(
-        migrateBiliTemplate(
-          fileNameTemplate: kBiliDefaultFileNameTemplate,
-          dirTemplate: kBiliDefaultDirTemplate,
-        ),
+        migrateBiliTemplate(fileNameTemplate: kBiliDefaultFileNameTemplate),
         kBiliDefaultFileNameTemplate,
         reason: '新默认值再读一次要幂等',
       );
