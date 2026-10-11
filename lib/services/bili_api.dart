@@ -632,10 +632,45 @@ MediaVariant _variantOf(BiliStream s, {required bool dash}) => MediaVariant(
 /// 但它就在内嵌 WebView 的会话里。让页面自己带 `credentials:'include'` 去取，
 /// 才能拿到登录态下的档位（1080P/4K）与字幕列表；`dart:io` 那条路没有凭据，
 /// 只到 480P。实现在 `bili_web.dart` 的 [BiliInPage]，接线在页面层。
+/// 页内 fetch 的取数口：**签名在 Dart 侧算，凭据留在浏览器**。
+///
+/// 参数是**已经拼好（必要时已签名）**的完整 URL，返回值是接口的**整份 JSON body**
+/// （与 `_getJson` 同形，不是 `data`）——判 `code`、取 `data` 由 [BiliApi] 自己
+/// 做，因为各条口对 `data` 的形状要求不同（`view/detail/tag` 的 `data` 是数组）。
+///
+/// 为什么要有这个口：B 站的登录态是 HttpOnly Cookie，**挖不出来也不该挖**，
+/// 但它就在内嵌 WebView 的会话里。让页面自己带 `credentials:'include'` 去取，
+/// 才能拿到登录态下的档位与字幕列表；`dart:io` 那条路没有凭据，只到 480P。
+/// 实现在 `bili_web.dart` 的 [BiliInPage]，接线在页面层与 [BiliPageTransportRegistry]。
 typedef BiliPageTransport = Future<Map<String, dynamic>> Function(
   Uri signedUri,
   String what,
 );
+
+/// 「当前有个 WebView 在提供页内 fetch」这一个事实的**进程级登记处**。
+///
+/// 为什么需要它：附加文件那一份 `BiliApi` 在 `main.dart` **启动时**装配，
+/// 而 WebView 是**页面级**创建的 —— 装配那一刻还不存在页，构造参数传不进去。
+/// 页面的 WebView 就绪时把口登记到这里，附加文件那份就能用上同一份登录态。
+///
+/// 一个进程里同时只会有一个 B 站页拿着 WebView，所以是「最后登记的那个生效」；
+/// 页面销毁时登记 null 退回匿名。
+///
+/// ⚠️ 这条是 2026-10-11 真机踩出来的：只给页面装了口、没接这条，
+/// 附加文件仍在匿名请求，表现为**登录了也报「字幕：接口没返回任何一条」**。
+class BiliPageTransportRegistry {
+  BiliPageTransportRegistry._();
+
+  static BiliPageTransport? _current;
+
+  /// 页面就绪时登记；销毁时传 null。
+  static void set(BiliPageTransport? t) => _current = t;
+
+  static BiliPageTransport? get current => _current;
+
+  @visibleForTesting
+  static void resetForTest() => _current = null;
+}
 
 class BiliApi {
   /// `cookie` 只存进内存字段。传空就是不登录，接口照样能取到 480P。
@@ -651,9 +686,28 @@ class BiliApi {
 
   /// 装了它，签名请求就走内嵌页的 `fetch`（带登录态）；没装就走 `dart:io`（匿名）。
   ///
-  /// 只经 [setPageTransport] 装：WebView 是页面级的、创建得比 `BiliApi` 晚，
-  /// 构造参数那条路永远用不上（也免得两处入口语义分叉）。
+  /// 两条来源：
+  ///  * [setPageTransport] —— 页面自己那份 `BiliApi`（取流、批量列表）直接装；
+  ///  * [useSharedPageTransport] —— **附加文件**那份在 `main.dart` 启动时装配，
+  ///    此刻还没有 WebView，所以它改为「跟随 [BiliPageTransportRegistry]」，
+  ///    页面就绪登记后自动用上。
+  ///
+  /// 为什么要后者：2026-10-11 真机撞上过 —— 只给页面装了口，附加文件仍在
+  /// 匿名请求，于是**登录了也报「字幕：接口没返回任何一条」**。
   BiliPageTransport? _pageTransport;
+
+  /// 是否跟随进程级登记处（附加文件那份用这条）。
+  bool _useShared = false;
+
+  /// 改为跟随 [BiliPageTransportRegistry]：页面登记后本对象立刻用上。
+  void useSharedPageTransport() {
+    _useShared = true;
+  }
+
+  /// 当前生效的口：自己装的优先，否则取登记处那一份（若在跟随）。
+  BiliPageTransport? get _effectiveTransport =>
+      _pageTransport ??
+      (_useShared ? BiliPageTransportRegistry.current : null);
 
   /// 匿名设备标识（buvid3/buvid4），只在内存里，进程结束就没了。
   String _anonCookie = '';
@@ -876,8 +930,9 @@ class BiliApi {
     _pageTransport = t;
   }
 
-  /// 当前是否走页内 fetch（界面可据此如实说明「登录态已接入取流」）。
-  bool get usesPageTransport => _pageTransport != null;
+  /// 当前是否**真的**会走页内 fetch（自己装了，或跟随登记处且已登记）。
+  /// 界面可据此如实说明「登录态已接入」。
+  bool get usesPageTransport => _effectiveTransport != null;
 
   /// 直接塞一对 wbi 密钥，跳过打 `nav` 那一步。
   ///
@@ -895,19 +950,20 @@ class BiliApi {
     Map<String, dynamic> params, {
     required String what,
   }) async {
-    final transport = _pageTransport;
+    final transport = _effectiveTransport;
     if (transport != null) {
       // 页内那一路：**每次签名都重新算**（`wts` 会过期，拿同一串重放只会在
       // 几轮退避之后再次被拒 —— 与 dart:io 那一路同源）。
       // 重试由 `_getJson` 那一层管不到（它认的是 Uri），所以这里只处理
       // 「签名被拒」这一种，重取密钥后重试一次，与下面那条分支同一语义。
       try {
-        return await transport(await _signedUri(path, params), what);
+        return _unwrap(await transport(await _signedUri(path, params), what), what);
       } on BiliApiException catch (e) {
         if (e.code != -403) rethrow;
         AppLogger.log('BILI', '$what 签名被拒，重取 wbi 密钥后重试一次（页内）');
         _keys = null;
-        return transport(await _signedUri(path, params), what);
+        return _unwrap(
+            await transport(await _signedUri(path, params), what), what);
       }
     }
     try {
@@ -965,7 +1021,17 @@ class BiliApi {
     Map<String, dynamic> params, {
     String what = '接口',
   }) async {
-    final body = await _getJson(() => _uri(kBiliApiHost, path, params));
+    // 页内口装了就走它：登录态的 `player/wbi/v2` 才会给出字幕列表，
+    // 而这条口正是附加文件问字幕/标签用的那一条。
+    final transport = _effectiveTransport;
+    final Map<String, dynamic> body;
+    if (transport != null) {
+      // 页内 fetch 只要签名过的地址；这条口不签名，用 plainPageUrl 同形的
+      // 拼法由实现方决定 —— 所以这里只把「非 0 抛」的契约交给它。
+      body = await _plainViaTransport(path, params, what);
+    } else {
+      body = await _getJson(() => _uri(kBiliApiHost, path, params));
+    }
     final code = _int(body['code']);
     if (code != 0) {
       throw BiliApiException(
@@ -974,6 +1040,22 @@ class BiliApi {
       );
     }
     return body['data'];
+  }
+
+  /// 不签名那条口的页内实现：地址由本类拼（签名不在这一支），
+  /// 请求由页面发（凭据在浏览器侧）。**非 0 由页面那段抛**，这里原样透传。
+  Future<Map<String, dynamic>> _plainViaTransport(
+    String path,
+    Map<String, dynamic> params,
+    String what,
+  ) async {
+    final transport = _effectiveTransport;
+    if (transport == null) {
+      return _getJson(() => _uri(kBiliApiHost, path, params));
+    }
+    // 复用签名口的形态：把「一个 URL + what」交给实现方。
+    // 不签名 = 不带 w_rid/wts，与 `plainPageUrl` 一致。
+    return transport(_uri(kBiliApiHost, path, params), what);
   }
 
   /// 不签名取 `data`。合集 / 系列 / `card` / 收藏夹这几支实测匿名即可。

@@ -19,7 +19,7 @@ import '../services/settings_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/bili_download_options_dialog.dart';
-import 'bili_page.dart' show kBiliHomeUrl;
+import 'bili_page.dart' show kBiliHomeUrl, biliPageTransportFor;
 
 /// 「B 站批量下载」页：一次贴多条主页 / 合集 / 系列 / 收藏夹，逐条翻到尽并投队列。
 ///
@@ -158,22 +158,10 @@ class _BiliBatchPageState extends State<BiliBatchPage> {
           return BiliInPage.get(ctrl, url);
         },
       );
-      // 取流（playurl）也切到页内：契约与 getSignedData 一致，非 0 就抛
-      api.setPageTransport((uri, what) async {
-        final body = await BiliInPage.get(ctrl, uri.toString());
-        final code = body['code'];
-        if (code is num && code.toInt() != 0) {
-          throw BiliApiException(
-            '$what失败：${biliCodeHint(code.toInt(), body['message'])}',
-            code: code.toInt(),
-          );
-        }
-        final data = body['data'];
-        if (data is! Map) {
-          throw BiliApiException('$what失败：响应里没有 data');
-        }
-        return data.cast<String, dynamic>();
-      });
+      // 取流（playurl）也切到页内：附加文件那份 BiliApi 靠登记处取用同一个口
+      final t = biliPageTransportFor(ctrl);
+      api.setPageTransport(t);
+      BiliPageTransportRegistry.set(t);
       AppLogger.log('BILI', '批量页取流已切到页内 fetch（登录态生效）');
     } catch (e) {
       AppLogger.log('BILI', '批量页页内取数口接线失败，继续用纯接口：$e');

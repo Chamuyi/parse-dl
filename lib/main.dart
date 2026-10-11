@@ -195,12 +195,16 @@ Future<void> main() async {
 
   // B 站附加文件（弹幕 / 字幕 / 封面 / 章节 / 元数据）的装配点。
   //
-  // 这一层只认「取数口」，编排逻辑在 `bili_additional_runner.dart` 里；
-  // 以后要换成页内 fetch（AI 字幕、个性化收藏夹那些需要登录态的）就改这几行，
-  // 编排层与协调器都不动。**凭据不进 aria2 那条红线也在这里守住**：
-  // 这些请求全走 Dart 侧，一次都不经过下载器，下载器的 per-task header
-  // 会被 --save-session 明文写进会话文件。
-  final biliApiForFiles = BiliApi();
+  // 这一层只认「取数口」，编排逻辑在 `bili_additional_runner.dart` 里。
+  // **凭据不进 aria2 那条红线也在这里守住**：这些请求全走 Dart 侧，
+  // 一次都不经过下载器（下载器的 per-task header 会被 --save-session 明文写进
+  // 会话文件）。
+  //
+  // ⚠️ **`useSharedPageTransport()` 这一行不能省。** 本对象在启动时装配，
+  // 而 WebView 是页面级创建的 —— 少了它，附加文件会一直走匿名 `dart:io`，
+  // 表现为**登录了也报「字幕：接口没返回任何一条」**（2026-10-11 真机撞上）。
+  // 页面就绪时会把页内口登记到 `BiliPageTransportRegistry`，本对象随即用上。
+  final biliApiForFiles = BiliApi()..useSharedPageTransport();
   coordinator.biliAdditional = ({
     required cfg,
     required saveDir,

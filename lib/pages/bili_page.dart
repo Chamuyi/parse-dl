@@ -54,6 +54,14 @@ class BiliPage extends StatefulWidget {
 /// 内嵌浏览器的起始地址。
 const String kBiliHomeUrl = 'https://www.bilibili.com/';
 
+/// 页内取数口的**唯一实现**：算完的 URL 交给页面发，凭据一直留在浏览器侧。
+///
+/// 解析页与批量页都用它（两处各写一遍迟早会漂）。**返回的是整份 body，
+/// 不是 `data`** —— 各条口对 `data` 的形状要求不同（`view/detail/tag` 的
+/// `data` 是数组），判 code、取 data 由 [BiliApi] 自己做。
+BiliPageTransport biliPageTransportFor(WebviewController ctrl) =>
+    (uri, what) => BiliInPage.get(ctrl, uri.toString());
+
 /// 主页推荐接口（**要 WBI 签名**，所以每次都得先拿密钥再拼完整地址）。
 const String kBiliFeedPath = '/x/web-interface/wbi/index/top/feed/rcmd';
 
@@ -120,27 +128,23 @@ class _BiliPageState extends State<BiliPage> {
   /// 2026-10-11 登录档实测（`probe_tiers.py` + 验收执行器）：带凭据的
   /// `playurl` 能拿到 1080P/4K，而 `dart:io` 那条匿名路只到 480P。
   void _attachPageTransport(WebviewController ctrl) {
-    final api = _api;
-    if (api == null) return;
-    api.setPageTransport((uri, what) async {
-      final body = await BiliInPage.get(ctrl, uri.toString());
-      final code = body['code'];
-      if (code is num && code.toInt() != 0) {
-        // 契约与 BiliApi.getSignedData 一致：非 0 就抛，并带上业务码
-        // （-403 那条重取密钥的分支靠它认）。
-        throw BiliApiException(
-          '$what失败：${biliCodeHint(code.toInt(), body['message'])}',
-          code: code.toInt(),
-        );
-      }
-      final data = body['data'];
-      if (data is! Map) {
-        throw BiliApiException('$what失败：响应里没有 data');
-      }
-      return data.cast<String, dynamic>();
-    });
+    final t = biliPageTransportFor(ctrl);
+    _api?.setPageTransport(t);
+    // **同一份口也登记到进程级**：附加文件那份 `BiliApi` 在 main.dart 启动时
+    // 装配，拿不到这里的 WebView，靠登记处用上同一个登录态。
+    // 漏了这一行 = 登录了也报「字幕：接口没返回任何一条」（真机撞过）。
+    BiliPageTransportRegistry.set(t);
     AppLogger.log('BILI', '取流已切到页内 fetch（登录态生效，档位不再受匿名 480P 限制）');
   }
+
+  /// 页内口本身：算完的 URL 交给页面发，凭据一直留在浏览器侧。
+  ///
+  /// **返回的是整份 body，不是 `data`** —— 因为 `view/detail/tag` 那条的
+  /// `data` 是**数组**，而 `BiliApi` 那几种口对形状的要求各不相同，
+  /// 判 code 取 data 由它们自己做（契约与 `_getJson` 一致）。
+  ///
+  /// 实现见顶层的 [biliPageTransportFor]：批量页也要用同一份，
+  /// 两处各写一遍迟早会漂。
 
   /// 给 [_api] 的 cookie。**由登录层注入，本期不实现** ——
   /// 留这个字段是为了让「cookie 从哪来」只有一处，而不是散在三四个地方。
@@ -172,6 +176,9 @@ class _BiliPageState extends State<BiliPage> {
 
   @override
   void dispose() {
+    // 注销登记处：本页的 WebView 马上要销毁，留着它 = 后续请求打向一个死控制器。
+    // 附加文件那份 `BiliApi` 会跟着退回匿名（好过一直失败）。
+    BiliPageTransportRegistry.set(null);
     for (final s in _subs) {
       s.cancel();
     }
