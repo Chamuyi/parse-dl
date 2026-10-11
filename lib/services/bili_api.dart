@@ -964,9 +964,29 @@ class BiliApi {
   );
 
   /// 不签名取一个**绝对 URL** 的 JSON（字幕正文 `subtitle_url` 是完整地址）。
+  ///
+  /// **刻意不走 [_unwrap]。** 字幕正文是 CDN 直出的静态 JSON，顶层是
+  /// `{font_size, font_color, Stroke, type, lang, version, body:[…]}`，
+  /// **没有 `code`、也没有 `data`** —— `_unwrap` 是给带业务信封的接口用的，
+  /// 套在这里会把一份完全正常的响应判成「B 站返回 code=null」。
+  ///
+  /// 这是 2026-10-11 登录档验收现场踩出来的：三条 1080P 全部下载成功，却每条都报
+  /// 「字幕：ai-zh 正文取回失败」，而同一份日志里那条 URL 的 `GET … -> 200` 是成功的。
+  /// **匿名验收永远碰不到**（匿名态 `subtitles` 恒为 0，走不到取正文这一步），
+  /// 所以它只在登录档暴露。回归测试 `test/bili_subtitle_body_shape_test.dart`。
+  ///
+  /// 仍然要判业务错误：服务端真被风控时回的是带 `code` 的信封（如 -412），
+  /// 那种必须抛出去，不能被当成一份正文收下。
   Future<Map<String, dynamic>> jsonAtUrl(String url, {String what = '字幕正文'}) async {
     final body = await _getJson(() => Uri.parse(url));
-    return _unwrap(body, what);
+    final code = _int(body['code']);
+    if (code != null && code != 0) {
+      throw BiliApiException(
+        '$what失败：${biliCodeHint(code, body['message'])}',
+        code: code,
+      );
+    }
+    return body;
   }
 
   /// 取一个绝对 URL 的字节（封面图床）。
