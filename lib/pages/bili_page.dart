@@ -12,7 +12,6 @@ import '../services/app_logger.dart';
 import '../services/bili_api.dart';
 import '../services/bili_batch_runner.dart';
 import '../services/bili_download_plan.dart';
-import '../services/bili_feed.dart';
 import '../services/bili_ledger.dart';
 import '../services/bili_link.dart';
 import '../services/bili_store.dart';
@@ -28,7 +27,8 @@ import '../widgets/app_toast.dart';
 ///
 /// **工作方式**：左边内嵌一个 WebView2 打开 bilibili.com，右边是操作面板。
 /// 两条取列表的路都**不靠劫持页面**：
-///   * 「取主页推荐」在页面里发 `fetch(..., {credentials:'include'})`
+///   * 「抓当前页 / 抓正在播」把内嵌页里那条稿件交给下面的解析通路；
+///     需要凭据的接口在页面里发 `fetch(..., {credentials:'include'})`
 ///     （见 [BiliInPage]）—— B 站的登录态是 HttpOnly Cookie，我们读不到也
 ///     导不出，但它就在这个 WebView 的会话里；让页面自己去问，Cookie /
 ///     Referer / Origin 全由浏览器补，我们**不需要碰凭据**。
@@ -54,6 +54,27 @@ class BiliPage extends StatefulWidget {
 /// 内嵌浏览器的起始地址。
 const String kBiliHomeUrl = 'https://www.bilibili.com/';
 
+/// 读「页面里正在播放哪一条稿件」的页内脚本。
+///
+/// **同步取值、不发请求**：`executeScript` 不 await Promise，写成异步只会拿到
+/// `[object Promise]`。三级降级都取不到时回空串，由调用方如实报「读不到」——
+/// 不猜一个 BV 号出来（猜错会让用户下载到完全无关的稿件）。
+const String kBiliProbePlayingScript = r'''
+(function () {
+  try {
+    var st = window.__INITIAL_STATE__;
+    if (st) {
+      if (st.bvid) return String(st.bvid);
+      if (st.videoData && st.videoData.bvid) return String(st.videoData.bvid);
+    }
+  } catch (e) {}
+  try {
+    var c = document.querySelector('link[rel="canonical"]');
+    if (c && c.href) return String(c.href);
+  } catch (e) {}
+  return '';
+})()''';
+
 /// 页内取数口的**唯一实现**：算完的 URL 交给页面发，凭据一直留在浏览器侧。
 ///
 /// 解析页与批量页都用它（两处各写一遍迟早会漂）。**返回的是整份 body，
@@ -61,9 +82,6 @@ const String kBiliHomeUrl = 'https://www.bilibili.com/';
 /// `data` 是数组），判 code、取 data 由 [BiliApi] 自己做。
 BiliPageTransport biliPageTransportFor(WebviewController ctrl) =>
     (uri, what) => BiliInPage.get(ctrl, uri.toString());
-
-/// 主页推荐接口（**要 WBI 签名**，所以每次都得先拿密钥再拼完整地址）。
-const String kBiliFeedPath = '/x/web-interface/wbi/index/top/feed/rcmd';
 
 /// ── 纯函数：界面上那几个「说人话」的地方 ──────────────────────────
 /// 单独拎出来是为了能被 widget 测试直接钉住 —— 这三处的文案混淆是真会发生的：
@@ -98,6 +116,18 @@ String biliClockText(int? ms) {
 /// 界面上看到的分 P 号必须和落盘文件名里那段一致，两处各写一份迟早会对不上。
 /// 单 P 稿件 `%P%` 取到 0 → 整段消失 → 这里回空串，界面就不画这枚标记。
 String biliPartBadgeText(Media m) => resolveVariables('<P%P%>', m).trim();
+
+/// 从「抓正在播」脚本的返回值里抠出 BV 号；抠不到回 null。
+///
+/// 独立成纯函数是因为 `executeScript` 的返回类型**不稳定**：同一个值有时送成
+/// `String`、有时是 `num`（`bili_web.dart` 的 `idOf` 就是为这个加的）。
+/// 这里统一按字符串处理再正则捞，避免「偶发取不到」这种最难查的形状。
+///
+/// **抠不到就回 null，绝不猜一个 BV 号**：猜错会让用户下载到完全无关的稿件。
+String? biliBvidFromProbe(Object? raw) {
+  final s = raw?.toString() ?? '';
+  return RegExp(r'BV[0-9A-Za-z]{10}').firstMatch(s)?.group(0);
+}
 
 
 class _BiliPageState extends State<BiliPage> {
@@ -339,52 +369,67 @@ class _BiliPageState extends State<BiliPage> {
     // 未登录不是错误，所以不弹提示条 —— 那一行文案自己会说明只拿得到 480P。
   }
 
-  // ── 取列表：主页推荐 ────────────────────────────────────────
+  // ── 取列表：抓内嵌页里的稿件 ────────────────────────────────
 
-  /// 签名在 Dart 侧算、凭据在浏览器侧带 —— 两边都不越界（见 [BiliInPage]）。
+  /// 把**内嵌页当前正在看的网址**抓过来解析。
   ///
-  /// `BiliApi` 自己没有「用页内 fetch 发请求」这条路：它的 `_signedData` 走的是
-  /// dart:io 的 HttpClient，那种请求**没有登录态**（这一版 cookie 也不进它），
-  /// 所以个性化推荐必须由页面在 WebView 里发。
-  Future<void> _fetchFeed() async {
+  /// 读的是 `_addr`（地址栏输入框）而不是 `ctrl.url`：`_addr` 就是那个流的镜像
+  /// （见 `_initWebView` 里对 `ctrl.url` 的订阅），读它不必再碰一次控制器。
+  ///
+  /// 写的 `_link`（链接输入框）会被**无条件覆盖** —— 用户点「抓当前页」的意图
+  /// 就是「抓我现在看的这一页」，此时留着输入框里上一轮的旧链接反而是错的。
+  ///
+  /// 走的仍是 [_parseLink] 那条路：短链展开、列表形态判定、不支持形态的文案
+  /// 全都不用重写一遍，行为与手工粘贴完全一致。
+  Future<void> _grabCurrentPage() async {
     final ctrl = _web;
-    final api = _api;
-    final store = context.read<BiliStore>();
-    if (ctrl == null || !_wvReady || api == null) {
+    if (ctrl == null || !_wvReady) {
+      _navHint(t('内嵌浏览器还没就绪，请稍后再试'));
+      return;
+    }
+    final url = _addr.text.trim();
+    if (url.isEmpty || url == kBiliHomeUrl) {
+      _navHint(t('内嵌页还停在首页，先在里面打开一条稿件再抓'));
+      return;
+    }
+    // 覆盖输入框是**有意**的：用户点这个按钮就是要抓「现在这一页」。
+    setState(() => _link.text = url);
+    await _parseLink();
+  }
+
+  /// 抓**页面里正在播放的那一条**视频（不是当前网址）。
+  ///
+  /// 与 [_grabCurrentPage] 的区别：多 P 稿件里翻到第 5 P 时，网址可能仍停在
+  /// 第 1 P 的地址，而页面上正在播的是第 5 P。所以这里从 DOM 里读：
+  ///  1. 页面自带的 `window.__INITIAL_STATE__.bvid`（B 站自己塞的，最准）；
+  ///  2. 退而求其次看 `<link rel="canonical">`。
+  /// 两级都取不到就如实报「读不到」，不去猜一个 BV 号出来。
+  Future<void> _grabPlayingVideo() async {
+    final ctrl = _web;
+    if (ctrl == null || !_wvReady) {
       _navHint(t('内嵌浏览器还没就绪，请稍后再试'));
       return;
     }
     if (_working) return;
-    store.setBusy(true);
+    // **不要把 `_working` 置真后再调 [_parseLink]**：后者开头就有
+    // `if (_working) return`，那样按钮会「读完 BV 号就静默什么都不做」。
+    // 读脚本本身很快，这段不占忙碌位；真正的忙碌状态交给 _parseLink 自己管。
     try {
-      final keys = await api.fetchWbiKeys();
-      final uri = biliSignedUri(kBiliFeedPath, const {'y_num': 30, 'fresh_type': 3}, keys.mixinKey);
-      final body = await BiliInPage.get(ctrl, uri.toString());
-      final data = body['data'];
-      final items = data is Map
-          ? biliFeedItems(data.cast<String, dynamic>())
-          : const <BiliFeedItem>[];
-      if (!mounted) return;
-      if (items.isEmpty) {
-        // 认不出一稿件就直说。硬把直播间 / 专栏当成稿件塞进列表，
-        // 用户勾完会在取流那一步撞一个看不懂的错。
-        store.setError(t('推荐流里没有被认出的稿件（接口形状变了，或者这次被风控了）'));
-        AppLogger.log('BILI', '主页推荐：code=${body['code']} 里没有 goto==av 的条目');
+      // executeScript 不 await Promise，所以只读同步可得的全局值，不发起请求。
+      final raw = await ctrl.executeScript(kBiliProbePlayingScript);
+      final bvid = biliBvidFromProbe(raw);
+      if (bvid == null) {
+        _navHint(t('读不到正在播放的稿件号 —— 先在页面里打开一条视频再抓'));
+        AppLogger.log('BILI', '抓当前播放：脚本回的是 $raw');
         return;
       }
-      store.replaceAll(
-        [for (final it in items) it.toSeedMedia()],
-        link: kBiliHomeUrl,
-      );
-      AppLogger.log('BILI', '主页推荐：拿到 ${items.length} 条可下载稿件');
+      if (!mounted) return;
+      setState(() => _link.text = bvid);
+      AppLogger.log('BILI', '抓当前播放：$bvid');
+      await _parseLink();
     } catch (e) {
-      AppLogger.log('BILI', '取主页推荐失败：$e');
-      if (mounted) store.setError(tf('取主页推荐失败：{why}', {'why': '$e'}));
-    } finally {
-      if (mounted) {
-        store.setBusy(false);
-        setState(() => _working = false);
-      }
+      AppLogger.log('BILI', '抓当前播放失败：$e');
+      if (mounted) _navHint(tf('读页面失败：{why}', {'why': '$e'}));
     }
   }
 
@@ -818,7 +863,11 @@ class _BiliPageState extends State<BiliPage> {
     );
   }
 
-  /// 两个取列表的入口。
+  /// 两个「抓当前页」入口 + 清除结果。
+  ///
+  /// 原来这里是「取主页推荐」（走接口拿个性化推荐流）。2026-10-11 用户要求换成
+  /// 抓当前页：推荐流的命中率与可用性都不如「我正看着的这一条」——
+  /// 用户已经在页面里挑好了，再让程序去猜一份推荐列表是绕远路。
   Widget _buildEntries(AppColors c, BiliStore store) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -827,12 +876,25 @@ class _BiliPageState extends State<BiliPage> {
           children: [
             Expanded(
               child: FilledButton.tonalIcon(
-                onPressed: _wvReady && !_working ? _fetchFeed : null,
-                icon: const Icon(Icons.auto_awesome_motion_rounded, size: 16),
-                label: Text(t('取主页推荐'), style: const TextStyle(fontSize: 12.5)),
+                onPressed: _wvReady && !_working ? _grabCurrentPage : null,
+                icon: const Icon(Icons.travel_explore_rounded, size: 16),
+                label: Text(t('抓当前页'), style: const TextStyle(fontSize: 12.5)),
                 style: FilledButton.styleFrom(
                   visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: FilledButton.tonalIcon(
+                onPressed: _wvReady && !_working ? _grabPlayingVideo : null,
+                icon: const Icon(Icons.play_circle_outline_rounded, size: 16),
+                label:
+                    Text(t('抓正在播'), style: const TextStyle(fontSize: 12.5)),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 ),
               ),
             ),
@@ -988,7 +1050,8 @@ class _BiliPageState extends State<BiliPage> {
             ),
             const SizedBox(height: 6),
             Text(
-              t('点「取主页推荐」看你登录后的推荐，或把一条稿件链接粘到上面再解析。'),
+              t('在左边打开一条稿件，点「抓当前页」或「抓正在播」；'
+                  '也可以把链接粘到上面再解析。'),
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: c.textMuted, height: 1.6),
             ),

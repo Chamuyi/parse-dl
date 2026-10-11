@@ -391,11 +391,13 @@ const Map<String, String> kStringsEn = {
   // 「检测不到」与「未登录」是两件事：前者多半是被风控，叫用户去扫码是误导。
   '检测不到登录状态（被风控或页面没就绪）':
       'Cannot tell the sign-in state (rate-limited, or the page is not ready)',
-  '取主页推荐': 'Load home recommendations',
-  '推荐流里没有被认出的稿件（接口形状变了，或者这次被风控了）':
-      'Nothing recognisable in the recommendation feed '
-      '(the API shape changed, or this request was rate-limited)',
-  '取主页推荐失败：{why}': 'Failed to load recommendations: {why}',
+  '抓当前页': 'Grab this page',
+  '抓正在播': 'Grab now playing',
+  '内嵌页还停在首页，先在里面打开一条稿件再抓':
+      'The built-in browser is still on the home page - open a video in it first',
+  '读不到正在播放的稿件号 —— 先在页面里打开一条视频再抓':
+      'Cannot read the playing video id - open a video in the page first',
+  '读页面失败：{why}': 'Failed to read the page: {why}',
   '解析这条链接': 'Parse this link',
   '粘这条稿件的链接 / BV 号 / b23.tv 短链':
       'Paste the video link / BV id / b23.tv short link',
@@ -414,9 +416,9 @@ const Map<String, String> kStringsEn = {
   '{n} 个稿件': '{n} videos',
   '已选 {n} / {total} 个分P': '{n} of {total} parts selected',
   '还没有解析结果': 'Nothing parsed yet',
-  '点「取主页推荐」看你登录后的推荐，或把一条稿件链接粘到上面再解析。':
-      'Use "Load home recommendations" to see the feed for your signed-in account, '
-      'or paste a video link above and parse it.',
+  '在左边打开一条稿件，点「抓当前页」或「抓正在播」；也可以把链接粘到上面再解析。':
+      'Open a video in the built-in browser, then use "Grab this page" or '
+          '"Grab now playing"; or paste a video link above and parse it.',
   '全部选中': 'Select all',
   '全部取消': 'Select none',
   '上限 {q}': 'Cap: {q}',
