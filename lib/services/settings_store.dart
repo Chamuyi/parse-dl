@@ -36,6 +36,19 @@ class SettingsStore extends ChangeNotifier {
       if (await f.exists()) {
         final raw = await f.readAsString();
         _settings = Settings.decode(raw);
+        // 一次性迁移的**落盘**这一步不能省。
+        //
+        // `decode` 里可能把旧默认值升级成新默认（如 B 站文件名模板），但那只改了
+        // 内存里的对象；盘上仍是旧串，于是**下次启动又走一遍迁移**，而用户如果
+        // 一直不改设置，就永远看不到新默认 —— 表现是「改了代码里的默认值却没效果」。
+        // 2026-10-11 真机撞上过：迁移函数写对了，盘上还是旧值。
+        //
+        // 判据用「重新编码后与读到的原文不同」而不是「某个字段变了」：
+        // 这样以后再加迁移都不用回来改这里，也不会误判（没迁移时两者逐字相同）。
+        if (_settings.encode() != raw) {
+          await save();
+          debugPrint('[SettingsStore] 检测到旧版配置，已按新默认迁移并回写');
+        }
       } else {
         _settings = Settings();
       }
