@@ -78,6 +78,23 @@ String defaultFfmpegPath() => p.join(
 /// 安装目录可能只读（Program Files），userdata 一定可写。
 String sidecarFfmpegPath() => p.join(AppPaths.configDir.path, kFfmpegExeName);
 
+/// 用户在设置里指定的 ffmpeg 目录 → 该目录下**可能**的 exe 全路径候选，按优先序。
+///
+/// 为什么要给多个候选：完整构建的压缩包里层级是 `<解压目录>\bin\ffmpeg.exe`，
+/// 而有人会把 exe 直接拷到外面。让用户去指到"exe 那一层"很容易指错一层，
+/// 所以**目录里直接有、或下一层 `bin\` 里有，两种都认**。
+///
+/// 纯函数（不碰盘）：是否真存在由调用方逐个 `File.exists` 判 —— 这样这条
+/// 候选顺序能被单测钉住，不必造真目录。
+List<String> ffmpegCandidatesIn(String dir) {
+  final d = dir.trim();
+  if (d.isEmpty) return const [];
+  return [
+    p.join(d, kFfmpegExeName),
+    p.join(d, 'bin', kFfmpegExeName),
+  ];
+}
+
 /// 失败的哪一种。三种「没成功」的形状必须分开：界面要给出不同的下一步
 /// （装 ffmpeg / 重试 / 换原始流），光一句「合并失败」等于没说。
 enum BiliMergeFailure {
@@ -230,6 +247,7 @@ class BiliMerger {
   /// 字段）。换个字段名把两条 lint 一起绕开，参数名保持任务指定的 `ffmpegPath`。
   BiliMerger({
     String? ffmpegPath,
+    this.userDir,
     this.commandPrefix = const [],
     BiliAssetLoader? loadAsset,
   }) : _pathOverride = ffmpegPath,
@@ -237,6 +255,24 @@ class BiliMerger {
 
   final String? _pathOverride;
   final BiliAssetLoader _loadAsset;
+
+  /// 用户在设置里指定的 ffmpeg 目录（见 `BiliConfig.ffmpegDir`）。空 = 不指定。
+  ///
+  /// 指定了就**优先于随包那份**：用户装完整版是为了拿到白名单构建没有的能力
+  /// （h264/hevc 编码、ffprobe、字幕滤镜），我们不能拿随包那份把他顶掉。
+  ///
+  /// 公开可写（不是私有字段 + setter）：[setUserDir] 要能同时清掉解析缓存，
+  /// 而命名参数那条路只需要赋值。两者分工写清楚，别在外部直接改这个字段。
+  String? userDir;
+
+  /// 设置页改了目录之后热更新，免得要重启应用。[resolvePath] 的结果会跟着重算。
+  void setUserDir(String? dir) {
+    final next = (dir ?? '').trim();
+    if (next == (userDir ?? '')) return;
+    userDir = next.isEmpty ? null : next;
+    _resolving = null;
+    _resolved = null;
+  }
 
   /// 解析结果的两级缓存：[_resolving] 让并发请求只释放一次文件，
   /// [_resolved] 是给同步取值用的。
@@ -268,6 +304,27 @@ class BiliMerger {
   Future<String> _resolve() async {
     final override = _pathOverride;
     if (override != null) return _resolved = override;
+
+    // ① 用户在设置里指定的目录**最优先**：他装完整版就是为了拿到随包那份没有的
+    //    能力（h264/hevc 编码、ffprobe、字幕滤镜），不能被随包那份顶掉。
+    //    目录里直接有、或下一层 `bin\` 里有，两种都认（完整构建解压后就带 bin）。
+    final userDir = this.userDir;
+    if (userDir != null && userDir.isNotEmpty) {
+      for (final cand in ffmpegCandidatesIn(userDir)) {
+        if (await File(cand).exists()) {
+          AppLogger.log(kBiliMergeLogTag, '用外部 ffmpeg：$cand');
+          return _resolved = cand;
+        }
+      }
+      // 指了目录但里面没有 —— 如实记一行，然后**继续往下找**。
+      // 不在这里失败：用户可能只是把路径填错了，随包那份仍然能用，
+      // 直接报「找不到」等于把他本来就有的能力也弄没了。
+      AppLogger.log(
+        kBiliMergeLogTag,
+        '设置里的 ffmpeg 目录里没有 ffmpeg.exe（试过 ${ffmpegCandidatesIn(userDir).join(" 与 ")}），改用随包那份',
+      );
+    }
+
     final installed = defaultFfmpegPath();
     if (await File(installed).exists()) return _resolved = installed;
     // 整段都在 try 里：[sidecarFfmpegPath] 要读 AppPaths，而它可能还没 init

@@ -77,6 +77,9 @@ class _BiliSectionState extends State<BiliSection> {
   late final TextEditingController _nameTpl;
   late final TextEditingController _saveDir;
 
+  /// 外挂 ffmpeg 目录（空 = 用随包那份）。
+  late final TextEditingController _ffmpegDir;
+
   final FocusNode _dirFocus = FocusNode();
   final FocusNode _nameFocus = FocusNode();
 
@@ -97,6 +100,7 @@ class _BiliSectionState extends State<BiliSection> {
     _customText = TextEditingController(text: b.customText);
     _dirTpl = TextEditingController(text: b.dirTemplate);
     _nameTpl = TextEditingController(text: b.fileNameTemplate);
+    _ffmpegDir = TextEditingController(text: b.ffmpegDir);
     // 没自己设过时，先把框子显示成「这一趟实际会落到哪」，而不是留一个
     // 看起来什么都没配的空白 —— 真正的回退规则在 resolveSaveBase 里。
     // B 站自己那一层的优先级（bili.saveDirBase → 会话目录 → X 的根目录）
@@ -122,6 +126,7 @@ class _BiliSectionState extends State<BiliSection> {
     _dirTpl.dispose();
     _nameTpl.dispose();
     _saveDir.dispose();
+    _ffmpegDir.dispose();
     _dirFocus.dispose();
     _nameFocus.dispose();
     super.dispose();
@@ -151,6 +156,23 @@ class _BiliSectionState extends State<BiliSection> {
     if (result == null) return;
     if (mounted) setState(() => _saveDir.text = result);
     await _set((b) => b.saveDirBase = result);
+  }
+
+  /// 选外挂 ffmpeg 所在目录 —— 空串表示改回「用随包那份」。
+  ///
+  /// 只记目录，不改 [BiliConfig.ffmpegDir] 之外的任何东西：真正生效靠
+  /// `Aria2Coordinator` 监听设置变化后把它同步给 `BiliMerger.setUserDir`。
+  Future<void> _pickFfmpegDir() async {
+    final result = await FilePicker.platform.getDirectoryPath();
+    if (result == null) return;
+    if (mounted) setState(() => _ffmpegDir.text = result);
+    await _set((b) => b.ffmpegDir = result);
+  }
+
+  /// 清空外挂目录 = 回到随包那份。
+  Future<void> _clearFfmpegDir() async {
+    if (mounted) setState(() => _ffmpegDir.text = '');
+    await _set((b) => b.ffmpegDir = '');
   }
 
   @override
@@ -223,6 +245,59 @@ class _BiliSectionState extends State<BiliSection> {
             t('当前环境找不到可用的 ffmpeg，合并这一步会失败：'
                 '下完只会得到两个不能单独播放的 .m4s 文件。'),
           ),
+
+        // ③-b 外挂 ffmpeg
+        const SizedBox(height: 18),
+        _label(
+          c,
+          t('外挂 ffmpeg（可选）'),
+          t('留空就用程序自带的那份。指一个目录可以换成你自己的完整版 ffmpeg —— '
+              '自带那份是精简构建（约 10 MB），只能把视频流和音频流原样合起来，'
+              '做不了转码、也没有 ffprobe。完整版能转码、烧字幕、看轨道信息。'
+              '目录里直接放 ffmpeg.exe，或者放它的 bin 子目录，两种都认。'),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _ffmpegDir,
+                onChanged: (v) => _set((q) => q.ffmpegDir = v.trim()),
+                style: const TextStyle(fontSize: 13.5),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: t('（空 = 用自带那份）'),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: c.line),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: c.line),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            FilledButton.tonalIcon(
+              onPressed: _pickFfmpegDir,
+              icon: const Icon(Icons.folder_open_outlined, size: 18),
+              label: Text(t('选择'), style: TextStyle(fontSize: 13.5)),
+            ),
+            if (b.ffmpegDir.isNotEmpty) ...[
+              const SizedBox(width: 6),
+              IconButton(
+                onPressed: _clearFfmpegDir,
+                icon: const Icon(Icons.close_rounded, size: 18),
+                tooltip: t('改回用自带那份'),
+              ),
+            ],
+          ],
+        ),
 
         // ④ 下载
         const SizedBox(height: 6),

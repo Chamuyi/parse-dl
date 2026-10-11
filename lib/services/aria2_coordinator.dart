@@ -438,7 +438,26 @@ class Aria2Coordinator {
 
   /// B 站 DASH 合并器。默认就是随包 ffmpeg 那一份（`BiliMerger()` 内部
   /// 已有全局串行闸门，多分 P 一起下完也不会并发起多个 ffmpeg）。
+  ///
+  /// 用户在设置里指定了外挂目录时，[BiliMerger.userDir] 会被同步成那个目录 ——
+  /// 见 [_syncBiliFfmpegDir]。
   BiliMerger _biliMerger = BiliMerger();
+
+  /// 设置变化的订阅标记：外挂 ffmpeg 目录改了要立刻生效。
+  ///
+  /// 用 bool 而不是存 `addListener` 的返回值 —— 那个方法返回 `void`，
+  /// 拿不到可取消的句柄。协调器是进程级单例，与 SettingsStore 同生命周期，
+  /// 不需要在别处反注册（真需要时得换成 `ChangeNotifier` 的显式解绑）。
+  bool _settingsHooked = false;
+
+  /// 把设置里的 `ffmpegDir` 同步给合并器。
+  ///
+  /// 幂等，可以随便调：目录没变时 `setUserDir` 自己会 early-return，
+  /// 解析缓存也不会被无谓清掉。
+  void _syncBiliFfmpegDir() {
+    final dir = _settings?.settings.bili.ffmpegDir ?? '';
+    _biliMerger.setUserDir(dir.isEmpty ? null : dir);
+  }
 
   /// B 站的配对表（进程内）。键 = `saveDir|outBase`，见 [_BiliPair.key]。
   final Map<String, _BiliPair> _biliPairs = {};
@@ -513,6 +532,14 @@ class Aria2Coordinator {
     if (_booted) return;
     _store = store;
     _settings = settings;
+
+    // 外挂 ffmpeg 目录：启动时同步一次，并在设置变化时跟着走
+    // （改完就能用，不必重启应用）。
+    _syncBiliFfmpegDir();
+    if (!_settingsHooked) {
+      _settingsHooked = true;
+      settings.addListener(_syncBiliFfmpegDir);
+    }
 
     try {
       await _aria.bootstrap();

@@ -224,6 +224,19 @@ class BiliConfig {
   /// 文件模板。
   String fileNameTemplate;
 
+  // ── 外部依赖 ────────────────────────────────────────────────
+
+  /// **外挂 ffmpeg 所在目录**（用户自己指定）。**空 = 用随包那份**。
+  ///
+  /// 为什么要有这个：随包那份是 10 MB 白名单构建（只有 mp4/mkv 直拷所需的那点
+  /// 能力，没有 h264/hevc 编码器、没有 ffprobe、网络被禁）。用户想用完整版
+  /// ffmpeg（217 MB）时不该被迫重打安装包 —— 指一个目录就能接管。
+  ///
+  /// 取值是**目录**而不是 exe 全路径：完整构建的压缩包里层级固定
+  /// （`…/bin/ffmpeg.exe`），让用户去指到 exe 容易指错一层。目录里有
+  /// `ffmpeg.exe` 或 `bin/ffmpeg.exe` 都认（见 [BiliMerger.resolvePath]）。
+  String ffmpegDir;
+
   // ── 容器与限速 ──────────────────────────────────────────────
 
   /// 合并产物容器。关合并时这个字段不参与落名。
@@ -301,6 +314,7 @@ class BiliConfig {
     this.enableSaveFolder = true,
     this.dirTemplate = kBiliDefaultDirTemplate,
     this.fileNameTemplate = kBiliDefaultFileNameTemplate,
+    this.ffmpegDir = '',
     this.container = BiliContainer.mp4,
     this.speedLimitKbps = 0,
     this.saveDanmaku = false,
@@ -331,10 +345,17 @@ class BiliConfig {
     concurrency: (j['concurrency'] as num?)?.toInt() ?? 4,
     customText: j['customText'] as String? ?? '',
     saveDirBase: j['saveDirBase'] as String? ?? '',
+    ffmpegDir: j['ffmpegDir'] as String? ?? '',
     enableSaveFolder: j['enableSaveFolder'] as bool? ?? true,
     dirTemplate: j['dirTemplate'] as String? ?? kBiliDefaultDirTemplate,
-    fileNameTemplate: j['fileNameTemplate'] as String? ??
-        kBiliDefaultFileNameTemplate,
+    // 一次性迁移：盘上存的**恰好是旧默认串**时升到新默认（见 migrateBiliTemplate）。
+    // 挂在这里而不是别处，是因为「读设置」是唯一能同时看到旧值与新默认的地方；
+    // 用户自己改过的模板不会被碰（判据收窄到全串相等）。
+    fileNameTemplate: migrateBiliTemplate(
+      fileNameTemplate: j['fileNameTemplate'] as String? ??
+          kBiliDefaultFileNameTemplate,
+      dirTemplate: j['dirTemplate'] as String? ?? kBiliDefaultDirTemplate,
+    ),
     container: BiliContainer.fromId(j['container'] as String?),
     speedLimitKbps: (j['speedLimitKbps'] as num?)?.toInt() ?? 0,
     saveDanmaku: j['saveDanmaku'] as bool? ?? false,
@@ -374,6 +395,7 @@ class BiliConfig {
     'enableSaveFolder': enableSaveFolder,
     'dirTemplate': dirTemplate,
     'fileNameTemplate': fileNameTemplate,
+    'ffmpegDir': ffmpegDir,
     'container': container.id,
     'speedLimitKbps': speedLimitKbps,
     'saveDanmaku': saveDanmaku,
@@ -409,6 +431,7 @@ class BiliConfig {
     int? concurrency,
     String? customText,
     String? saveDirBase,
+    String? ffmpegDir,
     bool? enableSaveFolder,
     String? dirTemplate,
     String? fileNameTemplate,
@@ -443,6 +466,7 @@ class BiliConfig {
     enableSaveFolder: enableSaveFolder ?? this.enableSaveFolder,
     dirTemplate: dirTemplate ?? this.dirTemplate,
     fileNameTemplate: fileNameTemplate ?? this.fileNameTemplate,
+    ffmpegDir: ffmpegDir ?? this.ffmpegDir,
     container: container ?? this.container,
     speedLimitKbps: speedLimitKbps ?? this.speedLimitKbps,
     saveDanmaku: saveDanmaku ?? this.saveDanmaku,
@@ -481,6 +505,7 @@ class BiliConfig {
     enableSaveFolder = src.enableSaveFolder;
     dirTemplate = src.dirTemplate;
     fileNameTemplate = src.fileNameTemplate;
+    ffmpegDir = src.ffmpegDir;
     container = src.container;
     speedLimitKbps = src.speedLimitKbps;
     saveDanmaku = src.saveDanmaku;
@@ -539,6 +564,7 @@ class BiliConfig {
       enableSaveFolder &&
       dirTemplate == kBiliDefaultDirTemplate &&
       fileNameTemplate == kBiliDefaultFileNameTemplate &&
+      ffmpegDir.isEmpty &&
       container == BiliContainer.mp4 &&
       speedLimitKbps == 0 &&
       !saveDanmaku &&
@@ -572,13 +598,43 @@ const int kBiliDefaultDanmakuMarginV = 10;
 /// 默认文件夹模板：一个稿件一个目录。
 const String kBiliDefaultDirTemplate = '%WORK_TITLE%';
 
-/// 默认文件名模板：`P03-第3P 冬天-1080P60-AV1.mp4`，单 P 时 `P%P%-` 整段消失。
+/// 默认文件名模板：`冬天-1080P60.mp4`。
 ///
-/// `<...>` 里的 `%P%` 是数值变量，单 P 稿件取到 `0` → 按空处理 → 连字面量
-/// `P` 和 `-` 一起丢弃。这正是参照实现踩过的那个坑（单 P 落出 `P00` 文件名），
-/// 在这里由可选段规则堵住。
-const String kBiliDefaultFileNameTemplate =
+/// **刻意不带 `%CODEC%`**：B 站同一个稿件的编码族（AVC / HEVC / AV1）对用户
+/// 来说通常没有意义，而标题里本来就常带 `4K`、`3840x2160` 这类字样 ——
+/// 再拼一个编码后缀，文件名会长到一眼看不懂、也更容易撞 Windows 的 260 字符。
+/// 想标编码的人可以在设置里用「启用模版」预设切到别的组合。
+///
+/// **也没有 `<P%P%->` 前缀**：默认目录模板已经是「一个稿件一个目录」，
+/// 目录名就是作品标题，文件名再加一遍分 P 号是冗余。多 P 稿件想区分分 P 时
+/// 换「按 BV 号分文件夹」那份预设即可（它保留了 `P%P%`）。
+const String kBiliDefaultFileNameTemplate = '%PART_TITLE%-%QUALITY%%EXT%';
+
+/// 上一版的默认文件名模板。**只为一次性迁移而存在**（见 [migrateBiliTemplate]）。
+///
+/// 用户在盘上存过这个串、且从未自己改过时，才把它升级成新默认 ——
+/// 判据收窄成「恰好等于旧默认串」，他自己改过的值一律不动。
+/// 这是 `project-downloader-settings-defaults-trap` 那条教训的落地：
+/// 光改默认值对老配置**不产生任何效果**，而且测试抓不到。
+const String kBiliLegacyFileNameTemplate =
     '<P%P%->%PART_TITLE%-%QUALITY%-%CODEC%%EXT%';
+
+/// 旧文件名模板 → 新默认。**只在值恰好等于旧默认串时才换**，否则原样返回。
+///
+/// 纯函数，可单测：迁移判断最容易写错的地方是「顺手把用户自己的也改了」，
+/// 而那在本机上是不可逆的（他手改过的模板会被悄悄覆盖）。
+String migrateBiliTemplate({
+  required String fileNameTemplate,
+  required String dirTemplate,
+}) {
+  final legacyName = fileNameTemplate == kBiliLegacyFileNameTemplate;
+  final legacyDir = dirTemplate == kBiliDefaultDirTemplate;
+  // 两条都还是出厂值 → 整份升到新默认（目录模板这一版没变，保留原样）
+  if (legacyName && legacyDir) return kBiliDefaultFileNameTemplate;
+  // 只文件名是出厂值 → 单换文件名
+  if (legacyName) return kBiliDefaultFileNameTemplate;
+  return fileNameTemplate;
+}
 
 /// 「启用模版」预设 —— 与抖音那份同构，选完仍可手动微调。
 class BiliTemplatePreset {

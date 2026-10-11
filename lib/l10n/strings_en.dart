@@ -639,6 +639,19 @@ const Map<String, String> kStringsEn = {
   '画质上限': 'Quality ceiling',
   '编码偏好': 'Codec preference',
   '下载完成后合并': 'Merge after download',
+  '外挂 ffmpeg（可选）': 'External ffmpeg (optional)',
+  '留空就用程序自带的那份。指一个目录可以换成你自己的完整版 ffmpeg —— '
+      '自带那份是精简构建（约 10 MB），只能把视频流和音频流原样合起来，'
+      '做不了转码、也没有 ffprobe。完整版能转码、烧字幕、看轨道信息。'
+      '目录里直接放 ffmpeg.exe，或者放它的 bin 子目录，两种都认。':
+      'Leave empty to use the bundled copy. Point it at a folder to use your own '
+          'full ffmpeg instead — the bundled one is a trimmed build (~10 MB) that '
+          'can only remux the video and audio streams together: no transcoding, '
+          'no ffprobe. A full build can transcode, burn in subtitles, and inspect '
+          'streams. Either keep ffmpeg.exe directly in that folder or in a bin '
+          'subfolder; both are recognised.',
+  '（空 = 用自带那份）': '(empty = use the bundled one)',
+  '改回用自带那份': 'Switch back to the bundled copy',
   '跳过已下载的分 P': 'Skip parts already downloaded',
   '同一稿件的分 P 排在一起': 'Keep parts of one video together',
   '并发数': 'Concurrent downloads',

@@ -21,6 +21,7 @@ final Map<String, void Function(BiliConfig c)> kNonDefaultMutators = {
   'concurrency': (c) => c.concurrency = 2,
   'customText': (c) => c.customText = '备注',
   'saveDirBase': (c) => c.saveDirBase = r'D:\x',
+  'ffmpegDir': (c) => c.ffmpegDir = r'D:\ffmpeg',
   'enableSaveFolder': (c) => c.enableSaveFolder = false,
   'dirTemplate': (c) => c.dirTemplate = '%BVID%',
   'fileNameTemplate': (c) => c.fileNameTemplate = '%WORK_TITLE%',
@@ -248,10 +249,15 @@ void main() {
   });
 
   group('默认模板与预设', () {
-    test('默认文件名模板：多 P 出 P03-，单 P 整段连字面量一起消失', () {
+    test('默认文件名模板：标题 + 档位，不带分 P 号与编码', () {
+      // 2026-10-11 改：默认模板从 `<P%P%->%PART_TITLE%-%QUALITY%-%CODEC%%EXT%`
+      // 收窄成 `%PART_TITLE%-%QUALITY%%EXT%`。理由两条：
+      //   ① 默认目录模板已经是一稿一个目录，文件名再加一遍分 P 号是冗余；
+      //   ② 标题本身常带 `4K`/`3840x2160` 字样，再拼编码会长到看不懂。
+      // 带 `%P%` 与 `%CODEC%` 的组合仍然是可用选项（`bvid` 预设）。
       expect(
         resolveVariables(kBiliDefaultFileNameTemplate, biliExampleMedia()),
-        'P03-第3P 冬天-1080P60-AV1.m4s',
+        '第3P 冬天-1080P60.m4s',
       );
       final single = biliExampleMedia().copyWith(
         bili: const BiliMeta(
@@ -265,8 +271,38 @@ void main() {
       );
       expect(
         resolveVariables(kBiliDefaultFileNameTemplate, single),
-        '把一年的海边拍成十二段-1080P60-AV1.m4s',
+        '把一年的海边拍成十二段-1080P60.m4s',
         reason: '单 P 不该出现 P0 / P00 —— 参照实现踩过的坑',
+      );
+    });
+
+    test('迁移：盘上存的恰好是旧默认串时才升级', () {
+      // 光改默认值对老配置不产生效果（settings.json 里已存过旧串），
+      // 所以 fromJson 读盘时跑一次一次性迁移。判据必须收窄到「全串相等」——
+      // 用户自己改过的模板被悄悄覆盖是不可逆的。
+      expect(
+        migrateBiliTemplate(
+          fileNameTemplate: kBiliLegacyFileNameTemplate,
+          dirTemplate: kBiliDefaultDirTemplate,
+        ),
+        kBiliDefaultFileNameTemplate,
+      );
+      const mine = '%BVID%_%PART_TITLE%%EXT%';
+      expect(
+        migrateBiliTemplate(
+          fileNameTemplate: mine,
+          dirTemplate: kBiliDefaultDirTemplate,
+        ),
+        mine,
+        reason: '用户自己改过的模板一个字都不许动',
+      );
+      expect(
+        migrateBiliTemplate(
+          fileNameTemplate: kBiliDefaultFileNameTemplate,
+          dirTemplate: kBiliDefaultDirTemplate,
+        ),
+        kBiliDefaultFileNameTemplate,
+        reason: '新默认值再读一次要幂等',
       );
     });
 
