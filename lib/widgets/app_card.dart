@@ -12,40 +12,69 @@ import '../theme/app_theme.dart';
 /// 也是选择 Flutter 而不是别的纯 Rust 方案的核心原因。
 ///
 /// 材质由 [AppTheme.surfaceOf] 给的 [AppSurface] 驱动，三套风格共用这一个组件：
-///   - 传进来的 [radius] 语义保留，实际半径 = `radius * surface.radiusScale`；
+///   - [radius] 是**档位**（[AppRadius]），像素由当前风格决定（S4）；
 ///   - [blur] 传 null 时用 `surface.blur`，显式传值仍然优先；
 ///   - `blur == 0` 的风格（陶土）**不套** [BackdropFilter] —— 实心面不该有模糊，
-///     顺带省掉一层合成开销。
+///     顺带省掉一层合成开销；
+///   - **边框 / 投影 / 悬停底色都随风格变**（S4）：取值逐项取证自
+///     `tools/ui/_redesign/preview/app.css`，见 [AppStyle] 上的那三组扩展。
 class AppCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
-  final double radius;
+
+  /// 圆角**档位**（不再是像素）。
+  ///
+  /// 改造前这里是 `double radius = 16`，实际半径 = `radius * radiusScale`，
+  /// 三套拿到 20 / 16 / 16 —— 与预览稿的 **20 / 14 / 16** 不符。现在语义改为
+  /// 档位，像素查 `AppStyle.radiusOf`。已核实显式传 `radius` 的调用点是 **0 处**，
+  /// 所以这次语义替换是零迁移。
+  final AppRadius radius;
 
   /// null = 用当前风格的模糊值；显式传值则覆盖风格（老调用点的语义）。
   final double? blur;
   final bool glow;
   final Color? overrideColor;
 
+  /// 悬停态：底色叠上该风格的悬停色。
+  ///
+  /// 改造前三套风格共用 `c.surfaceCardHover`，**而浅色三套那个值恰好完全相同**
+  /// （都是白 78%）—— 浅色下悬停反馈看不出风格。现在按各套 CSS 的 `:hover`
+  /// 规则取色并叠在卡片底色上（`Color.alphaBlend`）：叠加而不是替换，因为
+  /// CSS 里那条规则是铺在已有面上的覆盖层。
+  final bool hovered;
+
   const AppCard({
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(20),
-    this.radius = 16,
+    this.radius = AppRadius.card,
     this.blur,
     this.glow = false,
     this.overrideColor,
+    this.hovered = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final c = AppTheme.colorsOf(context);
-    final s = AppTheme.surfaceOf(context);
-    final brightness = AppTheme.of(context).brightness;
+    final t = AppTheme.of(context);
+    final c = t.colors;
+    final s = t.surface;
+    final style = t.style;
+    final brightness = t.brightness;
 
-    final r = radius * s.radiusScale;
+    final r = style.radiusOf(radius);
     final b = blur ?? s.blur;
-    final cardColor =
+    final baseColor =
         overrideColor ?? s.resolveCardColor(c.surfaceCard, c.surfaceSolid);
+    final cardColor =
+        hovered ? Color.alphaBlend(style.hoverColor(brightness), baseColor) : baseColor;
+
+    // 边框：液体玻璃有一条更亮的顶边（CSS 的 `inset 0 1px 0`），另三边是 `--rim`；
+    // 磨砂 / 陶土四边同色。[glow] 仍能把三边换成强调色描边（老调用点的语义）。
+    final rim = style.cardBorderOf(c, brightness);
+    final border = glow
+        ? StyleBorder(top: rim.top, side: c.accentLine).toBorder()
+        : rim.toBorder();
 
     final body = Container(
       padding: padding,
@@ -59,20 +88,8 @@ class AppCard extends StatelessWidget {
               )
             : null,
         borderRadius: BorderRadius.circular(r),
-        border: Border.all(
-          // 内缘亮环：用一圈更亮的描边模拟玻璃边缘的折射高光
-          color: s.rim
-              ? s.rimColor(brightness)
-              : (glow ? c.accentLine : c.line),
-          width: 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: s.shadowAlphaFor(brightness)),
-            blurRadius: s.shadowBlur,
-            offset: Offset(0, s.shadowY),
-          ),
-        ],
+        border: border,
+        boxShadow: style.cardShadows(brightness),
       ),
       child: child,
     );
