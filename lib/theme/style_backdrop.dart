@@ -1,0 +1,223 @@
+import 'package:flutter/material.dart';
+
+import 'app_style.dart';
+
+/// 背景层令牌 —— 声明式描述一套风格的窗口底（[BackgroundLayer] 按此绘制）。
+///
+/// **为什么是声明式**：`BackgroundLayer` 只管「按描述画」，不认识风格 ——
+/// 加第四套风格时只改这里，绘制代码零改动。与 `AppSurface` / `StyleColors`
+/// 同一思路：调用方读令牌，不自己判断风格。
+///
+/// ### 取值出处（`tools/ui/_redesign/preview/app.css` 是权威）
+///
+/// 每套 = 若干层 radial 光晕 + 一层线性渐变（CSS `background` 多重背景，
+/// 第一层画在最上面）：
+///
+/// | 风格 | 浅色 | 深色 | 出处 |
+/// |---|---|---|---|
+/// | liquid | 三层 radial + 150° 线性 | 三层 radial + 150° 线性 | `:248-252` / `:834-838` |
+/// | frosted | 165° 线性 | 165° 线性 | `:332` / `:885` |
+/// | clay | 168° 线性 | 168° 线性 | `:399` / `:932` |
+///
+/// 层数是 S3 的验收判据：liquid = 3（三层 radial）+ 1（线性），frosted = 1，
+/// clay = 1（`style_backdrop_test.dart` 钉住）。
+@immutable
+class StyleBackdrop {
+  /// radial 光晕层，**从上到下按 CSS 的书写顺序**（第一层最靠上）。
+  ///
+  /// 空列表 = 该风格没有光晕（frosted / clay）。
+  final List<StyleGlow> glows;
+
+  /// 最底下的线性渐变。**永远有值** —— 对应 CSS `background` 的最后一层，
+  /// 也是「永远铺一层底」不变量的取色来源。
+  final StyleLinear linear;
+
+  const StyleBackdrop({required this.glows, required this.linear});
+
+  /// 光晕层数（liquid = 3，frosted / clay = 0）。
+  int get glowCount => glows.length;
+
+  static StyleBackdrop of(AppStyle style, Brightness brightness) =>
+      switch ((style, brightness)) {
+        (AppStyle.liquid, Brightness.light) => liquidLight,
+        (AppStyle.liquid, Brightness.dark) => liquidDark,
+        (AppStyle.frosted, Brightness.light) => frostedLight,
+        (AppStyle.frosted, Brightness.dark) => frostedDark,
+        (AppStyle.clay, Brightness.light) => clayLight,
+        (AppStyle.clay, Brightness.dark) => clayDark,
+      };
+
+  // ── 液体玻璃 ────────────────────────────────────────────────
+
+  /// CSS `:248-252`：三层 radial + `linear-gradient(150deg, …)`。
+  static const liquidLight = StyleBackdrop(
+    glows: [
+      StyleGlow(
+        color: Color(0xFFCFE0FF), // #cfe0ff
+        center: Alignment(-0.76, -1.16), // at 12% -8%
+        radiusFactor: 0.62, // 1100px 700px → 按窗口短边归一
+      ),
+      StyleGlow(
+        color: Color(0xFFFFD9EC), // #ffd9ec
+        center: Alignment(0.92, -0.84), // at 96% 8%
+        radiusFactor: 0.51, // 900px 640px
+      ),
+      StyleGlow(
+        color: Color(0xFFD6FFF0), // #d6fff0
+        center: Alignment(0.04, 1.16), // at 52% 108%
+        radiusFactor: 0.44, // 760px 620px
+      ),
+    ],
+    linear: StyleLinear(
+      stops: [
+        Color(0xFFF7F8FE), // #f7f8fe 0%
+        Color(0xFFF2F0FB), // #f2f0fb 52%
+        Color(0xFFF6F4F2), // #f6f4f2 100%
+      ],
+      begin: Alignment(-0.322, -0.946), // 150°
+      end: Alignment(0.322, 0.946),
+    ),
+  );
+
+  /// CSS `:834-838`（深色三层 radial 光晕 + 150° 线性）。
+  static const liquidDark = StyleBackdrop(
+    glows: [
+      StyleGlow(
+        color: Color(0xFF2A2545),
+        center: Alignment(-0.76, -1.16), // at 12% -8%
+        radiusFactor: 0.62,
+      ),
+      StyleGlow(
+        color: Color(0xFF3A2438),
+        center: Alignment(0.92, -0.84), // at 96% 8%
+        radiusFactor: 0.51,
+      ),
+      StyleGlow(
+        color: Color(0xFF1F3A38),
+        center: Alignment(0.04, 1.16), // at 52% 108%
+        radiusFactor: 0.44,
+      ),
+    ],
+    linear: StyleLinear(
+      stops: [
+        Color(0xFF14131C), // 0%
+        Color(0xFF181722), // 52%
+        Color(0xFF16151F), // 100%（任务书表格只列了前两停，按 CSS 原文补全）
+      ],
+      begin: Alignment(-0.322, -0.946), // 150°
+      end: Alignment(0.322, 0.946),
+    ),
+  );
+
+  // ── 磨砂清晰 ────────────────────────────────────────────────
+
+  /// CSS `:332`：单层 `linear-gradient(165deg, …)`。
+  static const frostedLight = StyleBackdrop(
+    glows: [],
+    linear: StyleLinear(
+      stops: [
+        Color(0xFFEEF1F6), // #eef1f6 0%
+        Color(0xFFE8ECF3), // #e8ecf3 48%
+        Color(0xFFF0EEF3), // #f0eef3 100%
+      ],
+      begin: Alignment(-0.259, -0.966), // 165°
+      end: Alignment(0.259, 0.966),
+    ),
+  );
+
+  /// CSS `:885`。
+  static const frostedDark = StyleBackdrop(
+    glows: [],
+    linear: StyleLinear(
+      stops: [
+        Color(0xFF17171A), // 0%
+        Color(0xFF1B1B1F), // 48%
+        Color(0xFF191820), // 100%
+      ],
+      begin: Alignment(-0.259, -0.966), // 165°
+      end: Alignment(0.259, 0.966),
+    ),
+  );
+
+  // ── 陶土柔和 ────────────────────────────────────────────────
+
+  /// CSS `:399`：单层 `linear-gradient(168deg, …)`。
+  static const clayLight = StyleBackdrop(
+    glows: [],
+    linear: StyleLinear(
+      stops: [
+        Color(0xFFFAF6F1), // #faf6f1 0%
+        Color(0xFFF5EFE8), // #f5efe8 50%
+        Color(0xFFF8F4EF), // #f8f4ef 100%
+      ],
+      begin: Alignment(-0.208, -0.978), // 168°
+      end: Alignment(0.208, 0.978),
+    ),
+  );
+
+  /// CSS `:932`。
+  static const clayDark = StyleBackdrop(
+    glows: [],
+    linear: StyleLinear(
+      stops: [
+        Color(0xFF1F1A16), // 0%
+        Color(0xFF241E19), // 50%
+        Color(0xFF221D19), // 100%
+      ],
+      begin: Alignment(-0.208, -0.978), // 168°
+      end: Alignment(0.208, 0.978),
+    ),
+  );
+}
+
+/// 一层 radial 光晕。
+///
+/// [radiusFactor] 是**相对值**（相对窗口对角线的一半），不写死像素 ——
+/// CSS 的 `1100px 700px` 是在预览稿窗口尺寸下量出来的，搬进桌面端要按
+/// 窗口实际尺寸缩放，否则小窗口里光晕会溢出、大窗口里又缩成一团。
+@immutable
+class StyleGlow {
+  /// 光晕中心的实色（CSS radial 第一个色停）。
+  final Color color;
+
+  /// 光晕中心（[Alignment] 坐标系：-1~-1 左上，1~1 右下）。
+  final Alignment center;
+
+  /// 光晕半径 ≈ `radiusFactor × 窗口对角线的一半`。
+  final double radiusFactor;
+
+  const StyleGlow({
+    required this.color,
+    required this.center,
+    required this.radiusFactor,
+  });
+}
+
+/// 最底下那层线性渐变。
+@immutable
+class StyleLinear {
+  /// 渐变停点，按 CSS 原文顺序。
+  final List<Color> stops;
+
+  final Alignment begin;
+  final Alignment end;
+
+  const StyleLinear({
+    required this.stops,
+    required this.begin,
+    required this.end,
+  });
+
+  /// 按 [stops] 数量均匀分布的停点表。
+  ///
+  /// CSS 里三停分别是 0% / 48~52% / 100% —— 中间停点在 48~52% 之间波动，
+  /// 与均匀分布（50%）的偏差不足 2 个百分点，肉眼不可分辨，统一取均匀。
+  List<double> get evenlySpaced {
+    if (stops.length == 1) return const [0.0];
+    return List.generate(
+      stops.length,
+      (i) => i / (stops.length - 1),
+      growable: false,
+    );
+  }
+}
