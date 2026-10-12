@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'app_theme.dart';
+import 'style_colors.dart';
+
 /// 风格缩略图里那块「桌面壁纸」的渐变。
 ///
 /// 放在 `lib/theme/` 里是有意的：它是**视觉令牌**，而色板棘轮
@@ -37,6 +40,12 @@ enum AppStyle {
         (s) => s.id == id,
         orElse: () => AppStyle.frosted,
       );
+
+  /// 这套风格的色彩令牌。
+  ///
+  /// 与 [AppSurface.of] 并列：色彩与材质是**两个正交维度**，都在这里取，
+  /// 调用方（页面 / 组件）不自己判断风格。取值出口只有 [StyleColors.of] 一处。
+  StyleColors colorsFor(Brightness brightness) => StyleColors.of(this, brightness);
 }
 
 /// 卡片材质令牌 —— 一块面「有多厚、多透、多亮」。
@@ -155,4 +164,227 @@ class AppSurface {
   Color rimColor(Brightness brightness) => Colors.white.withValues(
         alpha: brightness == Brightness.light ? 0.55 : 0.28,
       );
+}
+
+// ══════════════════════════════════════════════════════════════
+// S4 · 圆角分档 / 边框 / 投影 / 悬停
+//
+// 下面四组令牌的取值**逐项取证自** `tools/ui/_redesign/preview/app.css`，
+// 每条注明出处行号。计划书 §1 只给了概括，这里按 CSS 原文取值。
+//
+// 为什么放在 [AppStyle] 的扩展里而不是塞进 [AppSurface]：`AppSurface` 的三套
+// 现值（blur / opacity / radiusScale）是 P1 期已验收的，有测试钉着，不许改。
+// 这四组是**新增维度**，所以另开扩展，互不干扰。
+// ══════════════════════════════════════════════════════════════
+
+/// 圆角**档位** —— 取代调用方传像素。
+///
+/// 三套风格对同一个档位给不同半径（液体玻璃更圆、磨砂更方、陶土居中），
+/// 这是「一套设计语言」的一部分，所以对外暴露的稳定 API 是**档位**而不是像素：
+/// 调用方说「我这是张卡片」，半径由当前风格决定。
+enum AppRadius {
+  /// `.card` —— 卡片本体。`app.css:266` / `:347` / `:408`
+  card,
+
+  /// `.qi` / `.opt` / `.hero` —— 小控件与首屏块。`app.css:273` / `:348` / `:409`
+  qi,
+
+  /// `.field` / `.web` / `.pill` / `.tabs2` / `.sw` / `.li` —— 输入框与胶囊。
+  /// `app.css:274` / `:349` / `:410`
+  field,
+
+  /// `.hero2` / `.stat` —— 大统计块。`app.css:804` / `:805` / `:806`
+  hero2,
+}
+
+/// 圆角分档表：`(风格, 档位) → 半径`。
+extension AppStyleRadiusTokens on AppStyle {
+  double radiusOf(AppRadius slot) => switch ((this, slot)) {
+        (AppStyle.liquid, AppRadius.card) => 20,
+        (AppStyle.frosted, AppRadius.card) => 14,
+        (AppStyle.clay, AppRadius.card) => 16,
+        (AppStyle.liquid, AppRadius.qi) => 11,
+        (AppStyle.frosted, AppRadius.qi) => 10,
+        (AppStyle.clay, AppRadius.qi) => 12,
+        (AppStyle.liquid, AppRadius.field) => 9,
+        (AppStyle.frosted, AppRadius.field) => 8,
+        (AppStyle.clay, AppRadius.field) => 10,
+        (AppStyle.liquid, AppRadius.hero2) => 14,
+        (AppStyle.frosted, AppRadius.hero2) => 12,
+        (AppStyle.clay, AppRadius.hero2) => 14,
+      };
+}
+
+/// 卡片边框的两层色：顶部 1px 高光 + 其余三边的环。
+///
+/// 为什么分成两个槽位而不是一个 [Color]：液体玻璃的边缘来自 CSS 的
+/// `border: 1px solid var(--rim)` **叠加** `inset 0 1px 0 rgba(255,255,255,.95)`
+/// ——顶边被高光盖住，另外三边留 ring 色。一个 [Color] 表达不了这个差异。
+///
+/// **能力边界（如实记录）**：CSS 的 `inset 0 -14px 26px -18px …` 那道底部内光晕
+/// 用 Flutter 的 [BoxDecoration] 无法表达（它没有 inset shadow），这里只取
+/// 「可表达的 1px 顶部高光」这一半，不做近似伪造。
+@immutable
+class StyleBorder {
+  final Color top;
+  final Color side;
+
+  const StyleBorder({required this.top, required this.side});
+
+  /// 顶部高光与三边同色时用这个（磨砂 / 陶土都没有独立的高光边）。
+  const StyleBorder.uniform(this.side) : top = side;
+
+  Border toBorder() => Border(
+        top: BorderSide(color: top),
+        left: BorderSide(color: side),
+        right: BorderSide(color: side),
+        bottom: BorderSide(color: side),
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is StyleBorder && other.top == top && other.side == side;
+
+  @override
+  int get hashCode => Object.hash(top, side);
+}
+
+/// 卡片边框随风格变。
+extension AppStyleBorderTokens on AppStyle {
+  StyleBorder cardBorderOf(AppColors c, Brightness brightness) =>
+      switch ((this, brightness)) {
+        // `:259` `border: 1px solid var(--rim)`，`--rim` = `rgba(255,255,255,.75)`
+        // （`:247`）；`:260` `inset 0 1px 0 rgba(255,255,255,.95)`。
+        (AppStyle.liquid, Brightness.light) => const StyleBorder(
+              top: Color(0xF2FFFFFF),
+              side: Color(0xBFFFFFFF),
+            ),
+        // 深色 `--rim` = `rgba(255,255,255,.14)`（`:833`）。CSS 深色**未给**
+        // `.card` 的顶部高光（只有 `::after` 内缘环，`:843`），所以这里不编造，
+        // 顶边与三边同色。
+        (AppStyle.liquid, Brightness.dark) =>
+          const StyleBorder.uniform(Color(0x24FFFFFF)),
+        // `:341` `border: 1px solid rgba(255,255,255,.9)`；`:891` 深色 `.10`。
+        (AppStyle.frosted, Brightness.light) =>
+          const StyleBorder.uniform(Color(0xE6FFFFFF)),
+        (AppStyle.frosted, Brightness.dark) =>
+          const StyleBorder.uniform(Color(0x1AFFFFFF)),
+        // `:405` / `:939` 两处都是 `border: 1px solid var(--ln)`，
+        // 而 `--ln` 已逐字节进了色板（`StyleColors` 的 `line`），所以取色板而不是
+        // 在这里再写一个值 —— 分隔线只有一处出处。
+        (AppStyle.clay, Brightness.light) ||
+        (AppStyle.clay, Brightness.dark) =>
+          StyleBorder.uniform(c.line),
+      };
+}
+
+/// 卡片投影随风格变 —— **每套是两条**（磨砂与陶土是 CSS 的双层影，
+/// 液体玻璃是一条带负 spread 的大影）。
+///
+/// 返回值**不是常量**，调用方不该缓存；它只是把 CSS 的 `box-shadow` 列表
+/// 逐条翻成 [BoxShadow]。
+extension AppStyleShadowTokens on AppStyle {
+  List<BoxShadow> cardShadows(Brightness brightness) =>
+      switch ((this, brightness)) {
+        // `:262` `0 10px 30px -12px rgba(38,38,80,.20)`。
+        (AppStyle.liquid, Brightness.light) => const [
+            BoxShadow(
+              color: Color(0x33362650),
+              offset: Offset(0, 10),
+              blurRadius: 30,
+              spreadRadius: -12,
+            ),
+          ],
+        // CSS 深色 `#v-a` 没给 `.card` 的投影（`:828` 起只有变量与 `::after`）。
+        // 深色底上需要比浅色更重的影才看得出层次，取同一几何、黑影 35%。
+        (AppStyle.liquid, Brightness.dark) => const [
+            BoxShadow(
+              color: Color(0x59000000),
+              offset: Offset(0, 10),
+              blurRadius: 30,
+              spreadRadius: -12,
+            ),
+          ],
+        // `:342` `0 1px 2px rgba(16,16,20,.05), 0 8px 24px -14px rgba(16,16,20,.22)`。
+        (AppStyle.frosted, Brightness.light) => const [
+            BoxShadow(
+              color: Color(0x0D101014),
+              offset: Offset(0, 1),
+              blurRadius: 2,
+            ),
+            BoxShadow(
+              color: Color(0x38101014),
+              offset: Offset(0, 8),
+              blurRadius: 24,
+              spreadRadius: -14,
+            ),
+          ],
+        // `:892` `0 1px 2px rgba(0,0,0,.30), 0 8px 24px -14px rgba(0,0,0,.50)`。
+        (AppStyle.frosted, Brightness.dark) => const [
+            BoxShadow(
+              color: Color(0x4D000000),
+              offset: Offset(0, 1),
+              blurRadius: 2,
+            ),
+            BoxShadow(
+              color: Color(0x80000000),
+              offset: Offset(0, 8),
+              blurRadius: 24,
+              spreadRadius: -14,
+            ),
+          ],
+        // `:406` `0 2px 4px rgba(87,78,70,.05), 0 12px 28px -18px rgba(87,78,70,.35)`。
+        (AppStyle.clay, Brightness.light) => const [
+            BoxShadow(
+              color: Color(0x0D574E46),
+              offset: Offset(0, 2),
+              blurRadius: 4,
+            ),
+            BoxShadow(
+              color: Color(0x59574E46),
+              offset: Offset(0, 12),
+              blurRadius: 28,
+              spreadRadius: -18,
+            ),
+          ],
+        // `:940` `0 2px 4px rgba(0,0,0,.28), 0 12px 28px -18px rgba(0,0,0,.55)`。
+        (AppStyle.clay, Brightness.dark) => const [
+            BoxShadow(
+              color: Color(0x47000000),
+              offset: Offset(0, 2),
+              blurRadius: 4,
+            ),
+            BoxShadow(
+              color: Color(0x8C000000),
+              offset: Offset(0, 12),
+              blurRadius: 28,
+              spreadRadius: -18,
+            ),
+          ],
+      };
+}
+
+/// 悬停底色随风格变。
+///
+/// 改造前三套风格共用色板的 `surfaceCardHover`，**而浅色三套的那个值恰好
+/// 完全相同**（都是白 78%）—— 也就是说浅色下悬停反馈根本分不出风格。
+/// 这里按各套 CSS 的 `:hover` 规则取值。
+///
+/// 浅色三套的 hover 都是**往亮里加**：[AppColors.surfaceCard] 本身是半透明白，
+/// 再叠一层更亮的白 → 压在卡片上的文字对比度只会升高，不会跌地板。
+extension AppStyleHoverTokens on AppStyle {
+  Color hoverColor(Brightness brightness) => switch ((this, brightness)) {
+        // `:280` `.grp > .hd:hover { background: rgba(255,255,255,.44) }`。
+        (AppStyle.liquid, Brightness.light) => const Color(0x70FFFFFF),
+        // `:846` `body.dark #v-a .grp > .hd:hover { … .07 }`。
+        (AppStyle.liquid, Brightness.dark) => const Color(0x12FFFFFF),
+        // `:352` `#v-b .grp > .hd:hover { background: rgba(16,16,20,.05) }`。
+        (AppStyle.frosted, Brightness.light) => const Color(0x0D101014),
+        // `:895` `body.dark #v-b .grp > .hd:hover { … .06 }`。
+        (AppStyle.frosted, Brightness.dark) => const Color(0x0FFFFFFF),
+        // `:415` `#v-c .grp > .hd:hover { background: rgba(43,38,34,.05) }`。
+        (AppStyle.clay, Brightness.light) => const Color(0x0D2B2622),
+        // `:942` `body.dark #v-c .grp > .hd:hover { … rgba(245,240,235,.06) }`。
+        (AppStyle.clay, Brightness.dark) => const Color(0x0FF5F0EB),
+      };
 }

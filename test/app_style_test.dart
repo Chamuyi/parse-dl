@@ -22,17 +22,21 @@ void main() {
   const dark = AppColors.dark;
   const light = AppColors.light;
 
-  /// 把 [card] 套上指定风格的 AppTheme 泵出来
+  /// 把 [card] 套上指定风格的 AppTheme 泵出来。
+  ///
+  /// [colors] 默认取**该风格自己的色板**（`AppColors.of(style, brightness)`）——
+  /// 与生产一致：`lib/app.dart` 就是这么构造 `AppTheme` 的。S4 的边框 / 悬停
+  /// 判据依赖这个对应关系（拿另一套风格的色板去测，量到的是不存在的组合）。
   Future<void> pumpCard(
     WidgetTester tester,
     AppStyle style, {
-    AppColors colors = dark,
+    AppColors? colors,
     Brightness brightness = Brightness.dark,
     Widget? child,
   }) async {
     await tester.pumpWidget(
       AppTheme(
-        colors: colors,
+        colors: colors ?? AppColors.of(style, brightness),
         brightness: brightness,
         style: style,
         child: MaterialApp(
@@ -249,7 +253,9 @@ void main() {
       );
     });
 
-    testWidgets('半径按 radiusScale 缩放：液体玻璃 > 磨砂 = 陶土', (tester) async {
+    testWidgets('半径按风格档位取值：液体玻璃 20 > 陶土 16 > 磨砂 14', (tester) async {
+      // S4 起 `AppCard.radius` 是**档位**（AppRadius.card）而不是像素，
+      // 像素由当前风格决定 —— 取值逐项取证自 app.css:266 / :347 / :408。
       Future<double> radiusFor(AppStyle s) async {
         await pumpCard(tester, s);
         final box = tester.widget<Container>(
@@ -262,15 +268,9 @@ void main() {
         return deco.borderRadius!.resolve(TextDirection.ltr).topLeft.x;
       }
 
-      final liq = await radiusFor(AppStyle.liquid);
-      final fro = await radiusFor(AppStyle.frosted);
-      final cla = await radiusFor(AppStyle.clay);
-
-      // 默认 radius = 16
-      expect(fro, 16);
-      expect(cla, 16);
-      expect(liq, 16 * 1.25);
-      expect(liq, greaterThan(fro));
+      expect(await radiusFor(AppStyle.liquid), 20);
+      expect(await radiusFor(AppStyle.frosted), 14);
+      expect(await radiusFor(AppStyle.clay), 16);
     });
 
     testWidgets('只有液体玻璃画渐变面', (tester) async {
@@ -290,21 +290,171 @@ void main() {
       expect(await gradientFor(AppStyle.clay), isNull);
     });
 
-    testWidgets('液体玻璃的内缘亮环比常规描边亮', (tester) async {
-      Future<Color> borderFor(AppStyle s) async {
-        await pumpCard(tester, s);
+    test('液体玻璃的边框是「更亮的顶边 + --rim 三边」，磨砂 / 陶土四边同色', () {
+      // 双层高光是**浅色**规格：`--rim` 与 `inset 0 1px 0` 都只在 #v-a 浅色块里
+      // （app.css:247/259/260）。深色 CSS 没给 .card 的顶部高光，不编造。
+      const b = Brightness.light;
+      StyleBorder borderOf(AppStyle s) =>
+          s.cardBorderOf(AppColors.of(s, b), b);
+
+      // 液体玻璃：顶边 = CSS `inset 0 1px 0 rgba(255,255,255,.95)`，
+      // 三边 = `--rim` `rgba(255,255,255,.75)`。
+      final liq = borderOf(AppStyle.liquid);
+      expect(liq.top, const Color(0xF2FFFFFF));
+      expect(liq.side, const Color(0xBFFFFFFF));
+      expect(
+        liq.top,
+        isNot(liq.side),
+        reason: '液体玻璃的双层高光就体现在「顶边比三边亮」，同色 = 退化成单层',
+      );
+
+      // 磨砂 / 陶土：四边同色（CSS 里都是一条 `border: 1px solid …`）。
+      for (final s in [AppStyle.frosted, AppStyle.clay]) {
+        final sb = borderOf(s);
+        expect(sb.top, sb.side, reason: '${s.id} 是单层描边');
+      }
+      // 陶土的描边就是色板的 --ln（分隔线只有一处出处）
+      expect(
+        borderOf(AppStyle.clay).side,
+        AppColors.of(AppStyle.clay, b).line,
+      );
+    });
+
+    testWidgets('AppCard 真的把风格边框画到了 Container 上（令牌没被架空）', (tester) async {
+      await pumpCard(tester, AppStyle.frosted, brightness: Brightness.light);
+      final box = tester.widget<Container>(
+        find.descendant(
+          of: find.byType(AppCard),
+          matching: find.byType(Container),
+        ),
+      );
+      final border = (box.decoration! as BoxDecoration).border! as Border;
+      expect(border.top.color, const Color(0xE6FFFFFF));
+      expect(border.left.color, const Color(0xE6FFFFFF));
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════
+  // S4 · 圆角分档 / 边框 / 投影 / 悬停
+  group('S4 圆角分档表', () {
+    test('三套 card 半径 = 20 / 14 / 16（取证自 app.css:266/:347/:408）', () {
+      expect(AppStyle.liquid.radiusOf(AppRadius.card), 20);
+      expect(AppStyle.frosted.radiusOf(AppRadius.card), 14);
+      expect(AppStyle.clay.radiusOf(AppRadius.card), 16);
+    });
+
+    test('四个档位都有值，且每档三套两两不同', () {
+      for (final slot in AppRadius.values) {
+        final vals = {for (final s in AppStyle.values) s.radiusOf(slot)};
+        // card / qi / field 三档三套互异；hero2 是 14/12/14 —— **有意的重复**
+        // （app.css:804/805/806 原文），所以这里只要求「至少两档不同」，
+        // 不强行要求三套两两不同。硬要求三套互异会逼人改掉预览稿的值。
+        expect(
+          vals.length,
+          greaterThanOrEqualTo(2),
+          reason: '$slot 在三套风格下只给出一个值，等于这一档没分风格',
+        );
+      }
+      // 逐档逐值照 app.css 的原文
+      const table = {
+        AppRadius.card: [20, 14, 16],
+        AppRadius.qi: [11, 10, 12],
+        AppRadius.field: [9, 8, 10],
+        AppRadius.hero2: [14, 12, 14],
+      };
+      for (final e in table.entries) {
+        expect(
+          [for (final s in AppStyle.values) s.radiusOf(e.key)],
+          e.value,
+          reason: '${e.key} 这一档的取值与 app.css 不符',
+        );
+      }
+    });
+
+    test('负控制：分档表确实会被「改回硬编码 16」测出来', () {
+      // 这条不测产品代码，而是证明**上面那两条判据的形状是有效的** ——
+      // 如果三套都返回 16（改造前的样子），下面的断言必须全部不成立。
+      const hardcoded = [16.0, 16.0, 16.0];
+      final real = [
+        for (final s in AppStyle.values) s.radiusOf(AppRadius.card),
+      ];
+      expect(real, isNot(hardcoded), reason: '三套 card 半径又变回同一个值了');
+
+      // 且逐套对得上「与 16 的差」：liquid/frosted 必须偏离，clay 恰好等于 16
+      expect(
+        AppStyle.liquid.radiusOf(AppRadius.card),
+        isNot(16.0),
+        reason: 'liquid 的 card 若是 16，就是退回改造前的 radiusScale 算法',
+      );
+      expect(
+        AppStyle.frosted.radiusOf(AppRadius.card),
+        isNot(16.0),
+        reason: 'frosted 的 card 若是 16，就是退回改造前的 radiusScale 算法',
+      );
+    });
+  });
+
+  group('S4 边框 / 投影 / 悬停随风格变', () {
+    test('三套卡片边框两两不同', () {
+      for (final b in Brightness.values) {
+        final got = {
+          for (final s in AppStyle.values) s.cardBorderOf(AppColors.of(s, b), b),
+        };
+        expect(
+          got.length,
+          AppStyle.values.length,
+          reason: '$b 下三套边框有重复：$got',
+        );
+      }
+    });
+
+    test('三套 boxShadow 列表两两不同（磨砂 / 陶土是双层影）', () {
+      for (final b in Brightness.values) {
+        final got = {
+          for (final s in AppStyle.values) s.cardShadows(b).toString(),
+        };
+        expect(
+          got.length,
+          AppStyle.values.length,
+          reason: '$b 下三套投影有重复',
+        );
+      }
+      expect(AppStyle.frosted.cardShadows(Brightness.light).length, 2,
+          reason: 'app.css:342 是双层影');
+      expect(AppStyle.clay.cardShadows(Brightness.light).length, 2,
+          reason: 'app.css:406 是双层影');
+      expect(AppStyle.liquid.cardShadows(Brightness.light).length, 1,
+          reason: 'app.css:262 是单层带负 spread 的影');
+    });
+
+    test('三套悬停底色两两不同（改造前三套共用色板的那一个值）', () {
+      for (final b in Brightness.values) {
+        final got = {for (final s in AppStyle.values) s.hoverColor(b)};
+        expect(
+          got.length,
+          AppStyle.values.length,
+          reason: '$b 下三套悬停色有重复 —— 悬停反馈又分不出风格了',
+        );
+      }
+    });
+
+    testWidgets('hover 打开时卡片底色真的变了（不是只存了个令牌没用）', (tester) async {
+      Future<Color> colorOf(bool hovered) async {
+        await pumpCard(
+          tester,
+          AppStyle.frosted,
+          child: AppCard(hovered: hovered, child: const Text('x')),
+        );
         final box = tester.widget<Container>(
           find.descendant(
             of: find.byType(AppCard),
             matching: find.byType(Container),
           ),
         );
-        final deco = box.decoration! as BoxDecoration;
-        return (deco.border! as Border).top.color;
+        return (box.decoration! as BoxDecoration).color!;
       }
 
-      expect(await borderFor(AppStyle.liquid), AppSurface.liquid.rimColor(Brightness.dark));
-      expect(await borderFor(AppStyle.frosted), dark.line);
+      expect(await colorOf(true), isNot(await colorOf(false)));
     });
   });
 

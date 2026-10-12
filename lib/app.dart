@@ -29,6 +29,7 @@ import 'services/douyin_store.dart';
 import 'services/homepage_store.dart';
 import 'services/settings_store.dart';
 import 'services/window_effect.dart';
+import 'theme/app_style.dart';
 import 'theme/app_theme.dart';
 import 'theme/window_material.dart';
 import 'widgets/app_toast.dart';
@@ -145,9 +146,9 @@ class XDownloaderApp extends StatelessWidget {
           final locale = activeLocale.flutterLocale;
 
           return AppTheme(
-            colors: brightness == Brightness.dark
-                ? AppColors.dark
-                : AppColors.light,
+            // 色板按「风格 + 亮度」取：三套风格各有自己的整套色彩令牌，
+            // 不再是全局一套（风格切换时整个子树重建，色彩立刻跟着变）。
+            colors: AppColors.of(appearance.visualStyle, brightness),
             brightness: brightness,
             // 界面风格：与 navLayout / locale 同一套做法 —— 从设置读，
             // 切换后整个子树重建，卡片材质立刻跟着变。
@@ -163,7 +164,7 @@ class XDownloaderApp extends StatelessWidget {
                 GlobalWidgetsLocalizations.delegate,
                 GlobalCupertinoLocalizations.delegate,
               ],
-              theme: _buildMaterialTheme(brightness),
+              theme: _buildMaterialTheme(brightness, appearance.visualStyle),
               home: _AppShell(brightness: brightness),
             ),
           );
@@ -184,10 +185,8 @@ class XDownloaderApp extends StatelessWidget {
     }
   }
 
-  ThemeData _buildMaterialTheme(Brightness brightness) => buildAppTheme(
-    brightness == Brightness.dark ? AppColors.dark : AppColors.light,
-    brightness,
-  );
+  ThemeData _buildMaterialTheme(Brightness brightness, AppStyle style) =>
+      buildAppTheme(AppColors.of(style, brightness), brightness);
 }
 
 class _AppShell extends StatefulWidget {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_style.dart';
+import 'style_colors.dart';
 
 /// 「已识别 / 已勾选」的黄色描边色。
 ///
@@ -155,6 +156,24 @@ class AppColors {
     onSuccess: Color(0xFF0A2E16),
   );
 
+  /// 按「风格 + 亮度」取该风格的整套色板。
+  ///
+  /// **注意 [light] / [dark] 与 frosted 不是同一套值**，这是有意的分工：
+  ///
+  /// | 东西 | 用途 | 值 |
+  /// |---|---|---|
+  /// | [light] / [dark] | 40 多个既有测试文件的引用（含 `theme_contrast_test` 里那 2 组地板） | **改造前的现值，一字不改** |
+  /// | [of]`(frosted, ·)` | 应用**实际渲染** frosted 时的色板 | 预览稿 `#v-b` 的冷灰蓝 |
+  ///
+  /// frosted 是默认风格 —— 用户不切风格时看到的就是它，所以它必须与 liquid/clay
+  /// 同等待遇地取预览稿取值，否则「三套风格」对默认用户等于没做。
+  static AppColors of(AppStyle style, Brightness brightness) =>
+      switch ((style, brightness)) {
+        (AppStyle.frosted, Brightness.light) => StyleColors.frostedLight.colors,
+        (AppStyle.frosted, Brightness.dark) => StyleColors.frostedDark.colors,
+        _ => StyleColors.of(style, brightness).colors,
+      };
+
   /// 按「强调色 + 明暗」算出一个合适的底色调。
   ///
   /// 关键：**不能**把强调色按固定不透明度直接铺满窗口。
@@ -177,11 +196,24 @@ class AppColors {
     );
   }
 
-  /// 纯色材质时用的不透明底色
-  static Color solidFor(Brightness brightness) =>
-      brightness == Brightness.dark
-          ? const Color(0xFF202020)
-          : const Color(0xFFF3F3F3);
+  /// 纯色材质时用的不透明底色。
+  ///
+  /// [style] 有默认值 [AppStyle.frosted]。**这个默认值返回的是
+  /// [#F3F3F3] / [#202020]（改造前的常量），不是 frosted 的 `--panel-solid`**
+  /// —— 既有 6 个调用点（`background_layer.dart` 两处、`theme_contrast_test.dart`
+  /// 两处、`nav_keyboard_test.dart`）依赖这组值，而 `theme_contrast_test` 的地板
+  /// 就是按它算出来的。按风格取底色是 S3 的接线范围，届时需要连同
+  /// `clayDark` 的实心卡片底一起处理（见 [StyleColors.clayDark] 的已知遗留）。
+  static Color solidFor(
+    Brightness brightness, {
+    AppStyle style = AppStyle.frosted,
+  }) =>
+      switch (style) {
+        AppStyle.frosted => brightness == Brightness.dark
+            ? const Color(0xFF202020)
+            : const Color(0xFFF3F3F3),
+        _ => of(style, brightness).surfaceSolid,
+      };
 }
 
 /// 「选中 / 激活」的统一画法：低饱和主色底 + 主色描边 + 柔光。

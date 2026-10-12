@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:parse_dl/theme/app_style.dart';
 import 'package:parse_dl/theme/app_theme.dart';
 
 /// 文字档位压在透明材质上时的对比度。
@@ -62,6 +63,9 @@ void main() {
 
   final surfaces = <String, Color Function(AppColors)>{
     'card': (c) => c.surfaceCard,
+    // hover 面此前无人守（计划书 §3b.5 末的测试盲区）—— 深色那两个「危险值」
+    // 能骗过第一遍推导就是因为这张表里没有它。门槛与 card 相同。
+    'hover': (c) => c.surfaceCardHover,
     'float': (c) => c.surfaceFloat,
     'sunken': (c) => c.surfaceSunken,
   };
@@ -75,6 +79,10 @@ void main() {
     'light': {
       'card.strong': 4.5, 'card.normal': 4.5, 'card.muted': 4.5, 'card.faint': 4.5,
       'card.accentText': 4.0, 'card.danger': 3.0,
+      // hover 面：门槛与 card 相同（S2b 新增覆盖，不是放宽 —— 计划书 §3b.5 末）。
+      'hover.strong': 4.5, 'hover.normal': 4.5, 'hover.muted': 4.5, 'hover.faint': 4.5,
+      'hover.accentText': 4.0, 'hover.danger': 3.0,
+      'hover.success': 4.5, 'hover.warning': 4.5,
       'float.strong': 4.5, 'float.normal': 4.5, 'float.muted': 4.5, 'float.faint': 4.5,
       'float.accentText': 4.0, 'float.danger': 3.0,
       'sunken.strong': 4.5, 'sunken.normal': 4.5, 'sunken.muted': 3.7,
@@ -86,6 +94,11 @@ void main() {
     'dark': {
       'card.strong': 4.5, 'card.normal': 4.5, 'card.muted': 4.5, 'card.faint': 3.0,
       'card.accentText': 4.0, 'card.danger': 3.0,
+      // hover 面同 card —— 这一档此前无人守，深色 hover 白 11% 的错误值
+      // 正是从这道缺口溜进去的（实测 muted 只有 4.03）。
+      'hover.strong': 4.5, 'hover.normal': 4.5, 'hover.muted': 4.5, 'hover.faint': 3.0,
+      'hover.accentText': 4.0, 'hover.danger': 3.0,
+      'hover.success': 3.7, 'hover.warning': 3.7,
       'float.strong': 4.5, 'float.normal': 4.5, 'float.muted': 4.5, 'float.faint': 3.0,
       'float.accentText': 4.0, 'float.danger': 3.0,
       'sunken.strong': 4.5, 'sunken.normal': 4.5, 'sunken.muted': 4.0,
@@ -96,14 +109,22 @@ void main() {
     },
   };
 
-  const themes = <String, (Brightness, AppColors)>{
-    'light': (Brightness.light, AppColors.light),
-    'dark': (Brightness.dark, AppColors.dark),
+  const themes = <String, (AppStyle, Brightness)>{
+    'liquid-light': (AppStyle.liquid, Brightness.light),
+    'liquid-dark': (AppStyle.liquid, Brightness.dark),
+    'frosted-light': (AppStyle.frosted, Brightness.light),
+    'frosted-dark': (AppStyle.frosted, Brightness.dark),
+    'clay-light': (AppStyle.clay, Brightness.light),
+    'clay-dark': (AppStyle.clay, Brightness.dark),
   };
+
+  /// 地板值按**亮度**取（与改造前一致），风格只决定色板。
+  String floorKey(Brightness b) => b == Brightness.dark ? 'dark' : 'light';
 
   for (final entry in themes.entries) {
     final theme = entry.key;
-    final (brightness, c) = entry.value;
+    final (style, brightness) = entry.value;
+    final c = AppColors.of(style, brightness);
     final inks = <String, Color>{
       'strong': c.textStrong,
       'normal': c.textNormal,
@@ -120,11 +141,18 @@ void main() {
         final key = '${s.key}.${ink.key}';
         test('$theme：${ink.key} 压在${s.key}上，最坏壁纸下也够对比度', () {
           final got = worst(brightness, c, ink.value, s.value);
+          final need = floors[floorKey(brightness)]![key];
+          expect(
+            need,
+            isNotNull,
+            reason: '$theme / $key 没有登记地板值 —— 新增面必须补地板，'
+                '否则它是无人守的盲区',
+          );
           expect(
             got,
-            greaterThanOrEqualTo(floors[theme]![key]!),
+            greaterThanOrEqualTo(need!),
             reason: '$theme / $key 实测 ${got.toStringAsFixed(2)} '
-                '< 地板 ${floors[theme]![key]}',
+                '< 地板 $need',
           );
         });
       }
@@ -156,15 +184,24 @@ void main() {
     //     selected 是淡蓝，明度本来就接近），说明"看着一样"靠的不是明度。
     //  2) 再换成 sRGB 距离 —— 暗色主题只有 0.061，因为两种填充确实都偏暗，
     //     人眼区分它们靠的是**蓝不蓝**。
-    // 所以最终度量是「朝主色方向的彩度差」：选中底必须明显比悬停底更蓝。
-    double blue(Color c) => c.b - c.r; // 主色 #1D9BF0 的蓝-红跨度
+    // 所以最终度量是「朝主色方向的彩度差」：选中底必须明显比悬停底更靠主色。
+    //
+    // 6 组时主色不再都是蓝的（clay 是橙 `#C2410C`），所以把「蓝-红跨度」换成
+    // 「主色的蓝-红跨度方向」：主色偏蓝 → 因子 +1（与改造前逐字节同式）；
+    // 主色偏暖 → 因子 -1（更橙读作正向）。**度量单位与阈值都没动**。
+    double chromaToward(Color x, Color accent) {
+      final ax = accent.b - accent.r;
+      return (x.b - x.r) * (ax >= 0 ? 1 : -1);
+    }
+
     double dist(Color a, Color b) => math.sqrt(math.pow(a.r - b.r, 2) +
             math.pow(a.g - b.g, 2) +
             math.pow(a.b - b.b, 2)) /
         math.sqrt(3.0);
 
     for (final entry in themes.entries) {
-      final (brightness, c) = entry.value;
+      final (style, brightness) = entry.value;
+      final c = AppColors.of(style, brightness);
       final sel = selectedDecoration(c);
       for (final wall in [const Color(0xFF000000), const Color(0xFFFFFFFF)]) {
         final base = over(
@@ -172,11 +209,13 @@ void main() {
         final cardBg = over(c.surfaceCard, base);
         final hover = over(c.surfaceCardHover, cardBg);
         final selected = over(c.accentSoft, cardBg);
+        final toward = chromaToward(selected, c.accent) -
+            chromaToward(hover, c.accent);
         expect(
-          blue(selected) - blue(hover),
+          toward,
           greaterThanOrEqualTo(0.10),
-          reason: '${entry.key}：选中底比悬停底只蓝了 '
-              '${(blue(selected) - blue(hover)).toStringAsFixed(3)}（要 ≥0.10）',
+          reason: '${entry.key}：选中底比悬停底只朝主色推进了 '
+              '${toward.toStringAsFixed(3)}（要 ≥0.10）',
         );
         expect(
           dist(hover, selected),
@@ -195,7 +234,8 @@ void main() {
     // 缎带是 8px 的小字，按正文标准要 4.5。暗色主题的 success 是亮绿，
     // 白字压上去只有 2.20 —— 所以要 onSuccess，不能沿用 textStrong。
     for (final entry in themes.entries) {
-      final (_, c) = entry.value;
+      final (style, brightness) = entry.value;
+      final c = AppColors.of(style, brightness);
       final r = ratio(c.onSuccess, c.success);
       expect(r, greaterThanOrEqualTo(4.5),
           reason: '${entry.key}：onSuccess 压在 success 上只有 ${r.toStringAsFixed(2)}');
