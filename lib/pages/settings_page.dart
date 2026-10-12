@@ -17,6 +17,7 @@ import '../widgets/douyin_section.dart';
 import '../widgets/material_picker.dart';
 import '../widgets/nav_layout_picker.dart';
 import '../widgets/proxy_section.dart';
+import '../widgets/style_picker.dart';
 import '../widgets/tint_picker.dart';
 import '../widgets/app_toast.dart';
 
@@ -128,6 +129,16 @@ class SettingsPage extends StatelessWidget {
                     await store.setAppearance((a) => a.windowMaterial = m);
                     await onMaterialChanged(m);
                   },
+                ),
+              ),
+              _Field(
+                label: t('界面风格'),
+                description:
+                    t('卡片用哪种材质表达：液体玻璃最透亮、磨砂清晰最清楚、'
+                        '陶土柔和是实心面。切换后立即生效，并在下次启动时保留。'),
+                child: StylePicker(
+                  value: appearance.visualStyle,
+                  onChanged: (s) => store.setAppearance((a) => a.visualStyle = s),
                 ),
               ),
               _Field(

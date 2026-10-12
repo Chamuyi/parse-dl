@@ -147,6 +147,9 @@ class XDownloaderApp extends StatelessWidget {
                 ? AppColors.dark
                 : AppColors.light,
             brightness: brightness,
+            // 界面风格：与 navLayout / locale 同一套做法 —— 从设置读，
+            // 切换后整个子树重建，卡片材质立刻跟着变。
+            style: appearance.visualStyle,
             child: MaterialApp(
               title: t('解析下载器'),
               debugShowCheckedModeBanner: false,

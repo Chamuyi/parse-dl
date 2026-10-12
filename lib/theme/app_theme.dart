@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_style.dart';
+
 /// 「已识别 / 已勾选」的黄色描边色。
 ///
 /// 页面上那一圈黄框是注入脚本 `markNode` 画的，色值写死在 JS 字符串里
@@ -200,10 +202,15 @@ class AppTheme extends InheritedWidget {
   final AppColors colors;
   final Brightness brightness;
 
+  /// 当前界面风格。默认 [AppStyle.frosted] —— 没显式传的调用点（含测试里的
+  /// 二十多处 `AppTheme(...)`）拿到的就是改造前的观感，不必逐个改。
+  final AppStyle style;
+
   const AppTheme({
     super.key,
     required this.colors,
     required this.brightness,
+    this.style = AppStyle.frosted,
     required super.child,
   });
 
@@ -215,9 +222,17 @@ class AppTheme extends InheritedWidget {
 
   static AppColors colorsOf(BuildContext context) => of(context).colors;
 
+  /// 当前风格的材质令牌。
+  static AppSurface surfaceOf(BuildContext context) => of(context).surface;
+
+  /// 由 [style] 派生的材质令牌
+  AppSurface get surface => AppSurface.of(style);
+
   @override
   bool updateShouldNotify(AppTheme oldWidget) =>
-      oldWidget.colors != colors || oldWidget.brightness != brightness;
+      oldWidget.colors != colors ||
+      oldWidget.brightness != brightness ||
+      oldWidget.style != style;
 }
 
 /// 应用级 Material 主题。**从 [AppColors] 派生，别再在别处手搓 ThemeData。**

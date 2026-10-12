@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../l10n/app_locale.dart';
+import '../theme/app_style.dart';
 import '../theme/window_material.dart';
 import 'bili_config.dart';
 import 'douyin_config.dart';
@@ -118,6 +119,10 @@ class AppearanceSettings {
   /// 界面语言。默认跟随系统；旧配置没这个字段时也是跟随系统。
   AppLocale locale;
 
+  /// 界面风格。默认磨砂清晰；旧配置没这个字段时也是磨砂清晰 ——
+  /// 拿到的就是改造前那套观感，升级不改变外观。
+  AppStyle visualStyle;
+
   AppearanceSettings({
     this.themeMode = ThemeMode2.system,
     this.windowMaterial = WindowMaterial.mica,
@@ -128,6 +133,7 @@ class AppearanceSettings {
     this.navLayout = NavLayout.dock,
     this.navGroupExpanded = const {},
     this.locale = AppLocale.system,
+    this.visualStyle = AppStyle.frosted,
   });
 
   /// 某个模块入口当前是否展开（没记录过 = 收起）
@@ -164,6 +170,7 @@ class AppearanceSettings {
         navLayout: NavLayout.fromId(j['navLayout'] as String?),
         navGroupExpanded: _readExpandedMap(j['navGroupExpanded']),
         locale: AppLocale.fromId(j['locale'] as String?),
+        visualStyle: AppStyle.fromId(j['visualStyle'] as String?),
       );
 
   Map<String, dynamic> toJson() => {
@@ -176,6 +183,7 @@ class AppearanceSettings {
     'navLayout': navLayout.id,
     'navGroupExpanded': navGroupExpanded,
     'locale': locale.id,
+    'visualStyle': visualStyle.id,
   };
 }
 
