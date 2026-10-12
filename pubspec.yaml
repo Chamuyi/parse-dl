@@ -54,6 +54,11 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
+  # 液体玻璃的逐像素折射着色器（S7）。仅 Impeller 后端可用；
+  # 探测失败或加载异常时静默回退到 Stage A 的放大折射路径。
+  shaders:
+    - shaders/liquid_glass.frag
+
   assets:
     - assets/logo.png
     - assets/aria2c.exe

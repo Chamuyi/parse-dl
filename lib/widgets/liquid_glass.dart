@@ -91,6 +91,9 @@ class LiquidGlassSurface extends StatefulWidget {
   /// 按压回退的时长（比前推慢，收得柔）。
   static const Duration pressReverse = Duration(milliseconds: 320);
 
+  /// Stage B 着色器的 asset 键；加载失败静默回退降级路径。
+  static const String shaderAsset = 'shaders/liquid_glass.frag';
+
   /// 静止时的光照方向。
   static const Offset restLight = Offset(-.65, -.8);
 
@@ -103,12 +106,28 @@ class LiquidGlassSurface extends StatefulWidget {
   static double zoomOf(double liquid, double press, {bool canvas = false}) =>
       1 + (canvas ? .004 : .014) * liquid * (1 + .3 * press);
 
+  /// Stage B 探测与加载的**注入点**（测试用它驱动 shader / 降级两条路径，
+  /// 不碰真实 GPU）。生产代码不赋值，走 SDK 真值。
+  @visibleForTesting
+  static bool Function()? shaderSupported;
+
+  @visibleForTesting
+  static Future<GlassShader> Function()? shaderLoader;
+
   @override
   State<LiquidGlassSurface> createState() => _LiquidGlassSurfaceState();
 }
 
 class _LiquidGlassSurfaceState extends State<LiquidGlassSurface>
     with SingleTickerProviderStateMixin {
+  static Future<ui.FragmentProgram>? _program;
+
+  bool _shaderSupported() =>
+      LiquidGlassSurface.shaderSupported?.call() ??
+      ui.ImageFilter.isShaderFilterSupported;
+
+  GlassShader? _glassShader;
+  bool _loadingShader = false;
   late final AnimationController _press;
 
   /// 光照方向，归一化到 `[-1, 1]`。用 ValueNotifier 而不是 setState：
@@ -138,18 +157,61 @@ class _LiquidGlassSurfaceState extends State<LiquidGlassSurface>
         )..addStatusListener((status) {
           if (status == AnimationStatus.completed) _press.reverse();
         });
+    if (_filterEnabled && _needsRefraction && _shaderSupported()) {
+      _loadShader();
+    }
   }
 
   @override
   void didUpdateWidget(LiquidGlassSurface oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!_needsRefraction) _resetInteraction();
+    if (_filterEnabled &&
+        _needsRefraction &&
+        _glassShader == null &&
+        _shaderSupported()) {
+      _loadShader();
+    }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_motionEnabled) _resetInteraction();
+  }
+
+  /// Stage B 加载：成功则 `setState` 挂上 shader（下一次 build 走 GLSL 折射）；
+  /// 失败（后端/资产/注入的假加载器抛错）**静默回退**到降级路径 —— 绝不崩。
+  Future<void> _loadShader() async {
+    if (_loadingShader) return;
+    _loadingShader = true;
+    try {
+      final loader =
+          LiquidGlassSurface.shaderLoader ?? _loadDefaultProgramShader;
+      final shader = await loader();
+      if (mounted && _filterEnabled && _needsRefraction) {
+        setState(() => _glassShader = shader);
+      }
+    } catch (_) {
+      // 后端/资产/测试注入的加载器失败时保持放大折射的降级材质。
+    } finally {
+      _loadingShader = false;
+    }
+  }
+
+  /// 生产加载路径：读 asset 的程序并取一个 fragment shader。
+  /// 与 morrow 一致：程序级缓存（静态 `_program`），shader 每次新取。
+  ///
+  /// 末尾的**金丝雀**在加载期就地验证两件事（任何一条不满足都算加载失败，
+  /// 走静默回退，而不是等 build 期才炸）：
+  /// - 后端真的支持 `ImageFilter.shader`（探测说支持但后端撒谎时在这里暴露）；
+  /// - SDK 契约「第一个 uniform 是 vec2」（`u_size`）成立，否则抛 `StateError`。
+  static Future<GlassShader> _loadDefaultProgramShader() async {
+    final program = await (_program ??=
+        ui.FragmentProgram.fromAsset(LiquidGlassSurface.shaderAsset));
+    final shader = program.fragmentShader();
+    ui.ImageFilter.shader(shader);
+    return SdkGlassShader(shader);
   }
 
   void _resetInteraction() {
@@ -161,31 +223,45 @@ class _LiquidGlassSurfaceState extends State<LiquidGlassSurface>
 
   @override
   void dispose() {
+    _glassShader?.dispose();
     _press.dispose();
     _light.dispose();
     super.dispose();
   }
 
   /// 降级路径的核心：**先模糊、再折射**（`compose(outer: 模糊, inner: 折射)`），
-  /// 顺序不能反。
+  /// 顺序不能反。Stage B 可用时内层换成逐像素折射的 shader 滤镜。
   ui.ImageFilter _filter(Size size, GlassMaterial material) {
     if (material.liquid <= .001) {
       return ui.ImageFilter.blur(sigmaX: material.blur, sigmaY: material.blur);
     }
-    final zoom = LiquidGlassSurface.zoomOf(
-      material.liquid,
-      _press.value,
-      canvas: widget.canvas,
-    );
-    final transform = Matrix4.identity()
-      ..setEntry(0, 0, zoom)
-      ..setEntry(1, 1, zoom)
-      // 缩放后必须重新居中，否则内容被往左上拽。
-      ..setEntry(0, 3, size.width * (1 - zoom) / 2)
-      ..setEntry(1, 3, size.height * (1 - zoom) / 2);
+    final ui.ImageFilter refraction;
+    if (_glassShader case final shader?) {
+      shader
+        ..setFloat(2, widget.borderRadius.topLeft.x) // u_radius
+        ..setFloat(3, (widget.canvas ? 4 : 9) * material.liquid) // u_depth
+        ..setFloat(4, _light.value.dx) // u_light.x
+        ..setFloat(5, _light.value.dy) // u_light.y
+        ..setFloat(6, _press.value); // u_press
+      // u_size（索引 0/1）由引擎按采样区域自动写入，Dart 侧只填 2..6。
+      refraction = shader.filter();
+    } else {
+      final zoom = LiquidGlassSurface.zoomOf(
+        material.liquid,
+        _press.value,
+        canvas: widget.canvas,
+      );
+      final transform = Matrix4.identity()
+        ..setEntry(0, 0, zoom)
+        ..setEntry(1, 1, zoom)
+        // 缩放后必须重新居中，否则内容被往左上拽。
+        ..setEntry(0, 3, size.width * (1 - zoom) / 2)
+        ..setEntry(1, 3, size.height * (1 - zoom) / 2);
+      refraction = ui.ImageFilter.matrix(transform.storage);
+    }
     return ui.ImageFilter.compose(
       outer: ui.ImageFilter.blur(sigmaX: material.blur, sigmaY: material.blur),
-      inner: ui.ImageFilter.matrix(transform.storage),
+      inner: refraction,
     );
   }
 
@@ -422,4 +498,51 @@ class LiquidRimPainter extends CustomPainter {
       old.light != light ||
       old.dark != dark ||
       old.canvas != canvas;
+}
+
+/// Stage B 的着色器抽象：组件通过它写 uniform 并产出折射滤镜。
+///
+/// SDK 的 `ui.FragmentProgram` / `ui.FragmentShader` 都是 `base class`，
+/// 测试造不出实例 —— 可注入性的落点就是这层薄封装：生产实现
+/// [SdkGlassShader] 包真 shader，测试注入记录 uniform 的 fake。
+abstract class GlassShader {
+  /// 写 float uniform（索引即 frag 里 uniform 的声明序，采样器不占位）。
+  void setFloat(int index, double value);
+
+  /// Stage B 的折射滤镜（`_filter` 的内层）。
+  ui.ImageFilter filter();
+
+  /// 释放底层资源。
+  void dispose();
+}
+
+/// 生产实现：包 SDK fragment shader；dispose 时置脏，之后任何
+/// `filter()` 调用都显式抛错（防把已释放的 shader 交回渲染管线）。
+class SdkGlassShader implements GlassShader {
+  SdkGlassShader(this._shader);
+
+  final ui.FragmentShader _shader;
+  bool _disposed = false;
+
+  @override
+  void setFloat(int index, double value) {
+    if (_disposed) {
+      throw StateError('GlassShader used after dispose');
+    }
+    _shader.setFloat(index, value);
+  }
+
+  @override
+  ui.ImageFilter filter() {
+    if (_disposed) {
+      throw StateError('GlassShader used after dispose');
+    }
+    return ui.ImageFilter.shader(_shader);
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _shader.dispose();
+  }
 }
