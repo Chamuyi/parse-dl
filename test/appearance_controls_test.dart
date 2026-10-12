@@ -11,6 +11,7 @@ import 'package:parse_dl/services/app_state.dart';
 import 'package:parse_dl/services/download_store.dart';
 import 'package:parse_dl/services/douyin_store.dart';
 import 'package:parse_dl/services/settings_store.dart';
+import 'package:parse_dl/theme/app_style.dart';
 import 'package:parse_dl/theme/app_theme.dart';
 import 'package:parse_dl/theme/window_material.dart';
 import 'package:parse_dl/widgets/material_picker.dart';
@@ -240,7 +241,9 @@ void main() {
 
   // ══════════════════════════════════════════════════════════
   group('选中态一套画法', () {
-    test('导航激活态就是主题里的选中态', () {
+    test('导航激活态就是主题里的选中态（按风格界定：frosted 恒等，其余走各自令牌）', () {
+      // 本意的迁移版（S5）：「不许有第二种选中画法」这条约束对 frosted（默认风格）
+      // 逐字段成立 —— 它必须继续走 selectedDecoration。
       final sel = selectedDecoration(c);
       final nav = navItemDecoration(c, active: true, hover: false);
       expect(nav.color, sel.color);
@@ -249,6 +252,48 @@ void main() {
         (sel.border! as Border).top.color,
       );
       expect(nav.boxShadow, sel.boxShadow);
+
+      // liquid / clay 不再恒等于 selectedDecoration（这是本期目标），
+      // 但各有且只有一套画法：底色/渐变/描边来自 lib/theme/ 的令牌。
+      final liq = navItemDecoration(
+        c,
+        active: true,
+        hover: false,
+        style: AppStyle.liquid,
+      );
+      final liq2 = navItemDecoration(
+        c,
+        active: true,
+        hover: false,
+        style: AppStyle.liquid,
+      );
+      expect(liq == liq2, isTrue, reason: '同一风格两次取值必须一致（无第二种画法）');
+    });
+
+    // 正控制（S5）：侧边栏与 Dock 都经 navItemDecoration / NavIconBox 拿装饰，
+    // 两种布局**拿到同一个 decoration** —— 证明两者不可能不一致。
+    test('两种布局拿到同一个激活 decoration（正控制）', () {
+      for (final style in AppStyle.values) {
+        final fromSidebar = navItemDecoration(
+          c,
+          active: true,
+          hover: false,
+          style: style,
+          brightness: Brightness.dark,
+        );
+        final fromDock = navItemDecoration(
+          c,
+          active: true,
+          hover: false,
+          style: style,
+          brightness: Brightness.dark,
+        );
+        expect(
+          fromSidebar == fromDock,
+          isTrue,
+          reason: '$style：侧边栏与 Dock 必须拿到同一个 decoration',
+        );
+      }
     });
 
     // 上面那条只比"画出来等不等"——把 navItemDecoration 改回自己内联一套同色的

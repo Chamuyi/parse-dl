@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 
 /// 一个导航项。
@@ -140,20 +141,38 @@ abstract final class NavMetrics {
 
 /// 导航项容器装饰 —— **两种布局共用这一个函数**。
 ///
-/// 激活态直接取 [selectedDecoration]（与材质卡片、分段控件同一套画法）；
-/// 悬停态 = 略亮的卡片底色；键盘焦点态 = 一圈高亮描边；其余 = 全透明。
+/// 悬停态 = 该风格的悬停底色；键盘焦点态 = 一圈高亮描边；其余 = 全透明。
 /// 因为两边都走这里，激活/悬停/聚焦的观感不可能不一致。
+///
+/// **激活态按风格分流**（S5）：
+/// - [AppStyle.frosted]（默认）继续走 [selectedDecoration] —— 选中底色全应用
+///   只有那一个出处（`appearance_controls_test` 源码层钉着本文件必须含
+///   `selectedDecoration(` 且**不得**直接引用色板的 accentSoft 槽位），
+///   这也是改造前所有风格的观感，既有调用点零改动；
+/// - liquid / clay 走 `app_style.dart` 的 `navActiveOf` 令牌
+///   （CSS `:284-286` / `:418-420`），都**不内联颜色**。
+///
+/// [style] 的默认值是 [AppStyle.frosted]：不传的调用点（含既有测试）
+/// 拿到改造前的画法。传风格的调用点（`NavIconBox` / `sidebar_nav.dart`）
+/// 从 `AppTheme.of(context).style` 取。
 ///
 /// 焦点框为什么用 [AppColors.accentText] 而不是 `accent`：焦点框要在**两种背景**
 /// 上都过 WCAG 的 3:1（非文本对比度）。`accent` #1D9BF0 压在暗色卡片 #4C4C4C 上
 /// 只有 2.85，而 `accentText`（暗 #57B9FF / 浅 #0F6FA8）在暗卡片上 3.99、
 /// 在浅卡片 #EDEDED 上 4.64，两端都够。
 /// 描边宽度恒为 1px（未聚焦时是透明描边），否则切换瞬间文字会跳格。
+///
+/// **左侧 3×15px 竖条**（三套 CSS 逐字节相同的那条）不在这里画：
+/// 它是几何而不是装饰参数，且两布局的锚定位置不同（侧边栏 `left:11px`、
+/// Dock 形态下对齐行头）——由侧边栏行与 Dock 图标格用 [NavActiveBar] 表达，
+/// 三套风格共用同一条，不作为区分点。
 BoxDecoration navItemDecoration(
   AppColors c, {
   required bool active,
   required bool hover,
   bool focused = false,
+  AppStyle style = AppStyle.frosted,
+  Brightness brightness = Brightness.light,
 }) {
   if (focused) {
     // 焦点框 = 1px 描边 + 向外撑 1.5px 的硬边。单圈 1px 在 125% 缩放下只有
@@ -163,9 +182,9 @@ BoxDecoration navItemDecoration(
       BoxShadow(color: c.accentText, blurRadius: 0, spreadRadius: 1.5),
     ];
     if (active) {
-      // 既选中又被聚焦：底色仍走 selectedDecoration（全应用选中底色只有那一个
-      // 出处），这里只把描边与柔光换成焦点框。
-      return selectedDecoration(c, radius: NavMetrics.radius)
+      // 既选中又被聚焦：底色仍走该风格的选中画法（frosted = selectedDecoration，
+      // liquid/clay = 同一套令牌底），这里只把描边与柔光换成焦点框。
+      return _activeDecorationFor(c, style, active: true, brightness: brightness)
           .copyWith(border: ring, boxShadow: hardGlow);
     }
     return BoxDecoration(
@@ -175,12 +194,73 @@ BoxDecoration navItemDecoration(
       boxShadow: hardGlow,
     );
   }
-  if (active) return selectedDecoration(c, radius: NavMetrics.radius);
+  if (active) {
+    return _activeDecorationFor(c, style, active: true, brightness: brightness);
+  }
   return BoxDecoration(
     color: hover ? c.surfaceCardHover : Colors.transparent,
     borderRadius: BorderRadius.circular(NavMetrics.radius),
     // 不激活也留一圈**透明**描边：描边要占 1px，省掉会让文字在悬停瞬间跳格
     border: Border.all(color: Colors.transparent, width: 1),
+  );
+}
+
+/// 按 [style] 取导航激活态装饰 —— **navItemDecoration 内部的唯一分流点**。
+///
+/// - frosted → [selectedDecoration]（唯一出处，行为与改造前逐字节一致）；
+/// - liquid / clay → `navActiveOf` 令牌（底色/渐变 + 内描边 + liquid 外发光），
+///   颜色全部来自 `lib/theme/app_style.dart`，这里只做组装。
+///
+/// 注意亮度取默认浅色档：激活态三套令牌的浅/深差异只来自 `--ac` 的取值
+/// （liquid `#5B6CFF`→`#7C8DFF`、clay `#C2410C`→`#EA580C`），而导航组件树
+/// 里 [AppColors] 不携带亮度。侧边栏 / Dock 传来的色板本身已按亮度选好，
+/// 激活态的深色变体经 [AppTheme.style] + 组件内 `_activeDecorationFor` 的
+/// 带 brightness 重载取（见 `navDecorationFor`）。
+BoxDecoration _activeDecorationFor(
+  AppColors c,
+  AppStyle style, {
+  required bool active,
+  Brightness brightness = Brightness.light,
+}) {
+  if (!active) {
+    return BoxDecoration(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(NavMetrics.radius),
+      border: Border.all(color: Colors.transparent, width: 1),
+    );
+  }
+  if (style == AppStyle.frosted) {
+    return selectedDecoration(c, radius: NavMetrics.radius);
+  }
+  final t = style.navActiveOf(brightness);
+  final radius = BorderRadius.circular(NavMetrics.radius);
+  final glow =
+      t.glow == null ? null : [kNavActiveGlow.copyWith(color: t.glow)];
+  return BoxDecoration(
+    gradient: t.gradient,
+    color: t.gradient == null ? t.color : null,
+    borderRadius: radius,
+    border: Border.all(color: t.borderColor, width: 1),
+    boxShadow: glow,
+  );
+}
+
+/// 亮度感知的导航装饰入口：组件（`NavIconBox` / 侧边栏行）在持有
+/// [BuildContext] 的地方用它，把 `AppTheme.of(context).brightness` 一并传入。
+BoxDecoration navDecorationFor(
+  BuildContext context, {
+  required bool active,
+  required bool hover,
+  bool focused = false,
+}) {
+  final t = AppTheme.of(context);
+  return navItemDecoration(
+    t.colors,
+    active: active,
+    hover: hover,
+    focused: focused,
+    style: t.style,
+    brightness: t.brightness,
   );
 }
 
@@ -243,6 +323,37 @@ class _NavFocusableState extends State<NavFocusable> {
               onTap: widget.onTap,
               child: widget.builder(context, _focused),
             ),
+    );
+  }
+}
+
+/// 左侧激活竖条 —— 3×15px 圆角胶囊，三套 CSS 逐字节相同的那条。
+///
+/// 出处：`app.css:288-292` / `:359-363` / `:422-426`
+/// `width:3px; height:15px; border-radius:999px; background:var(--ac)`，
+/// 位置 `left:11px; top:50%; translateY(-50%)`。
+/// **规格一致，不作为风格区分点** —— 这里只有一份实现，三套共用；
+/// 颜色取 [AppColors.accent]（= CSS `var(--ac)`）。
+class NavActiveBar extends StatelessWidget {
+  final bool active;
+
+  const NavActiveBar({super.key, required this.active});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppTheme.colorsOf(context);
+
+    return AnimatedOpacity(
+      opacity: active ? 1 : 0,
+      duration: const Duration(milliseconds: 160),
+      child: Container(
+        width: 3,
+        height: 15,
+        decoration: BoxDecoration(
+          color: c.accent,
+          borderRadius: BorderRadius.circular(999),
+        ),
+      ),
     );
   }
 }
@@ -392,6 +503,7 @@ class NavIconBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AppTheme.colorsOf(context);
+    final t = AppTheme.of(context);
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
@@ -399,11 +511,15 @@ class NavIconBox extends StatelessWidget {
       transform: hoverTransform,
       width: NavMetrics.iconBox,
       height: NavMetrics.iconBox,
+      // 经 AppTheme 取 style + brightness —— Dock 与侧边栏共用同一个
+      // navItemDecoration 分流（frosted → selectedDecoration）。
       decoration: navItemDecoration(
         c,
         active: active,
         hover: hover,
         focused: focused,
+        style: t.style,
+        brightness: t.brightness,
       ),
       child: NavIconContent(
         item: item,

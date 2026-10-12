@@ -388,3 +388,377 @@ extension AppStyleHoverTokens on AppStyle {
         (AppStyle.clay, Brightness.dark) => const Color(0x0FF5F0EB),
       };
 }
+
+// ══════════════════════════════════════════════════════════════
+// S5 · 导航激活态 / 侧边栏底色 / 按钮
+//
+// 取值**逐行取证自** `tools/ui/_redesign/preview/app.css`（每条注明行号）。
+//
+// 关键设计约束（既有测试钉着，不许破）：
+// 1. 选中底色**只有 `selectedDecoration` 一个出处** —— frosted（默认风格）的
+//    导航激活态**必须继续走它**（`appearance_controls_test` 源码层检查
+//    `contains('selectedDecoration(')`）；liquid / clay 是本批新增的取值，
+//    集中在这组令牌里，`navItemDecoration` 按风格分流。
+// 2. **竖条不进令牌**：三套 CSS 的左侧 3×15px 竖条逐字节相同（`:288-292` /
+//    `:359-363` / `:422-426`），它不是风格区分点，由 `nav_items.dart` 的
+//    既有结构表达，不在这里重复一份。
+// ══════════════════════════════════════════════════════════════
+
+/// 导航**激活态**装饰（侧边栏 / Dock 共用一份，经 `navItemDecoration`）。
+@immutable
+class StyleNavActive {
+  /// 激活底色。frosted 是纯色 12%（CSS `:356`）；liquid/clay 见下。
+  final Color color;
+
+  /// liquid 浅色用（`linear-gradient(135deg, …)`，CSS `:284`）。
+  /// 其余七套为 null（纯色，走 [color]）。
+  final Gradient? gradient;
+
+  /// 内描边（CSS `inset 0 0 0 1px …`）。
+  final Color borderColor;
+
+  /// 外发光（CSS `box-shadow` 里 `inset` 之外的那条）。**frosted / clay 没有**
+  /// （CSS `:357` / `:420` 只有内描边一条）—— 激活态「要发光」的老断言
+  /// 是对 frosted（旧默认）说的，frosted 分支继续走 `selectedDecoration`
+  /// 自带柔光；liquid 才有真正的外发光（`:286`）。
+  final Color? glow;
+
+  const StyleNavActive({
+    required this.color,
+    this.gradient,
+    required this.borderColor,
+    this.glow,
+  });
+
+  /// liquid · 浅色。CSS `:284-286`：
+  /// `linear-gradient(135deg, rgba(91,108,255,.20), rgba(139,92,246,.12))`
+  /// + `inset 0 0 0 1px rgba(91,108,255,.28), 0 4px 14px -8px var(--ac)`。
+  /// [color] 在有渐变时不被使用，但构造要求必填 —— 取渐变首色保持一致性。
+  static const liquidLight = StyleNavActive(
+    color: Color(0x335B6CFF),
+    gradient: LinearGradient(
+      begin: Alignment(-0.707, -0.707), // 135°
+      end: Alignment(0.707, 0.707),
+      colors: [Color(0x335B6CFF), Color(0x1F8B5CF6)],
+    ),
+    borderColor: Color(0x475B6CFF),
+    glow: Color(0xFF5B6CFF),
+  );
+
+  /// liquid · 深色。CSS 深色段（`:848`）只改了文字色，底/描边/发光沿用浅色
+  /// 令牌但按深色主色换算 —— `--ac: #7C8DFF`（`:831`）。
+  static const liquidDark = StyleNavActive(
+    color: Color(0x337C8DFF),
+    gradient: LinearGradient(
+      begin: Alignment(-0.707, -0.707),
+      end: Alignment(0.707, 0.707),
+      colors: [Color(0x337C8DFF), Color(0x1F9B7CFF)],
+    ),
+    borderColor: Color(0x477C8DFF),
+    glow: Color(0xFF7C8DFF),
+  );
+
+  /// frosted · 两亮度同值。CSS `:355-357`：纯色 12% + 仅内描边，**无外发光**。
+  /// 浅色/深色的 `--ac` 都是 `#1D9BF0`（`:330` / `:883`），alpha 也同（.12/.30）。
+  static const frosted = StyleNavActive(
+    color: Color(0x1F1D9BF0),
+    borderColor: Color(0x4D1D9BF0),
+  );
+
+  /// clay · 浅色。CSS `:418-420`：纯色 10% + 仅内描边，无外发光。
+  static const clayLight = StyleNavActive(
+    color: Color(0x1AC2410C),
+    borderColor: Color(0x42C2410C),
+  );
+
+  /// clay · 深色。CSS 深色 `--ac: #EA580C`（`:931`）。
+  static const clayDark = StyleNavActive(
+    color: Color(0x1AEA580C),
+    borderColor: Color(0x42EA580C),
+  );
+}
+
+/// 外发光阴影的几何常量（liquid 激活态专用，CSS `0 4px 14px -8px var(--ac)`）。
+const kNavActiveGlow = BoxShadow(
+  blurRadius: 14,
+  offset: Offset(0, 4),
+  spreadRadius: -8,
+  color: Colors.transparent, // color 由 StyleNavActive.glow 覆盖
+);
+
+/// 导航激活态令牌入口（[AppStyle] 的第五组扩展）。
+extension AppStyleNavTokens on AppStyle {
+  /// 激活态取值。**frosted 不在这里取** —— 它必须走 `selectedDecoration`
+  /// （选中底色唯一出处，`appearance_controls_test` 源码层检查着）；
+  /// 这个入口只服务 liquid / clay 两套新增画法。
+  StyleNavActive navActiveOf(Brightness brightness) =>
+      switch ((this, brightness)) {
+        (AppStyle.liquid, Brightness.light) => StyleNavActive.liquidLight,
+        (AppStyle.liquid, Brightness.dark) => StyleNavActive.liquidDark,
+        (AppStyle.clay, Brightness.light) => StyleNavActive.clayLight,
+        (AppStyle.clay, Brightness.dark) => StyleNavActive.clayDark,
+        _ => StyleNavActive.frosted, // 不可达：frosted 在调用点走 selectedDecoration
+      };
+}
+
+/// 侧边栏底色（CSS `.side`，含右分隔线随风格的有无）。
+@immutable
+class StyleSidebar {
+  /// 侧边栏底色（CSS `.side { background: … }`）。
+  final Color color;
+
+  /// liquid 浅色用（`linear-gradient(160deg, …)`，CSS `:255`）。
+  final Gradient? gradient;
+
+  /// 是否画右边分隔线（frosted / clay 的 CSS 带 `border-right: 1px solid var(--ln)`，
+  /// liquid 的不带 —— 它靠渐变自身收边）。
+  final bool borderRight;
+
+  const StyleSidebar({
+    required this.color,
+    this.gradient,
+    required this.borderRight,
+  });
+
+  /// liquid · 浅色。CSS `:255`
+  /// `linear-gradient(160deg, rgba(255,255,255,.5), rgba(255,255,255,.24))`。
+  static const liquidLight = StyleSidebar(
+    color: Colors.transparent,
+    gradient: LinearGradient(
+      begin: Alignment(-0.342, -0.940), // 160°
+      end: Alignment(0.342, 0.940),
+      colors: [Color(0x80FFFFFF), Color(0x3DFFFFFF)],
+    ),
+    borderRight: false,
+  );
+
+  /// liquid · 深色。CSS `:841`（白 .07 → .028）。
+  static const liquidDark = StyleSidebar(
+    color: Colors.transparent,
+    gradient: LinearGradient(
+      begin: Alignment(-0.342, -0.940),
+      end: Alignment(0.342, 0.940),
+      colors: [Color(0x12FFFFFF), Color(0x07FFFFFF)],
+    ),
+    borderRight: false,
+  );
+
+  /// frosted · 浅色。CSS `:336` `rgba(255,255,255,.55)` + 右分隔线。
+  static const frostedLight = StyleSidebar(
+    color: Color(0x8CFFFFFF),
+    borderRight: true,
+  );
+
+  /// frosted · 深色。CSS `:888` 白 .05 + 右分隔线。
+  static const frostedDark = StyleSidebar(
+    color: Color(0x0DFFFFFF),
+    borderRight: true,
+  );
+
+  /// clay · 浅色。CSS `:402` `#f3ece4` + 右分隔线。
+  static const clayLight = StyleSidebar(
+    color: Color(0xFFF3ECE4),
+    borderRight: true,
+  );
+
+  /// clay · 深色。CSS `:935` `#2A231D` + 右分隔线。
+  static const clayDark = StyleSidebar(
+    color: Color(0xFF2A231D),
+    borderRight: true,
+  );
+}
+
+/// 侧边栏底色令牌入口。
+extension AppStyleSidebarTokens on AppStyle {
+  StyleSidebar sidebarOf(Brightness brightness) =>
+      switch ((this, brightness)) {
+        (AppStyle.liquid, Brightness.light) => StyleSidebar.liquidLight,
+        (AppStyle.liquid, Brightness.dark) => StyleSidebar.liquidDark,
+        (AppStyle.frosted, Brightness.light) => StyleSidebar.frostedLight,
+        (AppStyle.frosted, Brightness.dark) => StyleSidebar.frostedDark,
+        (AppStyle.clay, Brightness.light) => StyleSidebar.clayLight,
+        (AppStyle.clay, Brightness.dark) => StyleSidebar.clayDark,
+      };
+}
+
+/// 按钮装饰随风格变（CSS `.btn` / `.btn.primary`）。
+///
+/// 改造前按钮没有独立令牌，全应用共用一套 `FilledButton.styleFrom` 取值；
+/// 这组令牌是 S5 的新增维度。**几何**（圆角档位、高度）不在这里 —— 那是
+/// [AppRadius] 的事，这里只管「面 / 边 / 影」。
+@immutable
+class StyleButton {
+  final Color color;
+
+  /// liquid / clay 主按钮用（`linear-gradient(135deg, var(--ac), var(--ac2))`）。
+  final Gradient? primaryGradient;
+
+  /// 主按钮底色（frosted 是实色 `var(--ac)`，无渐变）。
+  final Color? primaryColor;
+
+  final Color borderColor;
+
+  /// 普通按钮阴影（CSS 每套一条）。
+  final BoxShadow shadow;
+
+  /// 主按钮阴影（CSS 每套一条）。
+  final BoxShadow primaryShadow;
+
+  /// 主按钮顶边高光（liquid 的 `inset 0 1px 0 rgba(255,255,255,.35)`；
+  /// Flutter 无 inset shadow，取叠加一条 1px 顶描边的近似 —— 偏差如实记录）。
+  final Color? primaryTopHighlight;
+
+  const StyleButton({
+    required this.color,
+    this.primaryGradient,
+    this.primaryColor,
+    required this.borderColor,
+    required this.shadow,
+    required this.primaryShadow,
+    this.primaryTopHighlight,
+  });
+
+  /// liquid · 浅色。CSS `:293-302`。
+  static const liquidLight = StyleButton(
+    color: Color(0xB3FFFFFF), // rgba(255,255,255,.7)
+    primaryGradient: LinearGradient(
+      begin: Alignment(-0.707, -0.707),
+      end: Alignment(0.707, 0.707),
+      colors: [Color(0xFF5B6CFF), Color(0xFF8B5CF6)],
+    ),
+    borderColor: Color(0xD9FFFFFF), // rgba(255,255,255,.85)
+    shadow: BoxShadow(
+      color: Color(0x4D362650), // 0 3px 10px -6px rgba(38,38,80,.3)
+      offset: Offset(0, 3),
+      blurRadius: 10,
+      spreadRadius: -6,
+    ),
+    primaryShadow: BoxShadow(
+      color: Color(0xFF5B6CFF), // 0 10px 26px -10px var(--ac)
+      offset: Offset(0, 10),
+      blurRadius: 26,
+      spreadRadius: -10,
+    ),
+    primaryTopHighlight: Color(0x59FFFFFF),
+  );
+
+  /// liquid · 深色。CSS `:849` 只改了面与边（.07 白 / 边 .12）；
+  /// 主按钮深色段未覆盖，沿用浅色渐变（`--ac` 深色即 `#7C8DFF`，由
+  /// 色板派的渐变在此处无法逐字节复刻 CSS —— CSS 深色本就没写）。
+  static const liquidDark = StyleButton(
+    color: Color(0x12FFFFFF),
+    primaryGradient: LinearGradient(
+      begin: Alignment(-0.707, -0.707),
+      end: Alignment(0.707, 0.707),
+      colors: [Color(0xFF7C8DFF), Color(0xFF9B7CFF)],
+    ),
+    borderColor: Color(0x1FFFFFFF),
+    shadow: BoxShadow(
+      color: Color(0x00000000), // 深色段未给 .btn 阴影，取无
+      offset: Offset(0, 3),
+      blurRadius: 10,
+      spreadRadius: -6,
+    ),
+    primaryShadow: BoxShadow(
+      color: Color(0xFF7C8DFF),
+      offset: Offset(0, 10),
+      blurRadius: 26,
+      spreadRadius: -10,
+    ),
+    primaryTopHighlight: Color(0x35FFFFFF),
+  );
+
+  /// frosted · 浅色。CSS `:364-370`：白 .9 + `var(--ln)` 边 + 单条小影；
+  /// 主按钮实色 `var(--ac)`。
+  static const frostedLight = StyleButton(
+    color: Color(0xE6FFFFFF),
+    primaryColor: Color(0xFF1D9BF0),
+    borderColor: Color(0x1A101014),
+    shadow: BoxShadow(
+      color: Color(0x0D101014), // 0 1px 2px rgba(16,16,20,.05)
+      offset: Offset(0, 1),
+      blurRadius: 2,
+    ),
+    primaryShadow: BoxShadow(
+      color: Color(0xFF1D9BF0), // 0 6px 18px -8px var(--ac)
+      offset: Offset(0, 6),
+      blurRadius: 18,
+      spreadRadius: -8,
+    ),
+  );
+
+  /// frosted · 深色。CSS `:898`：白 .08 面、`--ln` 边（rgba(242,242,244,.12)）。
+  static const frostedDark = StyleButton(
+    color: Color(0x14FFFFFF),
+    primaryColor: Color(0xFF1D9BF0),
+    borderColor: Color(0x1FF2F2F4),
+    shadow: BoxShadow(
+      color: Color(0x00000000), // 深色段未给 .btn 阴影
+      offset: Offset(0, 1),
+      blurRadius: 2,
+    ),
+    primaryShadow: BoxShadow(
+      color: Color(0xFF1D9BF0),
+      offset: Offset(0, 6),
+      blurRadius: 18,
+      spreadRadius: -8,
+    ),
+  );
+
+  /// clay · 浅色。CSS `:427-435`：#fffdfa 面 + `var(--ln)` 边 + 小影；
+  /// 主按钮渐变 `--ac→--ac2`。
+  static const clayLight = StyleButton(
+    color: Color(0xFFFFFDFA),
+    primaryGradient: LinearGradient(
+      begin: Alignment(-0.707, -0.707),
+      end: Alignment(0.707, 0.707),
+      colors: [Color(0xFFC2410C), Color(0xFFEA580C)],
+    ),
+    borderColor: Color(0x172B2622),
+    shadow: BoxShadow(
+      color: Color(0x0F574E46), // 0 1px 2px rgba(87,78,70,.06)
+      offset: Offset(0, 1),
+      blurRadius: 2,
+    ),
+    primaryShadow: BoxShadow(
+      color: Color(0xFFC2410C), // 0 8px 20px -10px var(--ac)
+      offset: Offset(0, 8),
+      blurRadius: 20,
+      spreadRadius: -10,
+    ),
+  );
+
+  /// clay · 深色。CSS `:945` `#2F2720` 面 + `--ln` 边。
+  static const clayDark = StyleButton(
+    color: Color(0xFF2F2720),
+    primaryGradient: LinearGradient(
+      begin: Alignment(-0.707, -0.707),
+      end: Alignment(0.707, 0.707),
+      colors: [Color(0xFFEA580C), Color(0xFFF97316)],
+    ),
+    borderColor: Color(0x1FF5F0EB),
+    shadow: BoxShadow(
+      color: Color(0x00000000), // 深色段未给 .btn 阴影
+      offset: Offset(0, 1),
+      blurRadius: 2,
+    ),
+    primaryShadow: BoxShadow(
+      color: Color(0xFFEA580C),
+      offset: Offset(0, 8),
+      blurRadius: 20,
+      spreadRadius: -10,
+    ),
+  );
+}
+
+/// 按钮令牌入口。
+extension AppStyleButtonTokens on AppStyle {
+  StyleButton buttonOf(Brightness brightness) => switch ((this, brightness)) {
+        (AppStyle.liquid, Brightness.light) => StyleButton.liquidLight,
+        (AppStyle.liquid, Brightness.dark) => StyleButton.liquidDark,
+        (AppStyle.frosted, Brightness.light) => StyleButton.frostedLight,
+        (AppStyle.frosted, Brightness.dark) => StyleButton.frostedDark,
+        (AppStyle.clay, Brightness.light) => StyleButton.clayLight,
+        (AppStyle.clay, Brightness.dark) => StyleButton.clayDark,
+      };
+}

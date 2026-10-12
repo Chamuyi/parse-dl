@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/l10n.dart';
+import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 import 'app_card.dart';
 import 'nav_items.dart';
@@ -57,13 +58,30 @@ class SidebarNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final th = AppTheme.of(context);
+    final side = th.style.sidebarOf(th.brightness);
+
     return SizedBox(
       width: width,
-      child: AppFloat(
-        radius: 16,
-        // 与 Dock 同一套内边距语言
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Column(
+      child: DecoratedBox(
+        // 侧边栏底色随风格（S5，CSS `.side`）：包在 AppFloat 外面铺该风格的
+        // `.side` 底 —— AppFloat 的浮层材质（模糊/阴影/圆角）原样保留，
+        // 只在它背后垫风格底色。frosted/clay 是实色，liquid 是渐变；
+        // frosted/clay 另有右分隔线（CSS `border-right: 1px solid var(--ln)`）。
+        decoration: BoxDecoration(
+          color: side.gradient == null ? side.color : null,
+          gradient: side.gradient,
+          border: side.borderRight
+              ? Border(
+                  right: BorderSide(color: th.colors.line, width: 1),
+                )
+              : null,
+        ),
+        child: AppFloat(
+          radius: 16,
+          // 与 Dock 同一套内边距语言
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Logo —— 与 Dock 的第一个元素同源、同尺寸
@@ -134,6 +152,7 @@ class SidebarNav extends StatelessWidget {
             ),
           ],
         ),
+        ),
       ),
     );
   }
@@ -167,6 +186,7 @@ class _SidebarGroupHeaderState extends State<_SidebarGroupHeader> {
   @override
   Widget build(BuildContext context) {
     final c = AppTheme.colorsOf(context);
+    final th = AppTheme.of(context);
     final color = widget.activeInGroup
         ? c.accent
         : navIconColor(c, active: false, hover: _hover);
@@ -198,6 +218,8 @@ class _SidebarGroupHeaderState extends State<_SidebarGroupHeader> {
                 active: false,
                 hover: _hover,
                 focused: focused,
+                style: th.style,
+                brightness: th.brightness,
               ),
               child: Row(
                 children: [
@@ -302,6 +324,7 @@ class _SidebarNavRowState extends State<_SidebarNavRow> {
   @override
   Widget build(BuildContext context) {
     final c = AppTheme.colorsOf(context);
+    final th = AppTheme.of(context);
 
     return NavFocusable(
       focusLabel: 'nav:${widget.item.id}',
@@ -340,6 +363,8 @@ class _SidebarNavRowState extends State<_SidebarNavRow> {
                     active: widget.active,
                     hover: _hover,
                     focused: focused,
+                    style: th.style,
+                    brightness: th.brightness,
                   ),
                   child: Row(
                     children: [
@@ -384,6 +409,16 @@ class _SidebarNavRowState extends State<_SidebarNavRow> {
                   top: 0,
                   bottom: 0,
                   child: Center(child: NavIndicatorDot(active: widget.active)),
+                ),
+
+                // 左侧激活竖条（CSS `:288-292`/`:359-363`/`:422-426` 三套逐字节
+                // 相同的 3×15px 胶囊，规格一致不是风格区分点，但不许丢）。
+                // 锚定 left:11px：行 padding 非缩进为 8，竖条画在行框内左缘。
+                Positioned(
+                  left: 11,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(child: NavActiveBar(active: widget.active)),
                 ),
               ],
             ),

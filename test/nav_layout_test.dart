@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:parse_dl/models/settings.dart';
 import 'package:parse_dl/services/settings_store.dart';
+import 'package:parse_dl/theme/app_style.dart';
 import 'package:parse_dl/theme/app_theme.dart';
 import 'package:parse_dl/theme/window_material.dart';
 import 'package:parse_dl/widgets/dock.dart';
@@ -256,6 +257,7 @@ void main() {
     test('navItemDecoration 是两种布局共用的唯一装饰来源', () {
       const c = AppColors.dark;
 
+      // frosted（默认风格）激活态 = selectedDecoration 的现值（选中底色唯一出处）。
       final active = navItemDecoration(c, active: true, hover: false);
       expect(active.color, c.accentSoft);
       expect((active.border as Border).top.color, c.accentLine);
@@ -269,6 +271,34 @@ void main() {
       final idle = navItemDecoration(c, active: false, hover: false);
       expect(idle.color, Colors.transparent);
       expect(idle.boxShadow, isNull);
+    });
+
+    test('激活态随风格两两不同（frosted=纯色12%无外发光 / liquid=渐变+发光 / clay=纯色10%）', () {
+      const c = AppColors.dark;
+
+      final frosted =
+          navItemDecoration(c, active: true, hover: false, style: AppStyle.frosted);
+      final liquid =
+          navItemDecoration(c, active: true, hover: false, style: AppStyle.liquid);
+      final clay =
+          navItemDecoration(c, active: true, hover: false, style: AppStyle.clay);
+
+      // frosted 仍走 selectedDecoration：底 = accentSoft，有柔光
+      expect(frosted.color, c.accentSoft);
+      expect(frosted.boxShadow, isNotNull, reason: 'frosted 沿用旧画法，要发光');
+      // liquid 是渐变 + 外发光，没有纯色底
+      expect(liquid.gradient, isNotNull);
+      expect(liquid.color, isNull);
+      expect(liquid.boxShadow, isNotNull, reason: 'liquid 有外发光（CSS :286）');
+      // clay 是纯色、无外发光（CSS :420 只有内描边）
+      expect(clay.gradient, isNull);
+      expect(clay.color, isNotNull);
+      expect(clay.boxShadow, isNull, reason: 'clay 无外发光（CSS :420）');
+
+      // 两两不同（逐字段比较 BoxDecoration）
+      expect(frosted == liquid, isFalse);
+      expect(frosted == clay, isFalse);
+      expect(liquid == clay, isFalse);
     });
 
     test('navIconColor 是两种布局共用的唯一取色来源', () {
