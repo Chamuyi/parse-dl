@@ -384,15 +384,17 @@ void main() {
     testWidgets('分隔线：Dock 竖向、侧边栏横向，且都分隔出模块边界', (tester) async {
       await tester.pumpWidget(_navHarness(NavLayout.dock));
       var dividers = tester.widgetList<NavDivider>(find.byType(NavDivider));
-      // Logo 后 1 条 + 每个模块后各 1 条 —— 三个模块就是 4 条
-      expect(dividers.length, 1 + kNavGroups.length,
-          reason: 'Dock 靠分隔线体现每个模块各自独立');
+      // Logo 后 1 条 + 置顶项后 1 条 + 每个模块后各 1 条 —— 三个模块就是 5 条
+      expect(dividers.length, 2 + kNavGroups.length,
+          reason: 'Dock 靠分隔线体现每个模块各自独立（置顶项与模块之间也有一条）');
       expect(dividers.every((d) => d.axis == Axis.vertical), isTrue);
 
       await tester.pumpWidget(_navHarness(NavLayout.sidebar));
       dividers = tester.widgetList<NavDivider>(find.byType(NavDivider));
-      // Logo 后 1 条 + 模块区与全局项之间 1 条 = 2（侧边栏靠标题行分模块，不再逐组加线）
-      expect(dividers.length, 2);
+      // Logo 后 1 条 + 置顶项与模块区之间 1 条 + 模块区与全局项之间 1 条 = 3
+      // （侧边栏靠**标题行**分模块，不再逐组加线；置顶项没有标题行，
+      //   所以它与三个模块之间需要一条线把「总览」和模块入口分开）
+      expect(dividers.length, 3);
       expect(dividers.every((d) => d.axis == Axis.horizontal), isTrue);
     });
 
@@ -523,8 +525,12 @@ void main() {
 ///
 /// 「解析下载」「下载管理」这几个标签是跨模块同名的（每个模块都有自己那一行），
 /// 写死 1 会在加第三个模块时误报，写死 2 又会在收起某组时误报 —— 所以按数据算。
+/// `kNavPrimary`（置顶的「总览」）没有展开态，恒显示一行，所以无条件计入。
 int labelCount(String label, {Set<String> collapsed = const {}}) {
   var n = 0;
+  for (final p in kNavPrimary) {
+    if (p.label == label) n++;
+  }
   for (final g in kNavGroups) {
     if (g.label == label) n++;
     if (collapsed.contains(g.id)) continue;

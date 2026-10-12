@@ -50,6 +50,38 @@ const Map<String, String> kStringsEn = {
       'Mica requires Windows 11 and acrylic requires Windows 10 1809 or newer. '
       'Unsupported systems fall back to a solid background.',
   '界面风格': 'Interface style',
+  // 「总览」是首个导航项（置顶，不属于三个模块），也是标题栏文案。
+  '总览': 'Overview',
+  // 总览页（dashboard_page.dart）的文案。
+  '进行中': 'In progress',
+  '下载台账': 'Download ledger',
+  '磁盘占用': 'Disk usage',
+  '下载引擎就绪': 'Download engine ready',
+  '下载引擎未就绪': 'Download engine not ready',
+  '快捷开始': 'Quick start',
+  '点一下直达': 'One tap to jump there',
+  '最近活动': 'Recent activity',
+  '来自下载任务': 'From download tasks',
+  '还没有下载任务': 'No download tasks yet',
+  '等待中': 'Waiting',
+  '排队中': 'Queued',
+  '已暂停': 'Paused',
+  '模块状态': 'Module status',
+  '进行中 / 已下载': 'In progress / downloaded',
+  '下载引擎': 'Download engine',
+  '正在下载': 'Downloading',
+  '任务总数': 'Total tasks',
+  'aria2 正在运行': 'aria2 is running',
+  '环境': 'Environment',
+  '未初始化': 'Not initialised',
+  '日志': 'Logs',
+  '已开启': 'On',
+  '已关闭': 'Off',
+  // 统计卡的数字量词。中文是「3 个 / 3 条」，英文不加量词 ——
+  // 留空串而不是删条目：`l10n_test` 要求每个 t() 的中文都有对照，
+  // 且空串在拼装处自然消失（数字与单位之间不加空格由调用方处理）。
+  '个': '',
+  '条': '',
   '卡片用哪种材质表达：液体玻璃最透亮、磨砂清晰最清楚、陶土柔和是实心面。切换后立即生效，并在下次启动时保留。':
       'How cards express their material: liquid glass is the most translucent, '
       'frosted stays the clearest, and clay is a solid surface. Takes effect '

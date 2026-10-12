@@ -83,6 +83,7 @@ void main() {
 
     test('kNavItems 仍然覆盖全部条目（Dock 还在读它）', () {
       final flat = [
+        for (final p in kNavPrimary) p,
         for (final g in kNavGroups) ...g.children,
         ...kNavStandalone,
       ].map((e) => e.id).toList();

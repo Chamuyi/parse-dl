@@ -9,6 +9,7 @@ import 'pages/about_page.dart';
 import 'pages/auto_task_page.dart';
 import 'pages/bili_batch_page.dart';
 import 'pages/bili_page.dart';
+import 'pages/dashboard_page.dart';
 import 'pages/download_management_page.dart';
 import 'pages/douyin_auto_page.dart';
 import 'pages/douyin_page.dart';
@@ -208,6 +209,9 @@ class _AppShell extends StatefulWidget {
 /// [IndexedStack] 的 children 顺序由 `_visited`（首次访问顺序）决定，
 /// 原因见 `_visited` 的注释。
 const List<String> kAppRoutes = [
+  // 首页「总览」排在第一个：它是软件打开时的默认落地页
+  // （`_AppShellState._routeId` / `_visited` 的初值都是它）。
+  'dashboard',
   'home',
   'douyin',
   'douyin-downloads',
@@ -244,7 +248,11 @@ const List<String> kAppRoutes = [
 
 class _AppShellState extends State<_AppShell> {
   /// 当前选中的页面（导航 id）。
-  String _routeId = 'home';
+  ///
+  /// **初值必须是 `dashboard`**：它是软件打开时的落地页。改这里的同时
+  /// [_visited] 的初值也要跟着改（否则首帧 `keepAliveStack` 找不到
+  /// `dashboard` → 退回单页渲染，保活在第一个页面上就失效）。
+  String _routeId = 'dashboard';
 
   /// **已经打开过的**路由，**按首次访问顺序**排列 —— 这就是保活的依据。
   ///
@@ -266,7 +274,10 @@ class _AppShellState extends State<_AppShell> {
   ///
   /// 保活的代价是 WebView 常驻内存，所以**只保活访问过的**：没点进去过的路由
   /// 仍然不构造（启动时不会一次性建出三个 WebView）。
-  final List<String> _visited = ['home'];
+  ///
+  /// 初值 = 落地页 `dashboard`：首帧它已经是「当前页」，必须同时在已访问列表里，
+  /// 否则 `keepAliveStack` 返回 null、退回单页渲染。
+  final List<String> _visited = ['dashboard'];
 
   void _setRoute(String id) => setState(() {
     _routeId = id;
@@ -429,6 +440,9 @@ class _AppShellState extends State<_AppShell> {
   /// 单个路由 → 页面组件。**只有这里知道路由与页面的对应关系**。
   Widget _pageFor(BuildContext context, String id) {
     switch (id) {
+      case 'dashboard':
+        // 首页「总览」：默认落地页，快捷开始用 `_setRoute` 跳到各模块
+        return DashboardPage(onNavigate: _setRoute);
       case 'home':
         return HomepagePage(onNavigate: _setRoute);
       case 'douyin':
@@ -509,6 +523,7 @@ class _AppShellState extends State<_AppShell> {
   /// 每条分支各自过 `t()`：`test/l10n_test.dart` 靠扫 `t('…')` 字面量来保证
   /// 英文表覆盖齐全，整串外面再套一个 `t(switch …)` 它就扫不到了。
   String _titleOf(String id) => switch (id) {
+    'dashboard' => t('总览'),
     'home' => t('主页'),
     'download-management' => t('下载管理'),
     'auto-task' => t('自动执行'),

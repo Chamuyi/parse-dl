@@ -262,6 +262,9 @@ final d = t(variable);
       // 导航的 label 是 `const` 数据，渲染处才 t(label) —— 上一条测试扫的是
       // 字面量形式的调用点，扫不到这种「变量传进 t()」的路径，所以单独查。
       preferredLocale = AppLocale.en;
+      for (final c in kNavPrimary) {
+        expect(t(c.label), isNot(c.label), reason: '置顶项「${c.label}」没有英文对照');
+      }
       for (final g in kNavGroups) {
         expect(t(g.label), isNot(g.label), reason: '模块「${g.label}」没有英文对照');
         for (final c in g.children) {
@@ -355,6 +358,7 @@ final d = t(variable);
       // 已加宽到 252）。这条测试守的是"有人把侧边栏改窄到连中文都放不下"。
       await pumpSidebar(tester);
       final labels = <String>[
+        ...kNavPrimary.map((c) => c.label),
         for (final g in kNavGroups) ...[g.label, ...g.children.map((c) => c.label)],
         ...kNavStandalone.map((c) => c.label),
       ];

@@ -57,10 +57,15 @@ void main() {
   /// 组成：① 上下边框 2 + 左右 padding 16 ② Logo 28 ③ Logo 后那条分隔线 9
   /// （1px 线 + 左右各 4 边距）④ 每个模块 = 单字徽标 22 + 5 + 每项 40
   /// （36 图标格 + 左右各 2）+ 组尾分隔线 9 ⑤ 全局项每项 40。
+  /// ⑥ 置顶项（`kNavPrimary`）每项 40 + 它后面那条分隔线 9 —— 「总览」排在
+  /// 三个模块之前，与模块尾一样跟一条竖向分隔线（见 `dock.dart` 的渲染顺序）。
   /// 写死数字的话，加第三个模块就得回来改一次；按数据算才是这条断言真正想说的
   /// 「宽度只由这些常量决定，没被气泡/指示点撑歪」。
   double dockNaturalWidth() {
     double w = 2 + 16 + 28 + 9;
+    for (final _ in kNavPrimary) {
+      w += 40.0 + 9;
+    }
     for (final g in kNavGroups) {
       w += 22 + 5 + 40.0 * g.children.length + 9;
     }
@@ -154,7 +159,11 @@ void main() {
     const gap = iconSize + 4;
 
     // 同一模块内部：相邻图标恒为 40px（这是「未被指示点/气泡撑歪」的原断言）
-    var idx = 0;
+    //
+    // 下标从 `kNavPrimary.length` 起 —— Dock 里置顶项（总览）平铺在三个模块
+    // **之前**，若不跳过它，`dxs[0]` 就是总览、`dxs[1]` 是 X 组的第一个图标，
+    // 两者之间隔着一条分隔线（76px），第一条断言会误报成「模块内间距不对」。
+    var idx = kNavPrimary.length;
     for (final g in kNavGroups) {
       for (var i = 1; i < g.children.length; i++) {
         expect(
@@ -166,8 +175,15 @@ void main() {
       idx += g.children.length;
     }
 
+    // 置顶项与第一个模块之间也要有分隔线
+    expect(
+      dxs[kNavPrimary.length] - dxs[kNavPrimary.length - 1],
+      greaterThan(gap),
+      reason: '置顶项与第一个模块之间要有分隔线把它拉开',
+    );
+
     // 模块之间 / 最后一个模块与全局项之间：隔着一条竖向分隔线，必须大于组内间距
-    var offset = 0;
+    var offset = kNavPrimary.length;
     for (final g in kNavGroups) {
       offset += g.children.length;
       expect(

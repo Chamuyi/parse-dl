@@ -83,6 +83,18 @@ class SidebarNav extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      // ⓪ 置顶项（总览）—— 不属于任何模块，软件打开就落在它上面。
+                      //    渲染在三个模块**之前**，并跟一条分隔线划开。
+                      for (final item in kNavPrimary)
+                        _SidebarNavRow(
+                          item: item,
+                          active: item.id == currentRouteId,
+                          showDot: false,
+                          onTap: () => onSelect(item.id),
+                        ),
+
+                      const NavDivider(axis: Axis.horizontal),
+
                       // ① 两个下载模块 —— 每个模块是**一个可点击展开的入口**，
                       //    点标题行展开/收起它自己，两个模块互不影响。
                       for (final g in kNavGroups) ...[

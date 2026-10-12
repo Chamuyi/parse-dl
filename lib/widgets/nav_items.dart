@@ -69,6 +69,16 @@ const kNavGroups = <NavGroup>[
   ], 'B'),
 ];
 
+/// 不属于任何模块、且**置顶**展示的项（当前只有「总览」）。
+///
+/// 为什么单独一个列表而不是塞进 [kNavGroups]：那个列表的语义是
+/// 「三个下载模块」，`test/nav_groups_test.dart` 钉着「正好三组」。
+/// 为什么不是 [kNavStandalone]：那个列表渲染在三个模块**下面**，
+/// 而总览要置顶（软件打开就落在它上面）。
+const kNavPrimary = <NavItem>[
+  NavItem('dashboard', '总览', Icons.space_dashboard_rounded),
+];
+
 /// 不属于任何模块的**全局**项（侧边栏里排在三个模块下面）。
 const kNavStandalone = <NavItem>[
   // 三条都叫「设置」时，Dock 形态下两个滑杆图标 + 相同气泡文字根本分不出
@@ -77,12 +87,13 @@ const kNavStandalone = <NavItem>[
   NavItem('about', '关于', Icons.info_rounded),
 ];
 
-/// 扁平的「全部导航项」= 两个模块的子项 + 全局项。
+/// 扁平的「全部导航项」= 置顶项 + 三个模块的子项 + 全局项。
 ///
 /// Dock（`widgets/dock.dart`）用它 —— 图标式导航没有展开层级，
 /// 所以直接平铺，靠组间分隔线体现模块边界。
 /// 保留这个名字，另一个原因是「当前页标题」等处也在用。
 final kNavItems = <NavItem>[
+  ...kNavPrimary,
   for (final g in kNavGroups) ...g.children,
   ...kNavStandalone,
 ];

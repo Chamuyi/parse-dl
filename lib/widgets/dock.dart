@@ -71,6 +71,18 @@ class Dock extends StatelessWidget {
 
           const NavDivider(axis: Axis.vertical, length: 24),
 
+          // ⓪ 置顶项（总览）—— 不属于任何模块，软件打开就落在它上面。
+          //    Dock 是图标式导航，这里直接平铺在三个模块之前。
+          for (final item in kNavPrimary)
+            _DockIcon(
+              item: item,
+              active: item.id == currentRouteId,
+              showDot: false,
+              onTap: () => onSelect(item.id),
+            ),
+
+          const NavDivider(axis: Axis.vertical, length: 24),
+
           // 两个下载模块的图标。Dock 是图标式导航、没有展开层级，
           // 所以直接平铺，靠**组间分隔线** + 每组开头的**单字徽标**
           // 体现「两个模块各自独立」—— 光有分隔线时，两组图标长得几乎一样
