@@ -31,6 +31,7 @@ void main() {
   Future<SettingsStore> pumpPage(
     WidgetTester tester, {
     SettingsScope scope = SettingsScope.global,
+    void Function(String routeId)? onNavigate,
   }) async {
     // 画布要够高：`ListView` 懒构建，画布只放得下前半截时后面的分区不在树上。
     tester.view.physicalSize = const Size(1200, 4000);
@@ -58,6 +59,7 @@ void main() {
                 brightness: Brightness.dark,
                 onMaterialChanged: (_) async {},
                 scope: scope,
+                onNavigate: onNavigate,
               ),
             ),
           ),
@@ -156,6 +158,70 @@ void main() {
   });
 
   // ══════════════════════════════════════════════════════════
+  // 二、P5-2：全局设置的分模块入口有三个
+  // ══════════════════════════════════════════════════════════
+  group('P5-2 分模块设置入口', () {
+    testWidgets('三个入口都在，且各自跳到对应的设置页', (tester) async {
+      final opened = <String>[];
+      await pumpPage(tester, onNavigate: opened.add);
+
+      await tester.tap(find.text('分模块设置'));
+      await tester.pumpAndSettle();
+
+      final inSection = find.descendant(
+        of: find.byKey(contentKey('section.module_settings')),
+        matching: find.text('打开'),
+      );
+      expect(inSection, findsNWidgets(3), reason: 'X / 抖音 / B 站 三个入口，一个都不能少');
+
+      // 三个入口都在这一块里（模块名逐个点名 —— 少一个就红）
+      for (final name in ['X 下载', '抖音解析下载', 'B 站解析下载']) {
+        expect(
+          find.descendant(
+            of: find.byKey(contentKey('section.module_settings')),
+            matching: find.text(name),
+          ),
+          findsOneWidget,
+          reason: '分模块设置里必须有「$name」这个入口',
+        );
+      }
+
+      // 跳转方式一致：都是同一个 onNavigate，按**显示顺序**传三个路由 id
+      for (var i = 0; i < 3; i++) {
+        await tester.tap(inSection.at(i));
+        await tester.pumpAndSettle();
+      }
+      expect(
+        opened,
+        ['x-settings', 'douyin-settings', 'bili-settings'],
+        reason: '三个入口必须分别跳各自的设置页（顺序 = 页面里的显示顺序）',
+      );
+    });
+
+    testWidgets('没有跨页能力时按钮置灰而不是消失（三个入口仍可见）', (tester) async {
+      await pumpPage(tester);
+
+      await tester.tap(find.text('分模块设置'));
+      await tester.pumpAndSettle();
+
+      final inSection = find.descendant(
+        of: find.byKey(contentKey('section.module_settings')),
+        matching: find.text('打开'),
+      );
+      expect(inSection, findsNWidgets(3), reason: '按钮不该因为点不动就消失');
+
+      for (var i = 0; i < 3; i++) {
+        final btn = tester.widget<FilledButton>(
+          find
+              .ancestor(of: inSection.at(i), matching: find.byType(FilledButton))
+              .first,
+        );
+        expect(btn.onPressed, isNull, reason: '没有 onNavigate 时按钮应当置灰');
+      }
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════
   // 三、新文案的英文对照
   // ══════════════════════════════════════════════════════════
   group('新文案有英文', () {
@@ -165,7 +231,11 @@ void main() {
       //
       // 这里**不能**用 `t(key)` 断言：`t()` 走的是当前语言档，测试里默认是
       // 中文档（原样返回），拿它比会永远等于原文 —— 直接查表才判得动。
-      for (final key in const ['接口缓存']) {
+      for (final key in const [
+        '接口缓存',
+        '分模块设置',
+        'X 下载、抖音解析下载、B 站解析下载各自的设置页入口',
+      ]) {
         expect(kStringsEn.containsKey(key), isTrue, reason: '「$key」缺英文对照');
         expect(
           kStringsEn[key],

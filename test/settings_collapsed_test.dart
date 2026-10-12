@@ -29,10 +29,11 @@ void main() {
   /// 全局设置页该有的分区（账号已挪到 X 下载模块）
   ///
   /// 「高级」那个分区原本只装一项「刷新 X 接口缓存」—— 接口缓存搬到 X 设置页后
-  /// 它就成了空壳，所以整块去掉。
+  /// 它就成了空壳，所以整块去掉，全局页换成「分模块设置」入口。
   const globalSectionIds = <String>[
     'section.appearance',
     'section.proxy',
+    'section.module_settings',
     'section.app',
   ];
 
@@ -58,6 +59,7 @@ void main() {
     'section.douyin': '下载源、质量优先策略、图片格式、批量与筛选选项',
     'section.bili': '画质上限、编码偏好、下载完合并、命名模板',
     'section.proxy': '启用代理、使用系统代理、自定义代理地址、连通性测试',
+    'section.module_settings': 'X 下载、抖音解析下载、B 站解析下载各自的设置页入口',
     'section.app': '日志记录、日志目录与文件',
   };
 
@@ -320,13 +322,13 @@ void main() {
     testWidgets('分区标题都在，动作文案统一是「展开」', (tester) async {
       await pumpPage(tester);
 
-      for (final t in ['外观', '代理', '应用']) {
+      for (final t in ['外观', '代理', '分模块设置', '应用']) {
         expect(find.text(t), findsOneWidget, reason: '分区「$t」的标题不能丢');
       }
 
-      // 三个普通分区 —— 「展开诊断工具」那个特例已经统一掉，
+      // 四个普通分区 —— 「展开诊断工具」那个特例已经统一掉，
       // 动作文案现在全站只有一个词。
-      expect(find.text('展开设置'), findsNWidgets(3));
+      expect(find.text('展开设置'), findsNWidgets(4));
       expect(find.text('展开诊断工具'), findsNothing);
       expect(find.text('收起'), findsNothing);
     });

@@ -78,11 +78,18 @@ class SettingsPage extends StatelessWidget {
   /// 显示哪一组设置（默认全局）
   final SettingsScope scope;
 
+  /// 切到另一个设置页 —— **只给全局设置页的「分模块设置」入口用**。
+  ///
+  /// 默认 null：四个设置页共用这一个组件，模块页里没有跨页入口，
+  /// 而测试里也常常只泵一个页面（不给回调就不该崩）。
+  final void Function(String routeId)? onNavigate;
+
   const SettingsPage({
     super.key,
     required this.brightness,
     required this.onMaterialChanged,
     this.scope = SettingsScope.global,
+    this.onNavigate,
   });
 
   @override
@@ -301,6 +308,37 @@ class SettingsPage extends StatelessWidget {
             children: const [ProxySection()],
           ),
 
+        // ── 分模块设置 ────────────────────────────────────────
+        // 三个下载模块各有自己的设置页，入口本来只在侧边栏 / Dock 上。
+        // 这里再给一条「从全局设置直接跳过去」的路：用户找「抖音怎么改画质」
+        // 时先落到全局设置，原来只能看到外观/代理/应用，得自己想到去侧边栏
+        // 找模块标题行。
+        //
+        // 三个入口的**跳转方式完全一致**（同一个 onNavigate，传各自的
+        // 设置页路由 id），所以这里不写三套控件 —— 用一份数据 + 一个循环，
+        // 加第四个模块时只加一行数据。
+        if (scope == SettingsScope.global)
+          CollapsibleGroup(
+            storageId: 'section.module_settings',
+            variant: CollapsibleVariant.section,
+            title: t('分模块设置'),
+            icon: Icons.widgets_rounded,
+            summary: t('X 下载、抖音解析下载、B 站解析下载各自的设置页入口'),
+            expandLabel: t('展开设置'),
+            children: [
+              for (final m in _kModuleSettingsEntries)
+                _ModuleSettingsEntry(
+                  title: t(m.title),
+                  // 副标题直接复用各模块设置页里那份「收起态概要」的措辞，
+                  // 不另写一套 —— 两处说的是同一件事，措辞分叉就会互相矛盾。
+                  description: t(m.description),
+                  onOpen: onNavigate == null
+                      ? null
+                      : () => onNavigate!(m.routeId),
+                ),
+            ],
+          ),
+
         // ── 应用 ──────────────────────────────────────────────
         if (scope == SettingsScope.global)
           CollapsibleGroup(
@@ -316,6 +354,43 @@ class SettingsPage extends StatelessWidget {
     );
   }
 }
+
+/// 全局设置页「分模块设置」里的一个入口。
+class _ModuleSettingsEntryData {
+  /// 入口名（模块的通用叫法）
+  final String title;
+
+  /// 副标题：这个模块的设置页管什么
+  final String description;
+
+  /// 点「打开」要去的路由 id（`app.dart` 的 `_pageFor` 认得这些 id）
+  final String routeId;
+
+  const _ModuleSettingsEntryData(this.title, this.description, this.routeId);
+}
+
+/// 三个下载模块的设置入口 —— **顺序与侧边栏里的模块顺序一致**（X / 抖音 / B 站）。
+///
+/// `description` 逐字复用各模块设置页分区的收起态概要：两处说的是同一件事，
+/// 各自维护一份措辞早晚会分叉，而 `settings_collapsed_test.dart` 正是拿那些
+/// 字面量钉住概要的 —— 改一处漏一处就会被撞出来。
+const List<_ModuleSettingsEntryData> _kModuleSettingsEntries = [
+  _ModuleSettingsEntryData(
+    'X 下载',
+    '登录状态、cookie 输入与验证、保存路径、文件夹 / 文件名模板、同名文件处理',
+    'x-settings',
+  ),
+  _ModuleSettingsEntryData(
+    '抖音解析下载',
+    '下载源、质量优先策略、图片格式、批量与筛选选项',
+    'douyin-settings',
+  ),
+  _ModuleSettingsEntryData(
+    'B 站解析下载',
+    '画质上限、编码偏好、下载完合并、命名模板',
+    'bili-settings',
+  ),
+];
 
 // ────────────────────────────────────────────────────────────
 // 以下为通用布局组件，PageHeader / Section / Item
@@ -407,6 +482,66 @@ class _Field extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           child,
+        ],
+      ),
+    );
+  }
+}
+
+/// 「分模块设置」里的一行 —— 模块名 + 一句说明 + 右侧「打开」。
+///
+/// [onOpen] 为 null 时按钮置灰：没有跨页跳转能力时（测试里只泵这一页、
+/// 或将来把设置页嵌进别的壳里）按钮**可见但不可点**，而不是凭空消失 ——
+/// 消失会让「有三个模块设置」这件事在那一页上看不出来。
+class _ModuleSettingsEntry extends StatelessWidget {
+  final String title;
+  final String description;
+  final VoidCallback? onOpen;
+
+  const _ModuleSettingsEntry({
+    required this.title,
+    required this.description,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppTheme.colorsOf(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w500,
+                    color: c.textStrong,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: c.textMuted,
+                    height: 1.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.tonalIcon(
+            onPressed: onOpen,
+            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+            label: Text(t('打开'), style: const TextStyle(fontSize: 13.5)),
+          ),
         ],
       ),
     );

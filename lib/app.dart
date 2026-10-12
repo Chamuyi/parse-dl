@@ -481,10 +481,14 @@ class _AppShellState extends State<_AppShell> {
   /// 材质回调只有「全局设置」那一页真的会用到（外观分区只在 global 渲染），
   /// 但四个入口都必须把它传全 —— 以前每个 case 复制一遍这段异步块，
   /// 加第四个模块时就是第四份副本，而这段里的每条注释都是踩坑写下的。
+  ///
+  /// `onNavigate` 同理只给全局设置页用（它的「分模块设置」要跳到三个模块的
+  /// 设置页），但四个入口都传全：模块设置页自己不需要跨页跳转，传了也不读。
   Widget _settingsPage(SettingsScope scope) => SettingsPage(
     brightness: widget.brightness,
     onMaterialChanged: _applyMaterial,
     scope: scope,
+    onNavigate: _setRoute,
   );
 
   /// 把窗口材质真正落到原生窗口上。

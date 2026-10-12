@@ -102,6 +102,10 @@ const Map<String, String> kStringsEn = {
   '接口缓存': 'API cache',
   'X 接口标识缓存（搜索用户或加载媒体失败时使用）':
       'X GraphQL operation-id cache (used when user search or media loading fails)',
+  // 全局设置里的「分模块设置」入口（三个模块各一行）。
+  '分模块设置': 'Per-module settings',
+  'X 下载、抖音解析下载、B 站解析下载各自的设置页入口':
+      'Entry points to the X, Douyin and Bilibili settings pages',
   '刷新 X 接口缓存': 'Refresh X API cache',
   '搜索用户或加载媒体失败时（如提示「找不到该用户」或长时间无响应），通常是 X 更换了内部接口标识。点此清除缓存后重新搜索即可。':
       'When user search or media loading fails ("user not found", or no response '
