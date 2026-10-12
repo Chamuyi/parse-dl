@@ -22,6 +22,7 @@ import '../theme/app_theme.dart';
 import '../widgets/bili_download_options_dialog.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/media_thumb.dart';
 
 /// 「B 站解析下载」页。
 ///
@@ -1132,20 +1133,31 @@ class _BiliPageState extends State<BiliPage> {
   Widget _buildPartRow(AppColors c, BiliStore store, Media m) {
     final badge = biliPartBadgeText(m);
     final clock = biliClockText(m.durationMs);
+    final picked = store.selected.contains(m.id);
 
     return InkWell(
       onTap: () => store.toggle(m.id),
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(6, 3, 2, 3),
+        padding: const EdgeInsets.fromLTRB(6, 4, 2, 4),
         child: Row(
           children: [
             Checkbox(
-              value: store.selected.contains(m.id),
+              value: picked,
               onChanged: (v) => store.toggle(m.id, value: v),
               visualDensity: VisualDensity.compact,
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
+            // 封面：数据早就有（`bili_link.dart:643` 的 `previewUrl: cover`），
+            // 只是界面没画。没有封面时 MediaThumb 自己退回占位图标。
+            MediaThumb(
+              media: m,
+              width: 64,
+              height: 36,
+              selected: picked,
+              showDuration: false, // 时长单独画在右边，不在角标里重复
+            ),
+            const SizedBox(width: 9),
             if (badge.isNotEmpty)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
