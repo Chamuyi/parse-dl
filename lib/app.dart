@@ -34,6 +34,7 @@ import 'theme/window_material.dart';
 import 'widgets/app_toast.dart';
 import 'widgets/background_layer.dart';
 import 'widgets/dock.dart';
+import 'widgets/douyin_result_overlay.dart';
 import 'widgets/sidebar_nav.dart';
 import 'widgets/title_bar.dart';
 
@@ -279,10 +280,49 @@ class _AppShellState extends State<_AppShell> {
   /// 否则 `keepAliveStack` 返回 null、退回单页渲染。
   final List<String> _visited = ['dashboard'];
 
-  void _setRoute(String id) => setState(() {
-    _routeId = id;
-    if (!_visited.contains(id)) _visited.add(id);
-  });
+  /// 抖音浮层的跨层句柄。
+  ///
+  /// **为什么由外壳层持有**：浮层要盖住左侧导航栏，就必须挂在这一层的 `Stack`
+  /// 里（见 `build` 的注释）；而浮层的开关点（右侧面板那颗 ⤢）在页面内部。
+  /// 页面构造时把它自己那份句柄交上来，外壳层订阅它、据此渲染 —— 两侧共用
+  /// 一个可变对象，不会出现「页面以为开着、外壳以为关着」。
+  ///
+  /// 惰性创建：没访问过抖音页时它是 null，浮层不渲染。
+  DouyinOverlayController? _douyinOverlay;
+
+  /// 浮层的开关/进行中状态变了就重建本层 —— 遮罩挂在 `build` 的树上，
+  /// 不重建就永远不出现。
+  void _onDouyinOverlayChanged() => setState(() {});
+
+  @override
+  void dispose() {
+    _douyinOverlay?.removeListener(_onDouyinOverlayChanged);
+    super.dispose();
+  }
+
+  void _setRoute(String id) {
+    // 换页时关掉抖音浮层 —— 它是**当前页面**的抓取结果，跟着页面走
+    // （预览稿 `render()` 里切路由时同样把 `overlayOpen` 置回 false，
+    // 否则浮层会跨页留在别的模块上）。放在 setState 之外：句柄自己会通知本层重建。
+    _douyinOverlay?.setOpen(false);
+    setState(() {
+      _routeId = id;
+      if (!_visited.contains(id)) _visited.add(id);
+    });
+  }
+
+  /// 抖音浮层句柄 —— 惰性创建，并挂上本层的监听。
+  ///
+  /// 创建时机就是「抖音页被构造」的那一刻（[IndexedStack] 首次把它建出来）：
+  /// 页面拿到它之后才能把「展开详情」与入队入口写进去。
+  DouyinOverlayController _ensureDouyinOverlay() {
+    final existing = _douyinOverlay;
+    if (existing != null) return existing;
+    final created = DouyinOverlayController()
+      ..addListener(_onDouyinOverlayChanged);
+    _douyinOverlay = created;
+    return created;
+  }
 
   /// 点击模块标题行 —— 切换**该模块自己**的展开状态并落盘。
   ///
@@ -336,23 +376,49 @@ class _AppShellState extends State<_AppShell> {
                     : _EngineDownBanner(colors: AppTheme.colorsOf(context)),
               ),
               Expanded(
-                child: Row(
-                  // 让侧边栏通高（否则它只会按内容高度收缩）
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                child: Stack(
                   children: [
-                    if (useSidebar)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 0, 16),
-                        child: SidebarNav(
-                          currentRouteId: _routeId,
-                          onSelect: _setRoute,
-                          // 展开状态来自设置：点标题行切换、写回设置、下次启动保持
-                          isGroupExpanded: appearance.isNavGroupExpanded,
-                          onToggleGroup: _toggleNavGroup,
-                          taskRunning: taskRunning,
-                        ),
+                    Row(
+                      // 让侧边栏通高（否则它只会按内容高度收缩）
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (useSidebar)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 14, 0, 16),
+                            child: SidebarNav(
+                              currentRouteId: _routeId,
+                              onSelect: _setRoute,
+                              // 展开状态来自设置：点标题行切换、写回设置、下次启动保持
+                              isGroupExpanded: appearance.isNavGroupExpanded,
+                              onToggleGroup: _toggleNavGroup,
+                              taskRunning: taskRunning,
+                            ),
+                          ),
+                        Expanded(child: _buildContent(context, useSidebar)),
+                      ],
+                    ),
+
+                    // 抖音「抓取结果」浮层 —— 挂在**导航与内容之上**的这一层。
+                    //
+                    // 浮层是 `Positioned.fill`，它铺满的是**自己所在的那个 Stack**。
+                    // 挂在页面内部（a629679 那版）时页面被 `ClipRect` + `Padding`
+                    // 包着，浮层永远溢不出内容区，左侧导航栏一直露在遮罩外 ——
+                    // 用户 2026-10-12 的原话是「不是覆盖在网页上，是覆盖在**软件
+                    // 表面**」，预览稿的口径同样是铺满整个窗口（含侧边栏）。
+                    //
+                    // 挂在这里之后：侧边栏（或 Dock 形态下的内容区）与主内容区一起
+                    // 被盖住；标题栏与底部 Dock 在这一层**之外**，照旧不被盖 ——
+                    // 预览稿里浮层的范围就是 `.app`（侧边栏 + 主区），标题栏不在内。
+                    //
+                    // 宽度不依赖导航形态：这一层是 `Column` 直接子 `Expanded` 的
+                    // 全宽，侧边栏形态下它与侧边栏并排、Dock 形态下没有侧边栏，
+                    // 两种形态都铺满整宽。
+                    if (_douyinOverlay?.isOpen ?? false)
+                      DouyinResultOverlay(
+                        onClose: () => _douyinOverlay?.setOpen(false),
+                        enqueueing: _douyinOverlay!.enqueueing,
+                        onEnqueue: () => _douyinOverlay?.onEnqueue?.call(),
                       ),
-                    Expanded(child: _buildContent(context, useSidebar)),
                   ],
                 ),
               ),
@@ -446,7 +512,12 @@ class _AppShellState extends State<_AppShell> {
       case 'home':
         return HomepagePage(onNavigate: _setRoute);
       case 'douyin':
-        return DouyinPage(onNavigate: _setRoute);
+        // 浮层挂在外壳层，开关由这一层持有 —— 把句柄交给页面，
+        // 页面只有权改「开/关」和写进入队入口，渲染位置仍在外壳。
+        return DouyinPage(
+          onNavigate: _setRoute,
+          overlay: _ensureDouyinOverlay(),
+        );
       case 'bili':
         return BiliPage(onNavigate: _setRoute);
       case 'bili-batch':

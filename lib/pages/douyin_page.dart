@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' show pi;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -20,6 +19,7 @@ import '../services/settings_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/douyin_result_overlay.dart';
 import '../l10n/l10n.dart';
 
 /// 「抖音」页。
@@ -43,7 +43,13 @@ class DouyinPage extends StatefulWidget {
   /// 页面内跳转（"去下载管理"用），与主页的 `onNavigate` 同签名。
   final void Function(String routeId)? onNavigate;
 
-  const DouyinPage({super.key, this.onNavigate});
+  /// 抓取结果浮层的跨层句柄（**外壳层**持有并渲染浮层）。
+  ///
+  /// 传 null 时页面自己建一个：这样单独 pump 本页（测试、将来的复用）不会崩，
+  /// 只是浮层没人渲染。生产路径上外壳层一定会传。
+  final DouyinOverlayController? overlay;
+
+  const DouyinPage({super.key, this.onNavigate, this.overlay});
 
   @override
   State<DouyinPage> createState() => _DouyinPageState();
@@ -74,13 +80,21 @@ class _DouyinPageState extends State<DouyinPage> {
   bool _loading = false;
   bool _canBack = false;
   bool _canForward = false;
-  bool _enqueueing = false;
 
-  /// 抓取结果详情浮层是否展开（覆盖在抖音页面上，不挤窄 WebView）
-  bool _panelOpen = false;
+  /// 抓取结果浮层的**开关**与「下载进行中」标志。
+  ///
+  /// 浮层本身挂在**外壳层**（`app.dart` 里包住导航 `Row` 的那个 `Stack`）——
+  /// 页面被 `ClipRect` + `Padding` 包住，浮层从页面内部**溢不出去**，只能盖到
+  /// 网页区，左侧导航栏永远露在遮罩外面（2026-10-12 用户原话：「不是覆盖在
+  /// 网页上，是覆盖在软件表面」）。所以这里只留一个跨层句柄：
+  /// 页面按「展开详情」置位、外壳层读位渲染。
+  ///
+  /// [DouyinOverlayController.onEnqueue] 与 `enqueueing` 也都挂在这个句柄上 ——
+  /// 真正的入队逻辑（[_enqueue]）留在本页，因为它要用这里的 toast context。
+  late final DouyinOverlayController _overlay;
 
-  /// 详情浮层里**展开看逐张图**的作品 id（参照实现也是一行一作品，点开才摊开）
-  final Set<String> _expanded = {};
+  /// 句柄是否由本页自己创建（外壳层没注入时会创建）—— 决定 [dispose] 里要不要销毁它。
+  bool _ownsOverlay = false;
 
   final TextEditingController _addr = TextEditingController();
   final ScrollController _gridScroll = ScrollController();
@@ -88,6 +102,11 @@ class _DouyinPageState extends State<DouyinPage> {
   @override
   void initState() {
     super.initState();
+    // 浮层句柄：入队入口与「进行中」标志由本页提供，开关位置由外壳层读。
+    // 外壳层没注入时自己造一个 —— 页面单独 pump 也不会崩，只是浮层没人渲染。
+    final injected = widget.overlay;
+    _ownsOverlay = injected == null;
+    _overlay = (injected ?? DouyinOverlayController())..onEnqueue = _enqueue;
     final store = context.read<DouyinStore>();
     _addr.text = store.lastUrl;
     // 「跳过已下载」要用台账；`main.dart` 启动时已读过一次，
@@ -112,6 +131,13 @@ class _DouyinPageState extends State<DouyinPage> {
     }
     _addr.dispose();
     _gridScroll.dispose();
+    // 自己造的句柄连同页面一起销毁；外壳层注入的那个归外壳层管，
+    // 这里只能把入队回调摘掉（否则回调会指着一个已销毁的 State）。
+    if (_ownsOverlay) {
+      _overlay.dispose();
+    } else {
+      _overlay.onEnqueue = null;
+    }
     super.dispose();
   }
 
@@ -304,7 +330,7 @@ class _DouyinPageState extends State<DouyinPage> {
   ///   → 附带 BGM（图文作品、按地址去重）→ 按作品聚合。
   Future<void> _enqueue() async {
     final store = context.read<DouyinStore>();
-    if (_enqueueing) return;
+    if (_overlay.enqueueing) return;
 
     final cfg = context.read<SettingsStore>().settings.douyin;
     final batch = store.buildDownloadList(cfg);
@@ -328,7 +354,7 @@ class _DouyinPageState extends State<DouyinPage> {
       return;
     }
 
-    setState(() => _enqueueing = true);
+    setState(() => _overlay.setEnqueueing(true));
     var queued = 0;
     var skipped = 0;
     var notReady = 0;
@@ -372,7 +398,7 @@ class _DouyinPageState extends State<DouyinPage> {
         }
       }
     } finally {
-      if (mounted) setState(() => _enqueueing = false);
+      if (mounted) setState(() => _overlay.setEnqueueing(false));
     }
 
     // 写台账（作品粒度）。**只写确认进入 aria2 队列的作品**，而且写的是
@@ -785,24 +811,15 @@ class _DouyinPageState extends State<DouyinPage> {
         _buildToolbar(c, store),
         const SizedBox(height: 12),
         Expanded(
-          // **Stack 要包住整个 Row，不能只包左边那一栏。**
-          //
-          // 浮层是 `Positioned.fill`，它铺满的是**自己所在的那个 Stack**。
-          // 原先 Stack 只包住左侧 `Expanded`（网页区），于是遮罩只盖住网页、
-          // 右侧 268px 的抓取面板与工具栏露在外面 —— 看着像「遮罩被裁了一半」。
-          // 用户 2026-10-12 明确要求：浮层要盖住**整个软件表面**。
-          child: Stack(
+          // **这里不再挂浮层**：它已提到外壳层（`app.dart` 的 Stack），才盖得住
+          // 左侧导航栏。页面这一层只负责网页区 + 右侧抓取面板。
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(child: _buildWebPane(c)),
-                  const SizedBox(width: 14),
-                  // 侧边栏收窄一档，把宽度让给抖音页面（用户反馈页面偏小）
-                  SizedBox(width: 268, child: _buildCapturePane(c, store, cfg)),
-                ],
-              ),
-              if (_panelOpen) _buildResultOverlay(c, store),
+              Expanded(child: _buildWebPane(c)),
+              const SizedBox(width: 14),
+              // 侧边栏收窄一档，把宽度让给抖音页面（用户反馈页面偏小）
+              SizedBox(width: 268, child: _buildCapturePane(c, store, cfg)),
             ],
           ),
         ),
@@ -1059,7 +1076,7 @@ class _DouyinPageState extends State<DouyinPage> {
               IconButton(
                 onPressed: groups.isEmpty
                     ? null
-                    : () => setState(() => _panelOpen = true),
+                    : () => _overlay.setOpen(true),
                 tooltip: t('展开详情列表（覆盖在页面上）'),
                 iconSize: 16,
                 visualDensity: VisualDensity.compact,
@@ -1133,7 +1150,11 @@ class _DouyinPageState extends State<DouyinPage> {
                 : _buildGrid(c, store, groups),
           ),
           const SizedBox(height: 10),
-          _buildEnqueueButton(c, store),
+          DouyinEnqueueButton(
+            store: store,
+            enqueueing: _overlay.enqueueing,
+            onPressed: _enqueue,
+          ),
         ],
       ),
     );
@@ -1222,7 +1243,7 @@ class _DouyinPageState extends State<DouyinPage> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              _coverImage(c, cover),
+              DouyinCoverImage(url: cover),
 
               // 类型角标：视频给播放键，图集给「N 图」
               Positioned(
@@ -1293,327 +1314,9 @@ class _DouyinPageState extends State<DouyinPage> {
               ),
 
               if (store.isGroupDownloaded(g))
-                const Positioned.fill(child: _DownloadedRibbon()),
+                const Positioned.fill(child: DownloadedRibbon()),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  /// 抖音图片 CDN 会校验来源，必须带 Referer + UA 才给图。
-  Widget _coverImage(AppColors c, String? url) {
-    if (url == null || url.isEmpty) {
-      return Icon(Icons.image_outlined, size: 16, color: c.textFaint);
-    }
-    return Image.network(
-      url,
-      fit: BoxFit.cover,
-      headers: const {
-        'Referer': 'https://www.douyin.com/',
-        'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-            '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      },
-      errorBuilder: (_, _, _) =>
-          Icon(Icons.image_not_supported_outlined, size: 16, color: c.textFaint),
-    );
-  }
-
-  // ── 抓取结果详情浮层 ──────────────────────────────────────
-  //
-  // 参照实现的批量下载列表是**一层盖在抖音页面上的浮层**，不把页面挤窄
-  // （2026-09-19 用户明确要求照这个做法）。一行一个作品，图文不平铺。
-  Widget _buildResultOverlay(AppColors c, DouyinStore store) {
-    final groups = store.awemeGroups;
-    return Positioned.fill(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => setState(() => _panelOpen = false),
-        child: ColoredBox(
-          color: Colors.black.withValues(alpha: 0.42),
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: GestureDetector(
-              // 面板内的空白不该关掉浮层，这里把点击吃掉
-              onTap: () {},
-              child: Container(
-                width: 560,
-                margin: const EdgeInsets.fromLTRB(0, 14, 14, 14),
-                decoration: BoxDecoration(
-                  // **不能用 surfaceFloat** —— 它是 0xE0 半透明（给毛玻璃弹层设计的），
-                  // 底下再叠一层黑遮罩，盖在抖音页面上就糊成一片（2026-09-19 反馈）。
-                  color: c.surfaceSolid,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: c.line),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.45),
-                      blurRadius: 30,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildPanelHeader(c, store, groups.length),
-                    Divider(height: 1, color: c.lineSoft),
-                    Expanded(
-                      child: ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        itemCount: groups.length,
-                        itemBuilder: (context, i) =>
-                            _buildGroupRow(c, store, groups[i]),
-                      ),
-                    ),
-                    Divider(height: 1, color: c.lineSoft),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-                      child: _buildEnqueueButton(c, store),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPanelHeader(AppColors c, DouyinStore store, int n) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
-      child: Row(
-        children: [
-          Icon(Icons.auto_awesome_motion_rounded, size: 17, color: c.accent),
-          const SizedBox(width: 8),
-          Text(
-            t('抓取结果'),
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: c.textStrong,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            tf('{n} 个作品', {'n': n}),
-            style: TextStyle(fontSize: 12, color: c.textMuted),
-          ),
-          const Spacer(),
-          Text(
-            tf('已选 {n}', {'n': store.selectedCount}),
-            style: TextStyle(fontSize: 12, color: c.textMuted),
-          ),
-          IconButton(
-            onPressed: () => setState(() => _panelOpen = false),
-            tooltip: t('收起'),
-            iconSize: 18,
-            visualDensity: VisualDensity.compact,
-            color: c.textMuted,
-            icon: const Icon(Icons.close_rounded),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 一行 = 一个作品（对齐参照实现的列表）：勾选框 + 缩略图 + 类型标签 +
-  /// 标题 + 点赞/评论/收藏/分享 + 话题 + 时间。点行可以摊开看逐张图。
-  Widget _buildGroupRow(AppColors c, DouyinStore store, DouyinAwemeGroup g) {
-    // 与右侧格子同一套三态判定，否则浮层里看着没勾、格子里看着勾了
-    final sel = store.groupSelectionOf(g);
-    final picked = sel != DouyinSelection.none;
-    final open = _expanded.contains(g.awemeId);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        InkWell(
-          onTap: () => setState(() {
-            if (open) {
-              _expanded.remove(g.awemeId);
-            } else {
-              _expanded.add(g.awemeId);
-            }
-          }),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 7, 6, 7),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 26,
-                  height: 26,
-                  child: Checkbox(
-                    // null = 半选（横杠）：勾了图但同组还带着没勾的 BGM 视频时
-                    value: switch (sel) {
-                      DouyinSelection.all => true,
-                      DouyinSelection.some => null,
-                      DouyinSelection.none => false,
-                    },
-                    tristate: true,
-                    activeColor: c.accent,
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    onChanged: (_) => store.toggleGroup(g),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                SizedBox(
-                  width: 88,
-                  height: 110,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: c.surfaceSunken,
-                      borderRadius: BorderRadius.circular(7),
-                      // 勾了就描黄框，与右侧格子、抖音页面上的框同色同宽
-                      border: Border.all(
-                        color: picked ? kMarkYellow : c.lineSoft,
-                        width: picked ? 2 : 1,
-                      ),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        _coverImage(c, g.coverUrl),
-                        if (store.isGroupDownloaded(g))
-                          const Positioned.fill(
-                            child: _DownloadedRibbon(scale: 1.7),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 11),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text.rich(
-                        TextSpan(
-                          children: [
-                            WidgetSpan(
-                              alignment: PlaceholderAlignment.middle,
-                              child: _TypeChip(c, t(g.typeLabel)),
-                            ),
-                            const WidgetSpan(child: SizedBox(width: 6)),
-                            TextSpan(
-                              text: g.title,
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                color: c.textStrong,
-                                height: 1.45,
-                              ),
-                            ),
-                          ],
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 5),
-                      _StatRow(c, g: g),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              [
-                                for (final t in g.tags.take(3)) t,
-                                if (g.createdAt != null) _clock(g.createdAt!),
-                              ].join('  '),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: c.textFaint,
-                              ),
-                            ),
-                          ),
-                          Icon(
-                            open
-                                ? Icons.expand_less_rounded
-                                : Icons.expand_more_rounded,
-                            size: 17,
-                            color: c.textFaint,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        // 摊开：逐条媒体 + 各自勾选（图文想单挑某几张时用）
-        if (open)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(41, 0, 12, 10),
-            child: Wrap(
-              spacing: 7,
-              runSpacing: 7,
-              children: [
-                for (final m in g.items)
-                  _MiniMediaTile(
-                    c: c,
-                    media: m,
-                    checked: store.isSelected(m.id),
-                    onTap: () => store.toggle(m.id),
-                  ),
-              ],
-            ),
-          ),
-        Divider(height: 1, indent: 10, color: c.lineSoft.withValues(alpha: 0.5)),
-      ],
-    );
-  }
-
-  static String _clock(DateTime t) {
-    String two(int v) => v.toString().padLeft(2, '0');
-    return '${t.year}-${two(t.month)}-${two(t.day)} '
-        '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
-  }
-
-  Widget _buildEnqueueButton(AppColors c, DouyinStore store) {
-    final picked = store.selectedCount;
-    final visible = store.visibleCount;
-    final label = picked > 0
-        ? '下载选中（$picked）'
-        : (store.hasFilter ? '下载筛选结果（$visible）' : '下载全部（$visible）');
-
-    return SizedBox(
-      height: 36,
-      child: FilledButton.icon(
-        onPressed: visible == 0 || _enqueueing ? null : _enqueue,
-        style: FilledButton.styleFrom(
-          backgroundColor: c.accent,
-          foregroundColor: Colors.white,
-          // 不给这两条，禁用时走主题默认的灰底灰字 —— 它是面板里唯一的终点
-          // 动作，灰到和面板背景糊成一片，用户分不清是"没东西可下"还是"坏了"。
-          disabledBackgroundColor: c.accent.withValues(alpha: 0.28),
-          disabledForegroundColor: c.textMuted,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-        icon: _enqueueing
-            ? const SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation(Colors.white),
-                ),
-              )
-            : const Icon(Icons.download_rounded, size: 17),
-        label: Text(
-          label,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
         ),
       ),
     );
@@ -2025,199 +1728,3 @@ class _DouyinFilterDialogState extends State<_DouyinFilterDialog> {
   );
 }
 
-/// 「已下载」斜缎带 —— 台账是作品粒度，所以整条作品都带。
-/// 样式：绿色底、-45° 斜跨左上角、文案「已下载」。
-/// 靠**外层**的 `clipBehavior` 把溢出部分裁掉，正好裁成缎带。
-class _DownloadedRibbon extends StatelessWidget {
-  const _DownloadedRibbon({this.scale = 1});
-
-  /// 缎带跟着缩略图尺寸走：侧边栏小格子用默认 1，浮层里的大缩略图用 1.7
-  final double scale;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = AppTheme.colorsOf(context);
-    return Stack(
-      children: [
-        Positioned(
-          top: 8 * scale,
-          left: -16 * scale,
-          child: Transform.rotate(
-            angle: -pi / 4,
-            child: Container(
-              width: 52 * scale,
-              alignment: Alignment.center,
-              padding: EdgeInsets.symmetric(vertical: 1 * scale),
-              color: c.success,
-              child: Text(
-                t('已下载'),
-                style: TextStyle(
-                  fontSize: 8 * scale,
-                  color: c.onSuccess,
-                  height: 1.15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// 行首的「图文 9 图 / 视频 / 实况图文 3 图」小标签
-class _TypeChip extends StatelessWidget {
-  const _TypeChip(this.c, this.label);
-
-  final AppColors c;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-        color: c.accentSoft,
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: c.accentLine),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(fontSize: 10.5, color: c.accent, height: 1.35),
-      ),
-    );
-  }
-}
-
-/// 点赞 / 评论 / 收藏 / 分享 —— 参照实现列表里那四个数
-class _StatRow extends StatelessWidget {
-  const _StatRow(this.c, {required this.g});
-
-  final AppColors c;
-  final DouyinAwemeGroup g;
-
-  @override
-  Widget build(BuildContext context) {
-    Widget one(IconData icon, int v) => Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 12, color: c.textFaint),
-        const SizedBox(width: 3),
-        Text('$v', style: TextStyle(fontSize: 11, color: c.textMuted)),
-      ],
-    );
-    return Wrap(
-      spacing: 12,
-      runSpacing: 3,
-      children: [
-        one(Icons.favorite_border_rounded, g.likeCount),
-        one(Icons.mode_comment_rounded, g.commentCount),
-        one(Icons.star_outline_rounded, g.collectCount),
-        one(Icons.share_outlined, g.shareCount),
-      ],
-    );
-  }
-}
-
-/// 摊开一行后的单条媒体小方格：想只下其中几张图时用
-class _MiniMediaTile extends StatelessWidget {
-  const _MiniMediaTile({
-    required this.c,
-    required this.media,
-    required this.checked,
-    required this.onTap,
-  });
-
-  final AppColors c;
-  final Media media;
-  final bool checked;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: SizedBox(
-        width: 52,
-        height: 62,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: c.surfaceSunken,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: checked ? c.accent : c.lineSoft,
-                    width: checked ? 1.5 : 0.8,
-                  ),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: (media.previewUrl ?? '').isEmpty
-                    ? Icon(
-                        media.type.isVideo
-                            ? Icons.play_arrow_rounded
-                            : Icons.photo_rounded,
-                        size: 16,
-                        color: c.textFaint,
-                      )
-                    : Image.network(
-                        media.previewUrl!,
-                        fit: BoxFit.cover,
-                        headers: const {
-                          'Referer': 'https://www.douyin.com/',
-                          'User-Agent':
-                              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                              '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                        },
-                        errorBuilder: (_, _, _) => const Icon(
-                          Icons.image_not_supported_outlined,
-                          size: 16,
-                          color: Colors.white54,
-                        ),
-                      ),
-              ),
-            ),
-            Positioned(
-              right: 2,
-              top: 2,
-              child: Container(
-                width: 13,
-                height: 13,
-                decoration: BoxDecoration(
-                  color: checked ? c.accent : Colors.black45,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: checked ? c.accent : Colors.white70,
-                    width: 1,
-                  ),
-                ),
-                child: checked
-                    ? const Icon(
-                        Icons.check_rounded,
-                        size: 9,
-                        color: Colors.white,
-                      )
-                    : null,
-              ),
-            ),
-            Positioned(
-              left: 3,
-              bottom: 2,
-              child: Text(
-                media.type.isVideo ? '视频' : '${media.mediaIndex}',
-                style: const TextStyle(
-                  fontSize: 9,
-                  color: Colors.white,
-                  backgroundColor: Colors.black54,
-                  height: 1.2,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
