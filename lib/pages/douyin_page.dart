@@ -785,20 +785,24 @@ class _DouyinPageState extends State<DouyinPage> {
         _buildToolbar(c, store),
         const SizedBox(height: 12),
         Expanded(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          // **Stack 要包住整个 Row，不能只包左边那一栏。**
+          //
+          // 浮层是 `Positioned.fill`，它铺满的是**自己所在的那个 Stack**。
+          // 原先 Stack 只包住左侧 `Expanded`（网页区），于是遮罩只盖住网页、
+          // 右侧 268px 的抓取面板与工具栏露在外面 —— 看着像「遮罩被裁了一半」。
+          // 用户 2026-10-12 明确要求：浮层要盖住**整个软件表面**。
+          child: Stack(
             children: [
-              Expanded(
-                child: Stack(
-                  children: [
-                    _buildWebPane(c),
-                    if (_panelOpen) _buildResultOverlay(c, store),
-                  ],
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: _buildWebPane(c)),
+                  const SizedBox(width: 14),
+                  // 侧边栏收窄一档，把宽度让给抖音页面（用户反馈页面偏小）
+                  SizedBox(width: 268, child: _buildCapturePane(c, store, cfg)),
+                ],
               ),
-              const SizedBox(width: 14),
-              // 侧边栏收窄一档，把宽度让给抖音页面（用户反馈页面偏小）
-              SizedBox(width: 268, child: _buildCapturePane(c, store, cfg)),
+              if (_panelOpen) _buildResultOverlay(c, store),
             ],
           ),
         ),
