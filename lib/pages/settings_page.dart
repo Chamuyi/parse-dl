@@ -78,7 +78,6 @@ class SettingsPage extends StatelessWidget {
   /// 显示哪一组设置（默认全局）
   final SettingsScope scope;
 
-
   const SettingsPage({
     super.key,
     required this.brightness,
@@ -210,6 +209,46 @@ class SettingsPage extends StatelessWidget {
             children: const [AccountSection()],
           ),
 
+        // ── 接口缓存 ──────────────────────────────────────────
+        // 顺序：账号 → 接口缓存 → 下载。
+        // 「接口缓存」是**排障**用的（搜索用户或加载媒体失败时清一次），
+        // 夹在「账号」（前置条件：没登录就抓不到）与「下载」（配置：存哪、叫什么）
+        // 之间 —— 两端各是一次性的/日常的动作，排障项放最下面才不挡路。
+        //
+        // 为什么在 X 页而不是全局：这个缓存存的是 **X 的** GraphQL 接口标识
+        // （见 `x_api.dart` 的 queryId 缓存），与抖音、B 站无关；而抖音 / B 站
+        // 各自的设置页里也没有对应物，放在全局「高级」里等于让全局页替某一个
+        // 模块背排障工具。
+        if (scope == SettingsScope.xDownload)
+          CollapsibleGroup(
+            storageId: 'section.x_api_cache',
+            variant: CollapsibleVariant.section,
+            title: t('接口缓存'),
+            icon: Icons.cached_rounded,
+            summary: t('X 接口标识缓存（搜索用户或加载媒体失败时使用）'),
+            expandLabel: t('展开设置'),
+            children: [
+              _Field(
+                label: t('刷新 X 接口缓存'),
+                description:
+                    t('搜索用户或加载媒体失败时（如提示「找不到该用户」或长时间无响应），'
+                        '通常是 X 更换了内部接口标识。点此清除缓存后重新搜索即可。'),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      context.read<AppState>().api.clearQueryIdCache();
+                      AppToast.show(context, t('已清除 X 接口缓存，请重新搜索'),
+                          kind: AppToastKind.success);
+                    },
+                    icon: const Icon(Icons.refresh_rounded, size: 16),
+                    label: Text(t('清除缓存并重试')),
+                  ),
+                ),
+              ),
+            ],
+          ),
+
         // ── 下载 ──────────────────────────────────────────────
         if (scope == SettingsScope.xDownload)
           CollapsibleGroup(
@@ -260,41 +299,6 @@ class SettingsPage extends StatelessWidget {
             forceExpand:
                 proxy.enable && !proxy.useSystem && proxy.url.trim().isEmpty,
             children: const [ProxySection()],
-          ),
-
-        // ── 高级 ──────────────────────────────────────────────
-        if (scope == SettingsScope.global)
-          CollapsibleGroup(
-            storageId: 'section.advanced',
-            variant: CollapsibleVariant.section,
-            title: t('高级'),
-            // 其余分组都是 *_rounded，只有这里是 outline —— 一排图标里
-            // 混一种描边风格，看着像少画了一个。
-            icon: Icons.build_circle_rounded,
-            summary: t('X 接口标识缓存（搜索用户或加载媒体失败时使用）'),
-            // 五个分组里只有这个写「展开诊断工具」，措辞统一；
-            // 「诊断工具」的含义由上面的 summary 承担。
-            expandLabel: t('展开设置'),
-            children: [
-              _Field(
-                label: t('刷新 X 接口缓存'),
-                description:
-                    t('搜索用户或加载媒体失败时（如提示「找不到该用户」或长时间无响应），'
-                        '通常是 X 更换了内部接口标识。点此清除缓存后重新搜索即可。'),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      context.read<AppState>().api.clearQueryIdCache();
-                      AppToast.show(context, t('已清除 X 接口缓存，请重新搜索'),
-                          kind: AppToastKind.success);
-                    },
-                    icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: Text(t('清除缓存并重试')),
-                  ),
-                ),
-              ),
-            ],
           ),
 
         // ── 应用 ──────────────────────────────────────────────

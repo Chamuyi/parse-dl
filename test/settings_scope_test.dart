@@ -1,0 +1,185 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
+import 'package:parse_dl/l10n/strings_en.dart';
+import 'package:parse_dl/pages/settings_page.dart';
+import 'package:parse_dl/services/app_prefs.dart';
+import 'package:parse_dl/services/app_state.dart';
+import 'package:parse_dl/services/download_store.dart';
+import 'package:parse_dl/services/douyin_store.dart';
+import 'package:parse_dl/services/settings_store.dart';
+import 'package:parse_dl/theme/app_theme.dart';
+
+/// P5 设置页重组的归属判据。
+///
+/// **用户提的两条**（原话）：
+///   1. 「x账号管理要放在x的设置里，以及x接口缓存」
+///      → 账号已在 X 页（`settings_page.dart` 的 `scope == xDownload`），
+///        接口缓存从全局「高级」搬进 X 页；
+///   2. 「你写的分模块设置少一个x的」
+///      → 全局设置里的「分模块设置」入口必须是 **三个**（X / 抖音 / B 站）。
+///
+/// **判据怎么才算能判错**：每条都写成「这一页**有**什么」+「那一页**没有**什么」，
+/// 且「没有」那一侧必须指向**本页真实会渲染的**特征串 —— 否则把整块删掉也照样绿。
+/// 例如「全局页不含账号」用的是 `auth_token`：它是 `AccountSection` 里的
+/// 输入框标签，账号分区一搬走它就整块消失（负控制实测会红，见下方注释）。
+void main() {
+  /// 分区**内容容器**的 key —— 分区存不存在用它判断最准（比 find.text 稳，
+  /// 不会跟别处的同名文字撞车）。
+  Key contentKey(String id) => ValueKey('collapsible-content-$id');
+
+  Future<SettingsStore> pumpPage(
+    WidgetTester tester, {
+    SettingsScope scope = SettingsScope.global,
+  }) async {
+    // 画布要够高：`ListView` 懒构建，画布只放得下前半截时后面的分区不在树上。
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    AppPrefs.setMockInitialValues({});
+    final appState = await AppState.restore();
+    final settings = SettingsStore();
+
+    await tester.pumpWidget(
+      AppTheme(
+        colors: AppColors.dark,
+        brightness: Brightness.dark,
+        child: MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AppState>.value(value: appState),
+            ChangeNotifierProvider<SettingsStore>.value(value: settings),
+            ChangeNotifierProvider<DownloadStore>(create: (_) => DownloadStore()),
+            ChangeNotifierProvider<DouyinStore>(create: (_) => DouyinStore()),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: SettingsPage(
+                brightness: Brightness.dark,
+                onMaterialChanged: (_) async {},
+                scope: scope,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    return settings;
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 一、P5-1：X 账号与接口缓存都在 X 设置页
+  // ══════════════════════════════════════════════════════════
+  group('P5-1 X 设置页含账号与接口缓存', () {
+    testWidgets('X 下载设置页：账号 + 接口缓存两块都在', (tester) async {
+      await pumpPage(tester, scope: SettingsScope.xDownload);
+
+      expect(
+        find.byKey(contentKey('section.account')),
+        findsOneWidget,
+        reason: 'X 账号登录属于 X 下载模块，必须在 X 设置页里',
+      );
+      expect(
+        find.byKey(contentKey('section.x_api_cache')),
+        findsOneWidget,
+        reason: 'X 接口缓存是 X 自己的排障项，必须在 X 设置页里',
+      );
+
+      // 连标题文字也在（分区在树上 ≠ 标题没被改名成别的）
+      expect(find.text('账号'), findsOneWidget);
+      expect(find.text('接口缓存'), findsOneWidget);
+    });
+
+    testWidgets('接口缓存分区展开后能看到清除按钮与说明', (tester) async {
+      await pumpPage(tester, scope: SettingsScope.xDownload);
+
+      await tester.tap(find.text('接口缓存'));
+      await tester.pumpAndSettle();
+
+      // 按钮与说明都在该分区的内容子树里 —— 搬过来的是**整块**，不是只剩标题
+      final inSection = find.descendant(
+        of: find.byKey(contentKey('section.x_api_cache')),
+        matching: find.text('刷新 X 接口缓存'),
+      );
+      expect(inSection, findsOneWidget, reason: '「刷新 X 接口缓存」字段应随分区一起搬过来');
+      expect(find.text('清除缓存并重试'), findsOneWidget, reason: '清除按钮不能丢');
+    });
+
+    testWidgets('全局设置页：接口缓存与「高级」壳子都不在', (tester) async {
+      await pumpPage(tester);
+
+      expect(
+        find.byKey(contentKey('section.x_api_cache')),
+        findsNothing,
+        reason: '接口缓存属于 X 模块，不该留在全局设置里',
+      );
+      // 「高级」分区移空后整块去掉 —— 空壳留着比去掉更糟：点开是空的
+      expect(
+        find.byKey(contentKey('section.advanced')),
+        findsNothing,
+        reason: '「高级」移空后应当整块删除，不留空壳',
+      );
+      expect(find.text('高级'), findsNothing);
+      // 正文串也不该在全局页出现（分区删了但字段被漏在别处，这条会红）
+      expect(find.text('刷新 X 接口缓存'), findsNothing);
+    });
+
+    // ── 负控制 ────────────────────────────────────────────────
+    testWidgets('负控制：全局设置页不含账号特征 auth_token', (tester) async {
+      // `auth_token` 是 AccountSection 里那两个输入框的标签（account_section.dart:467），
+      // 折叠组「只裁剪不销毁」，所以账号分区只要**在树上**，这个字串就找得到 ——
+      // 这条断言因此真的能判错：把账号分区挪回全局页（或在全局页多渲染一次），
+      // 它立刻变红。实测见交付说明里的负控制记录。
+      await pumpPage(tester);
+
+      expect(
+        find.text('auth_token'),
+        findsNothing,
+        reason: '账号只在 X 设置页：全局设置里不该出现 auth_token 输入框',
+      );
+      expect(
+        find.text('ct0'),
+        findsNothing,
+        reason: '同上：ct0 是账号分区的另一半，一起证明账号不在全局页',
+      );
+
+      // 正控制：同一个判据在 X 页必须**找得到** —— 否则上面两条「找不到」
+      // 可能只是因为探针本身失效（例如标签被改成了别的字串）。
+      await pumpPage(tester, scope: SettingsScope.xDownload);
+      expect(
+        find.text('auth_token'),
+        findsOneWidget,
+        reason: '正控制：X 设置页里必须能找到 auth_token，否则上面的负判据是假绿',
+      );
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════
+  // 三、新文案的英文对照
+  // ══════════════════════════════════════════════════════════
+  group('新文案有英文', () {
+    test('P5 新增/改名的中文文案都在英文表里', () {
+      // l10n_test 扫的是源码里的 t('…') 字面量，这里点名核对 P5 这一批 ——
+      // 两处判据不同（那边扫调用点，这边钉具体串），任一处漏了都会红。
+      //
+      // 这里**不能**用 `t(key)` 断言：`t()` 走的是当前语言档，测试里默认是
+      // 中文档（原样返回），拿它比会永远等于原文 —— 直接查表才判得动。
+      for (final key in const ['接口缓存']) {
+        expect(kStringsEn.containsKey(key), isTrue, reason: '「$key」缺英文对照');
+        expect(
+          kStringsEn[key],
+          isNot(key),
+          reason: '「$key」的英文条目不能还是中文原文',
+        );
+      }
+      // 「高级」这个 key 随分区一起退役 —— 英文表里留着它就是死条目
+      // （l10n_test 的「英文表里没有源码已经不再使用的旧条目」会红）。
+      expect(
+        kStringsEn.containsKey('高级'),
+        isFalse,
+        reason: '「高级」分区已删除，英文表里的旧条目要一起清掉',
+      );
+    });
+  });
+}

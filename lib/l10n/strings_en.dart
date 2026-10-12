@@ -98,7 +98,8 @@ const Map<String, String> kStringsEn = {
   '代理': 'Proxy',
   '启用代理、使用系统代理、自定义代理地址、连通性测试':
       'Enable proxy, use system proxy, custom proxy address, connectivity test',
-  '高级': 'Advanced',
+  // 「接口缓存」原本是全局设置里的「高级」分区，现在整块归到 X 下载设置页。
+  '接口缓存': 'API cache',
   'X 接口标识缓存（搜索用户或加载媒体失败时使用）':
       'X GraphQL operation-id cache (used when user search or media loading fails)',
   '刷新 X 接口缓存': 'Refresh X API cache',

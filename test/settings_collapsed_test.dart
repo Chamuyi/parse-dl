@@ -27,15 +27,21 @@ import 'package:parse_dl/theme/app_theme.dart';
 ///   - 互不混入，各模块的设置也互不合并。
 void main() {
   /// 全局设置页该有的分区（账号已挪到 X 下载模块）
+  ///
+  /// 「高级」那个分区原本只装一项「刷新 X 接口缓存」—— 接口缓存搬到 X 设置页后
+  /// 它就成了空壳，所以整块去掉。
   const globalSectionIds = <String>[
     'section.appearance',
     'section.proxy',
-    'section.advanced',
     'section.app',
   ];
 
-  /// X 下载设置页该有的分区（按页面里的渲染顺序：账号在前、下载在后）
-  const xSectionIds = <String>['section.account', 'section.download'];
+  /// X 下载设置页该有的分区（按页面里的渲染顺序：账号 → 接口缓存 → 下载）
+  const xSectionIds = <String>[
+    'section.account',
+    'section.x_api_cache',
+    'section.download',
+  ];
 
   /// 抖音解析下载设置页该有的分区
   const douyinSectionIds = <String>['section.douyin'];
@@ -47,11 +53,11 @@ void main() {
   const summaries = <String, String>{
     'section.appearance': '窗口材质、自定义色调、导航形态、主题模式、背景图片、界面语言',
     'section.account': '登录状态、cookie 输入与验证',
+    'section.x_api_cache': 'X 接口标识缓存（搜索用户或加载媒体失败时使用）',
     'section.download': '保存路径、文件夹 / 文件名模板、同名文件处理',
     'section.douyin': '下载源、质量优先策略、图片格式、批量与筛选选项',
     'section.bili': '画质上限、编码偏好、下载完合并、命名模板',
     'section.proxy': '启用代理、使用系统代理、自定义代理地址、连通性测试',
-    'section.advanced': 'X 接口标识缓存（搜索用户或加载媒体失败时使用）',
     'section.app': '日志记录、日志目录与文件',
   };
 
@@ -314,13 +320,13 @@ void main() {
     testWidgets('分区标题都在，动作文案统一是「展开」', (tester) async {
       await pumpPage(tester);
 
-      for (final t in ['外观', '代理', '高级', '应用']) {
+      for (final t in ['外观', '代理', '应用']) {
         expect(find.text(t), findsOneWidget, reason: '分区「$t」的标题不能丢');
       }
 
-      // 四个普通分区 + 高级的诊断入口 —— 「展开诊断工具」那个特例已经统一掉，
+      // 三个普通分区 —— 「展开诊断工具」那个特例已经统一掉，
       // 动作文案现在全站只有一个词。
-      expect(find.text('展开设置'), findsNWidgets(4));
+      expect(find.text('展开设置'), findsNWidgets(3));
       expect(find.text('展开诊断工具'), findsNothing);
       expect(find.text('收起'), findsNothing);
     });
