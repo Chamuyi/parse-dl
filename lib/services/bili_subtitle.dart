@@ -15,9 +15,42 @@ library;
 import 'dart:convert';
 
 import '../models/bili_config.dart';
+import 'bili_dm_proto.dart' show biliAssColor;
 
 /// B 站 AI 字幕的语言码前缀。
 const String kBiliAiLangPrefix = 'ai-';
+
+/// 字幕正文的默认字号（ass 的 Fontsize，1080p 坐标系）。
+///
+/// **这个数是抄 B站播放器自己的公式算出来的**，不是拍的。2026-10-12 从本机
+/// WebView2 缓存里的播放器 JS 挖到：
+/// ```js
+/// calculateFontSize() { var t=1, …; r && (t = panel.width / 1139); … return t; }
+/// group[Major].style.fontSize = (t ?? 28) * calculateFontSize() + "px";
+/// ```
+/// 即主字幕字号 = `28 × (播放器宽 / 1139)`。1080p 全屏（宽 1920）下
+/// `28 × 1920 / 1139 ≈ 47.2`。取 48：实测该值渲染出的汉字字形高 36 px，
+/// 与 CSS 47.2px 的中文字形高（≈ em × 0.76）一致。
+///
+/// 与 [kBiliDefaultDanmakuFontSize]（25，弹幕用）分开的理由见 [biliSubtitleFontSize]。
+const int kBiliDefaultSubtitleFontSize = 48;
+
+/// 字幕正文的默认底部边距。
+///
+/// 弹幕默认 10 对字幕太贴底 —— 播放器的进度条与悬浮控件会压在上面。
+const int kBiliDefaultSubtitleMarginV = 48;
+
+/// 字幕描边宽度。抄 B站播放器的 `majorStrokeWidth: 3`。
+///
+/// B站是在 CSS 里用 8 向 `text-shadow` 模拟描边的（`buildStrokeShadow`），
+/// ass 这边直接用 `Outline` 一个数就够了，语义等价。
+const int kBiliSubtitleOutline = 3;
+
+/// 字幕描边色：B站 `strokeColor: "#000000"`。
+const int kBiliSubtitleOutlineColor = 0x000000;
+
+/// 字幕正文色：B站 `textColor: "#FFFFFF"`。
+const int kBiliSubtitlePrimaryColor = 0xFFFFFF;
 
 /// BCP-47 → ISO 639-2。表里没有的一律映射成空串（= 不写 Language 标签），
 /// 因为把 `xx-YY` 原样塞进 MKV 比不写更糟：播放器会显示一个非法语言码。
@@ -136,21 +169,27 @@ String biliSubtitleToTxt(List<(int, int, String)> lines) =>
     lines.map((e) => e.$3).join('\n');
 
 /// ass 字幕。样式取配置里那几项，语言名进 Meta。
+///
+/// **主色必须用 [biliAssColor] 生成，不要手拼字符串。** 2026-10-12 真机撞上：
+/// 这里曾写成 `'&H$alpha FFFFFF'` —— `$alpha` 与 `FFFFFF` 之间多了一个**空格**，
+/// 而 ass 颜色是 `&HAABBGGRR` 八位十六进制，libass 在空格处截断，只读到 `&H00`
+/// 补零成 `&H00000000`（不透明**黑**）。后果是内封字幕在播放器里是纯黑字，
+/// 深色画面上直接看不见；`ScaledAndBorder` 那类拼写错误同理。
+/// 实测判据：白底渲染同一帧，带空格时字形像素 79% 是近黑（1080/1367），
+/// 去掉空格后只剩细描边（349/1227）。回归测试 `test/bili_subtitle_style_test.dart`。
 String biliSubtitleToAss(
   BiliSubtitleEntry entry,
   BiliConfig cfg,
 ) {
-  final alpha = (255 - (cfg.danmakuOpacity.clamp(0, 100) * 255 ~/ 100))
-      .toRadixString(16)
-      .padLeft(2, '0')
-      .toUpperCase();
+  final primary = biliAssColor(kBiliSubtitlePrimaryColor, opacity: cfg.danmakuOpacity);
+  final outline = biliAssColor(kBiliSubtitleOutlineColor);
   final sb = StringBuffer()
     ..writeln('[Script Info]')
     ..writeln('ScriptType: v4.00+')
     ..writeln('PlayResX: 1920')
     ..writeln('PlayResY: 1080')
     ..writeln('WrapStyle: 0')
-    ..writeln('ScaledAndBorder: 1')
+    ..writeln('ScaledBorderAndShadow: yes')
     ..writeln('')
     ..writeln('[V4+ Styles]')
     ..writeln(
@@ -160,9 +199,9 @@ String biliSubtitleToAss(
       'MarginL, MarginR, MarginV, Encoding',
     )
     ..writeln(
-      'Style: Default,${cfg.danmakuFontFace},${cfg.danmakuFontSize},'
-      '&H$alpha FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,'
-      '20,20,${cfg.danmakuMarginV},134',
+      'Style: Default,${cfg.danmakuFontFace},${biliSubtitleFontSize(cfg)},'
+      '$primary,$outline,&H00000000,0,0,0,0,100,100,0,0,1,'
+      '$kBiliSubtitleOutline,0,2,20,20,${biliSubtitleMarginV(cfg)},134',
     )
     ..writeln('')
     ..writeln('[Events]')
@@ -175,6 +214,27 @@ String biliSubtitleToAss(
     );
   }
   return sb.toString();
+}
+
+/// 字幕正文字号（ass 的 Fontsize，1080p 坐标系）。
+///
+/// **不直接复用 `cfg.danmakuFontSize`。** 那个默认值是 25，是给**弹幕**用的
+/// —— 弹幕一行要挤很多条，字号天然偏小。字幕是「一行一句」的正文，25 太小：
+/// 2026-10-12 实测 25 的字形高只有 19 px（占 1080p 屏高 1.76%），而 B 站播放器
+/// 自己的字幕与 Netflix 规范都在 42 上下（字形高 31 px / 2.87%），常见压制组
+/// 正文在 48（36 px / 3.33%）。
+///
+/// 取值规则：用户调过弹幕字号（≠ 默认 25）就尊重他的选择；仍是默认值时给
+/// 字幕一个更大的默认，避免"没调过设置的人看到一片小字"。
+int biliSubtitleFontSize(BiliConfig cfg) {
+  final v = cfg.danmakuFontSize;
+  return v == kBiliDefaultDanmakuFontSize ? kBiliDefaultSubtitleFontSize : v;
+}
+
+/// 字幕底部边距。与弹幕同源，但弹幕默认 10 对字幕太贴底（会被播放器进度条压住）。
+int biliSubtitleMarginV(BiliConfig cfg) {
+  final v = cfg.danmakuMarginV;
+  return v == kBiliDefaultDanmakuMarginV ? kBiliDefaultSubtitleMarginV : v;
 }
 
 /// ass 文本转义：反斜杠与花括号会改语义，换行要变成 `\N`。
