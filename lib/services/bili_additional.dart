@@ -57,6 +57,39 @@ List<BiliEmbeddedTrack> orderTracks(
   return sorted;
 }
 
+/// 中文轨的语言码（ISO 639-2 与 BCP-47 两种写法都认）。
+const Set<String> kBiliChineseLangs = {'chi', 'zh', 'zh-cn', 'zh-hans',
+  'zh-hant', 'zh-hk', 'zh-tw', 'zho'};
+
+/// 哪一条字幕轨该是播放器的**默认轨**。
+///
+/// 为什么不能靠「谁排第一谁默认」：ffmpeg 会把 `default` 标给**第一条**字幕流，
+/// 而第一条是按文件名排序撞出来的。2026-10-12 真机撞上：`字幕.ai-ar.ass`
+/// （阿拉伯语）恰好排第一，于是成品的默认字幕轨是阿拉伯语 —— 用户打开就是
+/// 一堆看不懂的字，还以为「中文字幕下错了」。
+///
+/// 判据只有一条：**中文优先，弹幕垫底**。不区分人工/AI —— 两者同名（B站给的
+/// `lan_doc` 完全一样），而 [BiliEmbeddedTrack] 上没有「是不是 AI」这个字段，
+/// 靠标题里的「（AI）」后缀去判是把展示文案当语义用，不值当。
+/// 返回 -1 表示没有可作默认的轨（空列表）。
+int biliDefaultTrackIndex(List<BiliEmbeddedTrack> tracks) {
+  if (tracks.isEmpty) return -1;
+  int rank(BiliEmbeddedTrack t) {
+    if (t.fromDanmaku) return 2;   // 弹幕垫底：它不是给人读的正文
+    return kBiliChineseLangs.contains(t.iso639.toLowerCase()) ? 0 : 1;
+  }
+  var best = 0;
+  var bestRank = rank(tracks[0]);
+  for (var i = 1; i < tracks.length; i++) {
+    final r = rank(tracks[i]);
+    if (r < bestRank) {
+      bestRank = r;
+      best = i;
+    }
+  }
+  return best;
+}
+
 /// 附加文件的落盘名。
 ///
 /// 形如 `冬天-1080P.弹幕.中文.ass`、`冬天-1080P.字幕.eng.srt`、`冬天-1080P.封面.jpg`。

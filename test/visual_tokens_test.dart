@@ -42,9 +42,13 @@ void main() {
 
   test('色板之外的写死颜色只许变少，不许变多、不许冒出新文件', () {
     final offenders = <String>[];
+    // 词边界是必须的：`biliAssColor(0xFFFFFF)` 这种**把颜色当 int 传参**的调用
+    // 不含 `Color(0x` 的语义，但它含这个**子串**，会被无边界版本误报
+    // （2026-10-12 撞上：字幕改用 biliAssColor 后这条守卫报了假红）。
+    final rx = RegExp(r'(?<![A-Za-z_])Color\(0x');
     for (final path in libDartFiles()) {
       if (path.startsWith('lib/theme/')) continue;
-      final n = RegExp(r'Color\(0x').allMatches(readSource(path)).length;
+      final n = rx.allMatches(readSource(path)).length;
       final allowed = colorHardcodeBaseline[path];
       if (allowed == null) {
         if (n > 0) offenders.add('$path 有 $n 处未登记');
@@ -55,6 +59,16 @@ void main() {
       }
     }
     expect(offenders, isEmpty, reason: '新增写死颜色请改走 AppColors 语义槽位');
+  });
+
+  test('负控制：守卫确实能抓到手写的 Color(0x…)（证明上一条不是恒真）', () {
+    final rx = RegExp(r'(?<![A-Za-z_])Color\(0x');
+    // 正例：真正的构造调用要被抓到
+    expect(rx.hasMatch('final c = Color(0xFF112233);'), isTrue);
+    expect(rx.hasMatch('color: const Color(0x80FFFFFF),'), isTrue);
+    // 反例：把颜色当 int 传参的函数名不该被抓到（子串但不是构造）
+    expect(rx.hasMatch('biliAssColor(0xFFFFFF, opacity: 80)'), isFalse);
+    expect(rx.hasMatch('myColor(0x123456)'), isFalse);
   });
 
   /// 现存 18 档字号。新写代码请复用已有取值；要立正式刻度表时，

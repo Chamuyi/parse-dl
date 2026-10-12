@@ -25,6 +25,7 @@ import 'package:path/path.dart' as p;
 
 import 'app_logger.dart';
 import 'app_paths.dart';
+import 'bili_additional.dart';
 
 /// 日志 tag（与 `ARIA2` / `DOWNLOAD` 同一层叫法）。
 const String kBiliMergeLogTag = 'FFMPEG';
@@ -448,6 +449,12 @@ class BiliMerger {
       // 字幕轨原样封进去，不转格式：转 ass↔srt 要的是编码器，
       // 而这里只想要「同一条字节流换个容器」。
       args.addAll(['-c:s', 'copy']);
+      // **默认轨必须显式指定**：不写的话 ffmpeg 把 `default` 标给第一条字幕流，
+      // 而第一条是按文件名排序撞出来的 —— 2026-10-12 真机撞上：阿拉伯语 AI 轨
+      // 恰好排第一，用户打开成品看到一屏看不懂的字。
+      // 判据见 `biliDefaultTrackIndex`（在 `bili_additional.dart` 里，作用于
+      // `BiliEmbeddedTrack`；这里按同样的规则在 record 上算一遍）。
+      final defIdx = _defaultSubtitleIndex(subtitleTracks);
       for (var k = 0; k < subtitleTracks.length; k++) {
         final t = subtitleTracks[k];
         // `s:` 后面是**流限定符**，写法是「类型:序号」，所以这里要有两个冒号：
@@ -460,12 +467,35 @@ class BiliMerger {
         if (t.lang.isNotEmpty) {
           args.addAll([spec, 'language=${t.lang}']);
         }
+        args.addAll([
+          '-disposition:s:$k',
+          k == defIdx ? 'default' : '0',
+        ]);
       }
     }
     // +faststart 是 mp4 的事。matroska 不认这个键，塞过去只会换一句没人看的告警。
     if (wantFaststart) args.addAll(['-movflags', kFfmpegMovflags]);
     args.addAll(['-progress', 'pipe:1', outPath]);
     return args;
+  }
+
+  /// 哪一条该当默认轨 —— 规则本体在 `bili_additional.dart` 的
+  /// [biliDefaultTrackIndex]，这里只是把它套到 record 上。
+  ///
+  /// **刻意转一手而不是各写一遍**：两处规则漂了以后，成品里哪条是默认就会
+  /// 取决于谁被调用，是最难查的一类不一致。转换成本只有一次 map。
+  static int _defaultSubtitleIndex(List<BiliSubtitleInput> tracks) {
+    if (tracks.isEmpty) return -1;
+    return biliDefaultTrackIndex([
+      for (final t in tracks)
+        BiliEmbeddedTrack(
+          fileName: t.path,
+          title: t.title,
+          iso639: t.lang,
+          // 这里不参与判据（弹幕在另一条通路里入轨），给 false 即可。
+          fromDanmaku: false,
+        ),
+    ]);
   }
 
   /// 完整 argv（前缀在最前）。
