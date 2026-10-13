@@ -186,7 +186,12 @@ class XDownloaderApp extends StatelessWidget {
   }
 
   ThemeData _buildMaterialTheme(Brightness brightness, AppStyle style) =>
-      buildAppTheme(AppColors.of(style, brightness), brightness);
+      buildAppTheme(
+        AppColors.of(style, brightness),
+        brightness,
+        // 按钮主题也按风格取令牌（与上面 AppColors.of 同源）。
+        style: style,
+      );
 }
 
 class _AppShell extends StatefulWidget {

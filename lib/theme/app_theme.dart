@@ -269,9 +269,59 @@ class AppTheme extends InheritedWidget {
 
 /// 应用级 Material 主题。**从 [AppColors] 派生，别再在别处手搓 ThemeData。**
 ///
+/// [style] 决定按钮主题取哪一套 [StyleButton] 令牌（`.btn` / `.btn.primary`
+/// 的 Flutter 对应物）。默认 [AppStyle.frosted] 与 `AppColors.solidFor` 的
+/// 先例一致 —— 既有调用点（含测试）零改动，拿到的就是 frosted 的按钮观感。
+///
 /// 抽出来只为了一条可跑的判据：`canvasColor` 必须实心（见下），而它藏在
 /// `app.dart` 的私有方法里就没法被测试钉住。
-ThemeData buildAppTheme(AppColors c, Brightness brightness) {
+///
+/// 渐变的能力边界（如实记录）：liquid / clay 的主按钮 CSS 是
+/// `linear-gradient(135deg, var(--ac), var(--ac2))`，而 Material 3 的
+/// `ButtonStyle.backgroundColor` 只接受一个 [Color]，`FilledButtonThemeData`
+/// 无法下发渐变（真渐变需要包一层 Ink/DecoratedBox 装饰，属于逐调用点改造，
+/// 本期明确不做）。这里取渐变**主色段**（CSS `--ac`，即 `c.accent`）做实色近似。
+ThemeData buildAppTheme(
+  AppColors c,
+  Brightness brightness, {
+  AppStyle style = AppStyle.frosted,
+}) {
+  final StyleButton button = style.buttonOf(brightness);
+  // 43 处原生按钮（FilledButton / FilledButton.tonal* / TextButton / OutlinedButton）
+  // 的观感全部由这三组主题下发，任何调用点都不需要改动。
+  //
+  // 分组方式的一个 SDK 事实（filled_button.dart `themeStyleOf`）：filled 与
+  // tonal **共用** `FilledButtonThemeData.style`，主题层无法区分二者 —— 所以
+  // 主按钮实色与 tonal 的低饱和底都从 ColorScheme 槽位取：
+  //   FilledButton      → 读 `primary`（主按钮：--ac 实色，白字）
+  //   FilledButton.tonal* → 读 `secondaryContainer` / `onSecondaryContainer`
+  //     （普通按钮：StyleButton.color 半透面 + 该套 --ink2 字色；
+  //     liquid 浅色的半透白 0xB3 不满足 SDK 的 disabled/onPrimary 压字前提，
+  //     压实成白面板底再保留 18% 通透 —— 偏差如实记录）
+  final Color tonalSurface = style == AppStyle.liquid &&
+          brightness == Brightness.light
+      ? Color.lerp(button.color, c.surfaceSolid, 0.18)!
+      : button.color;
+  final ButtonStyle ordinaryButtonStyle = ButtonStyle(
+    backgroundColor: WidgetStatePropertyAll<Color>(tonalSurface),
+    foregroundColor: WidgetStatePropertyAll<Color>(c.textNormal),
+    overlayColor: WidgetStateProperty.resolveWith(
+      (Set<WidgetState> states) => states.contains(WidgetState.hovered)
+          ? c.surfaceCardHover.withValues(alpha: 0.35)
+          : null,
+    ),
+    side: WidgetStatePropertyAll<BorderSide>(
+      BorderSide(color: button.borderColor),
+    ),
+    shape: WidgetStatePropertyAll<OutlinedBorder>(
+      RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(style.radiusOf(AppRadius.field)),
+      ),
+    ),
+    elevation: const WidgetStatePropertyAll<double>(0),
+    shadowColor: WidgetStatePropertyAll<Color>(button.shadow.color),
+  );
+
   return ThemeData(
     useMaterial3: true,
     brightness: brightness,
@@ -292,7 +342,17 @@ ThemeData buildAppTheme(AppColors c, Brightness brightness) {
           primary: c.accent,
           surface: c.surfaceSolid,
           onSurface: c.textStrong,
+          // FilledButton（非 tonal）= 主按钮：--ac 实色底（见上方渐变能力边界）、
+          // 白字。fromSeed 的 primary 原本带 tone 偏移且未覆盖 onError。
+          onPrimary: Colors.white,
+          onError: Colors.white,
+          // FilledButton.tonal* = 普通按钮（见上方 tonalSurface 的说明）。
+          secondaryContainer: tonalSurface,
+          onSecondaryContainer: c.textNormal,
         ),
+    textButtonTheme: TextButtonThemeData(style: ordinaryButtonStyle),
+    outlinedButtonTheme: OutlinedButtonThemeData(style: ordinaryButtonStyle),
+    filledButtonTheme: FilledButtonThemeData(style: ordinaryButtonStyle),
     splashFactory: NoSplash.splashFactory,
     highlightColor: Colors.transparent,
   );
