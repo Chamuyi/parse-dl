@@ -20,6 +20,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_toast.dart';
 import '../l10n/l10n.dart';
+import '../widgets/page_header.dart';
 
 /// 抖音「自动下载」页 —— 对应 X 模块的「自动执行」。
 ///
@@ -414,6 +415,14 @@ class _DouyinAutoPageState extends State<DouyinAutoPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // 页头：共享 [PageHeader]（预览稿 `.head h1 .sub`）。这一页是
+        // 「上状态工具条 + 下双栏」，页头横跨整个页面宽度，插在工具条之上。
+        // 副题照 `PAGES['douyin-auto'].s` = 「按目标批量滚动抓取」。
+        PageHeader(
+          title: t('抖音自动下载'),
+          subtitle: t('按目标批量滚动抓取'),
+        ),
+        const SizedBox(height: 10),
         _toolbar(c, auto),
         const SizedBox(height: 12),
         Expanded(

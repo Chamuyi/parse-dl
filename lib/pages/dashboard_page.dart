@@ -11,6 +11,7 @@ import '../services/douyin_store.dart';
 import '../services/settings_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
+import '../widgets/page_header.dart';
 
 /// 首页「总览」。
 ///
@@ -106,6 +107,15 @@ class DashboardPage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(0, 16, 0, 16),
       children: [
+        // 页头：共享 [PageHeader]（预览稿 `.head h1 .sub`）。预览稿 `dashboard`
+        // 复用 HOME 的头，副题是「总览 · 快捷入口 · 最近活动」。这一页原本
+        // 没有页头，欢迎条就是第一块内容。
+        PageHeader(
+          title: t('总览'),
+          subtitle: t('总览 · 快捷入口 · 最近活动'),
+        ),
+        const SizedBox(height: 14),
+
         // ① 欢迎条
         _HeroBar(
           colors: c,

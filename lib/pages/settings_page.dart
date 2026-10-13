@@ -20,6 +20,7 @@ import '../widgets/proxy_section.dart';
 import '../widgets/style_picker.dart';
 import '../widgets/tint_picker.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/page_header.dart';
 
 /// 设置页。
 ///
@@ -67,6 +68,15 @@ enum SettingsScope {
     SettingsScope.douyin => Icons.music_note_rounded,
     SettingsScope.bili => Icons.play_circle_outline_rounded,
   };
+
+  /// 页头副题 —— 预览稿 `index.html` PAGES 每页的 `s:` 字段（660-724 行），
+  /// 逐个 scope 照抄。走 `t()` 由调用方翻译（[PageHeader] 不含中文字面量）。
+  String get subtitle => switch (this) {
+    SettingsScope.global => '外观 · 下载 · 代理 · 分模块',
+    SettingsScope.xDownload => '账号 · 下载 · 接口缓存',
+    SettingsScope.douyin => '下载源、筛选与命名',
+    SettingsScope.bili => '画质、合并、附加与命名',
+  };
 }
 
 class SettingsPage extends StatelessWidget {
@@ -101,7 +111,17 @@ class SettingsPage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: [
-        _PageHeader(title: t(scope.title), icon: scope.icon),
+        // 页头：共享 [PageHeader]（预览稿 `.head h1 .sub`）。旧版是自带 44×44
+        // accentSoft 图标方块的私有 _PageHeader，2026-10-13 按用户裁定换成
+        // 预览稿那一套纯文字页头。原私有页头的外边距 `only(top: 28, bottom: 24)`
+        // 在这里按等量间距补回，页面高度不塌。
+        Padding(
+          padding: const EdgeInsets.only(top: 28, bottom: 24),
+          child: PageHeader(
+            title: t(scope.title),
+            subtitle: t(scope.subtitle),
+          ),
+        ),
 
         // ── 外观 ──────────────────────────────────────────────
         if (scope == SettingsScope.global)
@@ -393,49 +413,8 @@ const List<_ModuleSettingsEntryData> _kModuleSettingsEntries = [
 ];
 
 // ────────────────────────────────────────────────────────────
-// 以下为通用布局组件，PageHeader / Section / Item
+// 以下为通用布局组件，Section / Item
 // ────────────────────────────────────────────────────────────
-
-class _PageHeader extends StatelessWidget {
-  final String title;
-  final IconData icon;
-
-  const _PageHeader({required this.title, required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = AppTheme.colorsOf(context);
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 28, bottom: 24),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: c.accentSoft,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: c.accentLine),
-              boxShadow: [BoxShadow(color: c.accentGlow, blurRadius: 18)],
-            ),
-            child: Icon(icon, size: 21, color: c.accentText),
-          ),
-          const SizedBox(width: 12),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w600,
-              letterSpacing: -0.3,
-              color: c.textStrong,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _Field extends StatelessWidget {
   final String label;

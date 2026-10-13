@@ -23,6 +23,7 @@ import '../widgets/bili_download_options_dialog.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/media_thumb.dart';
+import '../widgets/page_header.dart';
 
 /// 「B 站解析下载」页。
 ///
@@ -629,6 +630,14 @@ class _BiliPageState extends State<BiliPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // 页头：共享 [PageHeader]（预览稿 `.head h1 .sub`）。这一页是
+        // 「上工具条 + 下双栏」，页头横跨整个页面宽度，所以插在工具条之上
+        // 而不是塞进某一栏。副题照 `PAGES.bili.s` = 「左边浏览，右边抓取」。
+        PageHeader(
+          title: t('B 站解析下载'),
+          subtitle: t('左边浏览，右边抓取'),
+        ),
+        const SizedBox(height: 10),
         _buildToolbar(c),
         const SizedBox(height: 12),
         Expanded(

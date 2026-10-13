@@ -882,4 +882,19 @@ const Map<String, String> kStringsEn = {
   '提交 {n}': '{n} queued',
   '开始批量': 'Start batch',
   '未检测到 Edge WebView2 运行时。\n这一页的「UP 主主页投稿」与「我的自建收藏夹」要用到它；合集 / 系列 / 贴收藏夹 id 这几支仍然可以用纯接口那条路。': 'Edge WebView2 runtime was not detected.\nThis page needs it for "UP profile posts" and "my favorite folders"; collections, series and a pasted folder id still work through the plain API path.',
+
+  // ── 页头副标题（S9a 纯文字页头，2026-10-13）─────────────────────
+  //
+  // 文案逐条取自预览稿 `index.html` PAGES 表的 `s:` 字段（:360-724）。
+  // 这些是**页面级副标题**，与导航标签（'Downloads' / 'Auto Tasks'）不同：
+  // 更长、更描述性，侧边栏不会用到，所以不受那条「导航标签刻意收短」
+  // 的约束，按语义直译即可。
+  '版本、许可与本机环境': 'Version, licenses and local environment',
+  '按名单批量跑': 'Batch-run a user list',
+  '主页 / 合集 / 系列 / 收藏夹': 'Profile / collections / series / favorites',
+  '左边浏览，右边抓取': 'Browse on the left, grab on the right',
+  '总览 · 快捷入口 · 最近活动': 'Overview · shortcuts · recent activity',
+  '抖音自动下载': 'Douyin Auto Download',
+  '按目标批量滚动抓取': 'Batch-scroll targets',
+  'X 主页': 'X Home',
 };

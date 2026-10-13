@@ -14,6 +14,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_toast.dart';
 import '../l10n/l10n.dart';
+import '../widgets/page_header.dart';
 
 /// 自动执行页：批量处理一组用户 ID。
 ///
@@ -95,6 +96,16 @@ class _AutoTaskPageState extends State<AutoTaskPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(0, 16, 0, 24),
       children: [
+        // 页头：共享 [PageHeader]（预览稿 `.head h1 .sub`），副题照
+        // `PAGES['auto-task'].s` = 「按名单批量跑」。这一页原本没有页头，
+        // 告警条之上直接就是卡片；补上页头后不再另加间距 —— ListView 的
+        // top 16 padding 已经构成页头与窗口上沿的距离。
+        PageHeader(
+          title: t('自动执行'),
+          subtitle: t('按名单批量跑'),
+        ),
+        const SizedBox(height: 12),
+
         // ① 顶部告警
         if (store.running)
           _Alert(

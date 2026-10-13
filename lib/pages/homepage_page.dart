@@ -14,6 +14,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_toast.dart';
 import '../l10n/l10n.dart';
+import '../widgets/page_header.dart';
 
 /// 主页：搜索用户 → 加载用户信息 → 预览媒体列表 → 触发下载。
 ///
@@ -165,6 +166,16 @@ class _HomepagePageState extends State<HomepagePage> {
       controller: _pageCtrl,
       padding: const EdgeInsets.fromLTRB(0, 16, 0, 16),
       children: [
+        // 页头：共享 [PageHeader]（预览稿 `.head h1 .sub`），副题照
+        // `PAGES.home.s` = 「下载某个 X 用户的全部媒体」。这一页原本没有
+        // 页头，Hero 卡自己就是标题区；预览稿里 hero 内的 b/small 与页头
+        // 分工明确，所以页头只给标题行，正文与 hero 之间补一档间距。
+        PageHeader(
+          title: t('X 主页'),
+          subtitle: t('下载某个 X 用户的全部媒体'),
+        ),
+        const SizedBox(height: 14),
+
         // ① Hero 搜索区
         AppCard(
           padding: const EdgeInsets.fromLTRB(24, 22, 24, 22),

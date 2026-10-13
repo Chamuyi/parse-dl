@@ -17,6 +17,7 @@ import '../widgets/download_list_item.dart';
 import '../l10n/l10n.dart';
 import '../services/app_logger.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/page_header.dart';
 
 /// 下载管理页归属哪个模块。
 ///
@@ -127,97 +128,127 @@ class _DownloadManagementPageState extends State<DownloadManagementPage> {
         ? store.currentTab
         : _tabs.first.$1;
 
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // ① aria2 启动状态（不在顶部显示「启动中…」，避免每次切换都要抖动）
-          if (!coordinator.booted)
-            Container(
-              margin: const EdgeInsets.fromLTRB(14, 8, 14, 0),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: c.dangerSoft,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: c.danger.withValues(alpha: 0.3)),
-              ),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.6, color: c.danger),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      t('aria2 未启动，请稍候或重启应用'),
-                      style: TextStyle(fontSize: 12.5, color: c.danger),
+    // 页头：共享 [PageHeader]（预览稿 `.head h1 .sub`）。这一页原本整个
+    // 页面就是一张大卡（Tab 栏就是页头），现在把页头拆出来放在卡外 ——
+    // 预览稿 `download-management` / `douyin-downloads` / `bili-downloads`
+    // 三页共用同一结构：`.head` 之上、`.tabs2` 之下各归各位。
+    //
+    // 副题三个模块各一句：预览稿的 `s:` 分别是「X 媒体」/「抖音」/「B 站」。
+    final subtitle = switch (feed) {
+      DownloadFeed.x => 'X 媒体',
+      DownloadFeed.douyin => '抖音',
+      DownloadFeed.bili => 'B 站',
+    };
+    final title = switch (feed) {
+      DownloadFeed.x => '下载管理',
+      DownloadFeed.douyin => '下载管理',
+      DownloadFeed.bili => '下载管理',
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        PageHeader(title: t(title), subtitle: t(subtitle)),
+        const SizedBox(height: 12),
+        Expanded(
+          child: AppCard(
+            padding: const EdgeInsets.fromLTRB(0, 4, 0, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // ① aria2 启动状态（不在顶部显示「启动中…」，避免每次切换都要抖动）
+                if (!coordinator.booted)
+                  Container(
+                    margin: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: c.dangerSoft,
+                      borderRadius: BorderRadius.circular(8),
+                      border:
+                          Border.all(color: c.danger.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.6, color: c.danger),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            t('aria2 未启动，请稍候或重启应用'),
+                            style:
+                                TextStyle(fontSize: 12.5, color: c.danger),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                // ② 「创建中」的任务（对应原版 CreationTasks 组件）—— 只有 X 侧有翻页抓取
+                if (feed.hasCreationTasks) const _CreationTasksSection(),
+
+                // ③ Tab 头 + 工具栏
+                Row(
+                  children: [
+                    for (final tab in _tabs)
+                      _TabButton(
+                        label: t(tab.$1),
+                        // 角标只算 aria2 里的任务，和点进去看到的列表严格一致。
+                        // 原版把「创建中」的任务数也加进「下载中」角标，结果是
+                        // 角标写着 16、列表却是空的（创建中的用户在上方那个区块里，
+                        // 不在这个列表里）—— 看着像坏了。
+                        count: store
+                            .tasksByStatuses(tab.$2, source: feed.source)
+                            .length,
+                        selected: currentName == tab.$1,
+                        onTap: () => store.setCurrentTab(tab.$1),
+                      ),
+                    if (historyTab case final tab?)
+                      _TabButton(
+                        label: t(tab),
+                        count: historyCount,
+                        selected: currentName == tab,
+                        onTap: () => store.setCurrentTab(tab),
+                      ),
+                    const Spacer(),
+                    // 一键重试只在「错误」Tab 出现：别的 Tab 里没有可重试的东西，
+                    // 常驻一个灰按钮只会让人以为"全部暂停"那种全局动作。
+                    if (currentName == _tabs[1].$1)
+                      _RetryAllFailed(
+                        failed: store.tasksByStatuses(
+                            _tabs[1].$2, source: feed.source),
+                        coordinator: coordinator,
+                      ),
+                    _Toolbar(
+                        coordinator: coordinator, store: store, feed: feed),
+                    const SizedBox(width: 8),
+                  ],
+                ),
+                Divider(height: 0.5, thickness: 0.5, color: c.line),
+
+                // ② 内容
+                Expanded(
+                  child: (historyTab != null && currentName == historyTab)
+                      ? _historyBody(feed)
+                      : _TabBody(
+                          statuses: _tabs
+                              .firstWhere((t) => t.$1 == currentName,
+                                  orElse: () => _tabs.first)
+                              .$2,
+                          tabName: currentName,
+                          coordinator: coordinator,
+                          store: store,
+                          feed: feed,
+                        ),
+                ),
+              ],
             ),
-          // ② 「创建中」的任务（对应原版 CreationTasks 组件）—— 只有 X 侧有翻页抓取
-          if (feed.hasCreationTasks) const _CreationTasksSection(),
-
-          // ③ Tab 头 + 工具栏
-          Row(
-            children: [
-              for (final tab in _tabs)
-                _TabButton(
-                  label: t(tab.$1),
-                  // 角标只算 aria2 里的任务，和点进去看到的列表严格一致。
-                  // 原版把「创建中」的任务数也加进「下载中」角标，结果是
-                  // 角标写着 16、列表却是空的（创建中的用户在上方那个区块里，
-                  // 不在这个列表里）—— 看着像坏了。
-                  count: store
-                      .tasksByStatuses(tab.$2, source: feed.source)
-                      .length,
-                  selected: currentName == tab.$1,
-                  onTap: () => store.setCurrentTab(tab.$1),
-                ),
-              if (historyTab case final tab?)
-                _TabButton(
-                  label: t(tab),
-                  count: historyCount,
-                  selected: currentName == tab,
-                  onTap: () => store.setCurrentTab(tab),
-                ),
-              const Spacer(),
-              // 一键重试只在「错误」Tab 出现：别的 Tab 里没有可重试的东西，
-              // 常驻一个灰按钮只会让人以为"全部暂停"那种全局动作。
-              if (currentName == _tabs[1].$1)
-                _RetryAllFailed(
-                  failed: store.tasksByStatuses(_tabs[1].$2, source: feed.source),
-                  coordinator: coordinator,
-                ),
-              _Toolbar(coordinator: coordinator, store: store, feed: feed),
-              const SizedBox(width: 8),
-            ],
           ),
-          Divider(height: 0.5, thickness: 0.5, color: c.line),
-
-          // ② 内容
-          Expanded(
-            child: (historyTab != null && currentName == historyTab)
-                ? _historyBody(feed)
-                : _TabBody(
-                    statuses: _tabs
-                        .firstWhere((t) => t.$1 == currentName,
-                            orElse: () => _tabs.first)
-                        .$2,
-                    tabName: currentName,
-                    coordinator: coordinator,
-                    store: store,
-                    feed: feed,
-                  ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 

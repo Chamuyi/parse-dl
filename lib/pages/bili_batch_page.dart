@@ -19,6 +19,7 @@ import '../services/settings_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/bili_download_options_dialog.dart';
+import '../widgets/page_header.dart';
 import 'bili_page.dart' show kBiliHomeUrl, biliPageTransportFor;
 
 /// 「B 站批量下载」页：一次贴多条主页 / 合集 / 系列 / 收藏夹，逐条翻到尽并投队列。
@@ -362,21 +363,40 @@ class _BiliBatchPageState extends State<BiliBatchPage> {
     final c = AppTheme.colorsOf(context);
     final store = context.watch<BiliBatchStore>();
 
-    return Row(
+    // 页头归整个页面（预览稿 `.head` 横跨左右两栏），所以挂在页面根而不是
+    // 右面板里 —— 放进 `_panel` 会让它被右栏 400px 的宽度挤成两行。
+    final header = PageHeader(
+      title: t('B 站批量下载'),
+      subtitle: t('主页 / 合集 / 系列 / 收藏夹'),
+    );
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          child: header,
+        ),
+        const SizedBox(height: 10),
         Expanded(
-          flex: 3,
-          child: _browser(c),
-        ),
-        Container(
-          width: 1.2,
-          margin: const EdgeInsets.symmetric(vertical: 10),
-          color: c.line,
-        ),
-        SizedBox(
-          width: 400,
-          child: _panel(c, store),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 3,
+                child: _browser(c),
+              ),
+              Container(
+                width: 1.2,
+                margin: const EdgeInsets.symmetric(vertical: 10),
+                color: c.line,
+              ),
+              SizedBox(
+                width: 400,
+                child: _panel(c, store),
+              ),
+            ],
+          ),
         ),
       ],
     );

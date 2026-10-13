@@ -21,6 +21,7 @@ import '../widgets/app_card.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/douyin_result_overlay.dart';
 import '../l10n/l10n.dart';
+import '../widgets/page_header.dart';
 
 /// 「抖音」页。
 ///
@@ -808,6 +809,14 @@ class _DouyinPageState extends State<DouyinPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // 页头：共享 [PageHeader]（预览稿 `.head h1 .sub`）。这一页是
+        // 「上工具条 + 下双栏」，页头横跨整个页面宽度，插在工具条之上。
+        // 副题照 `PAGES.douyin.s` = 「左边浏览，右边抓取」。
+        PageHeader(
+          title: t('抖音解析下载'),
+          subtitle: t('左边浏览，右边抓取'),
+        ),
+        const SizedBox(height: 10),
         _buildToolbar(c, store),
         const SizedBox(height: 12),
         Expanded(

@@ -9,6 +9,7 @@ import '../services/app_paths.dart';
 import '../services/webview2_version.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
+import '../widgets/page_header.dart';
 
 /// 进程级缓存：WebView2 版本在运行期不会变，只查一次注册表。
 /// （Dart 的顶层 `final` 是惰性的，首次访问才发起查询。）
@@ -34,6 +35,15 @@ class AboutPage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(0, 16, 0, 16),
       children: [
+        // 页头：共享 [PageHeader]（预览稿 `.head h1 .sub`）。这一页原本
+        // 没有页头，标识区自己就是「Logo + 大标题」，现在按预览稿 `about`
+        // 页补上纯文字页头，副题照 `PAGES.about.s`。
+        PageHeader(
+          title: t('关于'),
+          subtitle: t('版本、许可与本机环境'),
+        ),
+        const SizedBox(height: 14),
+
         // ── 标识 + 基本信息 ────────────────────────────────
         AppCard(
           padding: const EdgeInsets.all(28),
