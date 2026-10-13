@@ -110,17 +110,20 @@ class _HomepagePageState extends State<HomepagePage> {
   }
 
   Future<void> _startSearch() async {
+    final appState = context.read<AppState>();
+    // 登录检查必须先于空输入检查：未登录时按钮是可点的（见 _SearchBar
+    // 的 disabledReason），空输入点击也该弹登录提示 —— 占位符
+    // 「未登录，点右侧按钮会提示登录」承诺的就是这个交互。
+    if (!appState.isLoggedIn) {
+      _toast(t('请先在「设置」中登录 X 账号'));
+      return;
+    }
     final sn = _inputCtrl.text.trim();
     if (sn.isEmpty) {
       _toast(t('请输入用户 ID'));
       return;
     }
     final hp = context.read<HomepageStore>();
-    final appState = context.read<AppState>();
-    if (!appState.isLoggedIn) {
-      _toast(t('请先在「设置」中登录 X 账号'));
-      return;
-    }
 
     await hp.loadUser(sn);
     if (!mounted) return;
@@ -200,6 +203,9 @@ class _HomepagePageState extends State<HomepagePage> {
                 hint: t(loggedIn
                     ? '请输入用户 ID，如：example_user'
                     : '未登录，点右侧按钮会提示登录'),
+                // 未登录时放开空输入禁用：按钮可点，由 _startSearch 弹登录提示。
+                disabledReason:
+                    loggedIn ? null : t('请先在「设置」中登录 X 账号'),
                 onSubmit: _startSearch,
               ),
               if (appState.searchHistory.isNotEmpty) ...[
@@ -240,11 +246,17 @@ class _SearchBar extends StatefulWidget {
   final String hint;
   final VoidCallback onSubmit;
 
+  /// 非空 = 按钮因这个原因放开禁用（点了走 [onSubmit]，由调用方的
+  /// 业务检查弹提示）。典型值：未登录时的登录提示 —— 此时按钮必须可点，
+  /// 否则那条提示永远走不到。null = 维持「空输入即禁用」的原行为。
+  final String? disabledReason;
+
   const _SearchBar({
     required this.controller,
     required this.loading,
     required this.hint,
     required this.onSubmit,
+    this.disabledReason,
   });
 
   @override
@@ -310,7 +322,9 @@ class _SearchBarState extends State<_SearchBar> {
         SizedBox(
           height: 46,
           child: FilledButton(
-            onPressed: loading || controller.text.trim().isEmpty
+            onPressed: loading ||
+                    (controller.text.trim().isEmpty &&
+                        widget.disabledReason == null)
                 ? null
                 : widget.onSubmit,
             style: FilledButton.styleFrom(
