@@ -17,7 +17,16 @@ final Future<String?> _webView2 = webView2Version();
 
 /// 「关于」页面。
 ///
-/// 内容组织参照常见桌面软件：标识区 → 版本信息 → 数据与诊断 → 开源组件。
+/// 内容组织参照预览稿 `about` 页的骨架：纯文字页头 → **双栏两卡**
+/// （版本与许可 ｜ 本机环境与数据）→ 单栏的开源组件。
+///
+/// 双栏规格逐行取自 `tools/ui/_redesign/preview/app.css`：
+///
+/// ```
+/// :111 .cols { flex:1; min-height:0; display:flex; gap:11px; }
+/// :112 .pane { display:flex; flex-direction:column; min-width:0; min-height:0; }
+/// ```
+///
 /// **不写「基于某某项目二次开发」** —— 用户 2026-09-20 明确要求；许可证本身
 /// 照实声明（见 [_kThirdParty] 与 app.dart 的 `license`）。
 ///
@@ -44,135 +53,153 @@ class AboutPage extends StatelessWidget {
         ),
         const SizedBox(height: 14),
 
-        // ── 标识 + 基本信息 ────────────────────────────────
-        AppCard(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const _LogoBadge(),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+        // ── 双栏（预览稿 `.cols`，gap 11px，两栏 flex:1）──────────
+        //
+        // 两卡的行数不同，所以 crossAxisAlignment 取 start：各自按内容取高。
+        // 不用 stretch —— ListView 里高度无界，stretch 会当场抛约束错误。
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── 左：标识 + 版本与许可 ────────────────────────
+            Expanded(
+              child: AppCard(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Text(
-                          t(info.name),
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w600,
-                            color: c.textStrong,
-                            letterSpacing: -0.2,
+                        const _LogoBadge(),
+                        const SizedBox(width: 20),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                t(info.name),
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w600,
+                                  color: c.textStrong,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                t(info.tagline),
+                                style: TextStyle(
+                                    fontSize: 13.5, color: c.textMuted),
+                              ),
+                            ],
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          t(info.tagline),
-                          style: TextStyle(fontSize: 13.5, color: c.textMuted),
                         ),
                       ],
                     ),
-                  ),
-                ],
-              ),
 
-              const SizedBox(height: 22),
+                    const SizedBox(height: 22),
 
-              _InfoRow(
-                label: t('版本号'),
-                colors: c,
-                child: _VersionBadge(value: info.version, colors: c),
-              ),
-              _InfoRow(
-                label: t('作者'),
-                colors: c,
-                child: Text(
-                  info.author,
-                  style: TextStyle(color: c.textStrong),
+                    _InfoRow(
+                      label: t('版本号'),
+                      colors: c,
+                      child: _VersionBadge(value: info.version, colors: c),
+                    ),
+                    _InfoRow(
+                      label: t('作者'),
+                      colors: c,
+                      child: Text(
+                        info.author,
+                        style: TextStyle(color: c.textStrong),
+                      ),
+                    ),
+                    _InfoRow(
+                      label: t('许可证'),
+                      colors: c,
+                      child: Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 6,
+                        children: [
+                          Text(
+                            info.license,
+                            style: TextStyle(color: c.textStrong),
+                          ),
+                          _LinkText(
+                            text: t('条款全文'),
+                            url: 'https://www.gnu.org/licenses/gpl-3.0.html',
+                            colors: c,
+                          ),
+                        ],
+                      ),
+                    ),
+                    _InfoRow(
+                      label: t('系统要求'),
+                      colors: c,
+                      child: Text(
+                        t('Windows 10 64 位及以上 · 需 WebView2 Runtime'),
+                        style: TextStyle(color: c.textNormal, fontSize: 13),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              _InfoRow(
-                label: t('许可证'),
-                colors: c,
-                child: Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 6,
+            ),
+
+            // 预览稿 `.cols { gap: 11px }`
+            const SizedBox(width: 11),
+
+            // ── 右：数据与诊断 ───────────────────────────────
+            Expanded(
+              child: AppCard(
+                padding: const EdgeInsets.fromLTRB(28, 20, 28, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    _SectionTitle(t('本机环境与数据'), c),
+                    const SizedBox(height: 6),
                     Text(
-                      info.license,
-                      style: TextStyle(color: c.textStrong),
+                      t('反馈问题时把这几项一并附上即可。'
+                          '本程序不含遥测、也不自动更新。'),
+                      style: TextStyle(
+                          fontSize: 12.5, color: c.textMuted, height: 1.6),
                     ),
-                    _LinkText(
-                      text: t('条款全文'),
-                      url: 'https://www.gnu.org/licenses/gpl-3.0.html',
+                    const SizedBox(height: 10),
+                    _DiagRow(
+                      label: t('本机系统'),
+                      value: Platform.operatingSystemVersion,
+                      colors: c,
+                    ),
+                    FutureBuilder<String?>(
+                      future: _webView2,
+                      builder: (context, snap) => _DiagRow(
+                        label: 'WebView2',
+                        value: switch (snap.connectionState) {
+                          ConnectionState.done =>
+                            snap.data ?? t('未检测到（抖音页会加载失败）'),
+                          _ => t('读取中…'),
+                        },
+                        colors: c,
+                      ),
+                    ),
+                    _DiagRow(
+                      label: t('数据目录'),
+                      value: AppPaths.configDir.path,
+                      openPath: AppPaths.configDir.path,
+                      colors: c,
+                    ),
+                    _DiagRow(
+                      label: t('日志目录'),
+                      value: AppPaths.logsDir.path,
+                      openPath: AppPaths.logsDir.path,
                       colors: c,
                     ),
                   ],
                 ),
               ),
-              _InfoRow(
-                label: t('系统要求'),
-                colors: c,
-                child: Text(
-                  t('Windows 10 64 位及以上 · 需 WebView2 Runtime'),
-                  style: TextStyle(color: c.textNormal, fontSize: 13),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
 
-        // ── 数据与诊断 ─────────────────────────────────────
-        AppCard(
-          padding: const EdgeInsets.fromLTRB(28, 20, 28, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SectionTitle(t('本机环境与数据'), c),
-              const SizedBox(height: 6),
-              Text(
-                t('反馈问题时把这几项一并附上即可。'
-                    '本程序不含遥测、也不自动更新。'),
-                style: TextStyle(fontSize: 12.5, color: c.textMuted, height: 1.6),
-              ),
-              const SizedBox(height: 10),
-              _DiagRow(
-                label: t('本机系统'),
-                value: Platform.operatingSystemVersion,
-                colors: c,
-              ),
-              FutureBuilder<String?>(
-                future: _webView2,
-                builder: (context, snap) => _DiagRow(
-                  label: 'WebView2',
-                  value: switch (snap.connectionState) {
-                    ConnectionState.done =>
-                      snap.data ?? t('未检测到（抖音页会加载失败）'),
-                    _ => t('读取中…'),
-                  },
-                  colors: c,
-                ),
-              ),
-              _DiagRow(
-                label: t('数据目录'),
-                value: AppPaths.configDir.path,
-                openPath: AppPaths.configDir.path,
-                colors: c,
-              ),
-              _DiagRow(
-                label: t('日志目录'),
-                value: AppPaths.logsDir.path,
-                openPath: AppPaths.logsDir.path,
-                colors: c,
-              ),
-            ],
-          ),
-        ),
-
-        // ── 开源组件 ───────────────────────────────────────
+        // ── 开源组件（单栏，留在双栏之后）───────────────────────
         AppCard(
           padding: const EdgeInsets.fromLTRB(28, 20, 28, 20),
           child: Column(
