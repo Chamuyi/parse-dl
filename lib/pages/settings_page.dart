@@ -11,7 +11,6 @@ import '../widgets/account_section.dart';
 import '../widgets/app_section.dart';
 import '../widgets/background_picker.dart';
 import '../widgets/bili_section.dart';
-import '../widgets/collapsible_group.dart';
 import '../widgets/download_section.dart';
 import '../widgets/douyin_section.dart';
 import '../widgets/material_picker.dart';
@@ -275,14 +274,10 @@ class SettingsPage extends StatelessWidget {
         // （没登录就抓不到媒体），所以跟保存路径、模板一起放在
         // 「X 下载 › 设置」里，不再占全局设置的位置。
         if (scope == SettingsScope.xDownload)
-          CollapsibleGroup(
-            storageId: 'section.account',
-            variant: CollapsibleVariant.section,
+          SectionCard(
             title: t('账号'),
-            icon: Icons.account_circle_outlined,
-            summary: t('登录状态、cookie 输入与验证'),
-            expandLabel: t('展开设置'),
-            children: const [AccountSection()],
+            trailing: t('登录状态、cookie 输入与验证'),
+            child: const AccountSection(),
           ),
 
         // ── 接口缓存 ──────────────────────────────────────────
@@ -296,15 +291,10 @@ class SettingsPage extends StatelessWidget {
         // 各自的设置页里也没有对应物，放在全局「高级」里等于让全局页替某一个
         // 模块背排障工具。
         if (scope == SettingsScope.xDownload)
-          CollapsibleGroup(
-            storageId: 'section.x_api_cache',
-            variant: CollapsibleVariant.section,
+          SectionCard(
             title: t('接口缓存'),
-            icon: Icons.cached_rounded,
-            summary: t('X 接口标识缓存（搜索用户或加载媒体失败时使用）'),
-            expandLabel: t('展开设置'),
-            children: [
-              _Field(
+            trailing: t('X 接口标识缓存（搜索用户或加载媒体失败时使用）'),
+            child: _Field(
                 label: t('刷新 X 接口缓存'),
                 description:
                     t('搜索用户或加载媒体失败时（如提示「找不到该用户」或长时间无响应），'
@@ -322,43 +312,30 @@ class SettingsPage extends StatelessWidget {
                   ),
                 ),
               ),
-            ],
           ),
 
         // ── 下载 ──────────────────────────────────────────────
         if (scope == SettingsScope.xDownload)
-          CollapsibleGroup(
-            storageId: 'section.download',
-            variant: CollapsibleVariant.section,
+          SectionCard(
             title: t('下载'),
-            icon: Icons.download_rounded,
-            summary: t('保存路径、文件夹 / 文件名模板、同名文件处理'),
-            expandLabel: t('展开设置'),
-            children: const [DownloadSection()],
+            trailing: t('保存路径、文件夹 / 文件名模板、同名文件处理'),
+            child: const DownloadSection(),
           ),
 
         // ── 抖音 ──────────────────────────────────────────────
         if (scope == SettingsScope.douyin)
-          CollapsibleGroup(
-            storageId: 'section.douyin',
-            variant: CollapsibleVariant.section,
+          SectionCard(
             title: t('抖音'),
-            icon: Icons.music_video_rounded,
-            summary: t('下载源、质量优先策略、图片格式、批量与筛选选项'),
-            expandLabel: t('展开设置'),
-            children: const [DouyinSection()],
+            trailing: t('下载源、质量优先策略、图片格式、批量与筛选选项'),
+            child: const DouyinSection(),
           ),
 
         // ── B 站 ──────────────────────────────────────────────
         if (scope == SettingsScope.bili)
-          CollapsibleGroup(
-            storageId: 'section.bili',
-            variant: CollapsibleVariant.section,
+          SectionCard(
             title: t('B 站'),
-            icon: Icons.play_circle_outline_rounded,
-            summary: t('画质上限、编码偏好、下载完合并、命名模板'),
-            expandLabel: t('展开设置'),
-            children: const [BiliSection()],
+            trailing: t('画质上限、编码偏好、下载完合并、命名模板'),
+            child: const BiliSection(),
           ),
 
       ],
