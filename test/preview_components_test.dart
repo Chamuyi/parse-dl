@@ -148,16 +148,15 @@ void main() {
     expect(gotValue, '4K');
     expect(gotItem?.label, '画质上限');
 
-    // 已知组件缺陷（**未修**，越出 S9a 边界）：`showOptPicker` 的弹层容器是
-    // 带底色的 `DecoratedBox`，SDK 的 ListTile 在 debug 下会断言「背景色与
-    // 水波纹可能被挡住」（`list_tile.dart:1147` `_debugCheckBackgroundIsHidden`）。
-    // 这里只吞掉它、继续验证交互链；下面这条断言是**自检**：组件一旦按 SDK
-    // 提示修好（容器换 `Material` 或给 ListTile 包 `Material`），它就变红，
-    // 提示把吞异常删掉 —— 不是恒真断言。
+    // S9b 修掉了这条缺陷：弹层容器从带底色的 `DecoratedBox` 换成 `Material`
+    // （SDK `list_tile.dart` 的 `_debugCheckBackgroundIsHidden` 会拿最近的
+    // 有底色祖先判「ListTile 的底色与水波纹被挡」）。原来这里吞掉那个断言并
+    // 反向断言「异常必须还在」—— 组件修好后它就会红、提示删掉。现已删除。
+    // 下面这条是**新的正向判据**：整个交互链跑完，一帧异常都不许有。
     expect(
       tester.takeException(),
-      isNotNull,
-      reason: '弹层已不再报 ListTile 遮挡断言 —— 请删掉这里的 takeException',
+      isNull,
+      reason: '弹层已换 Material 容器，ListTile 遮挡断言不该再报',
     );
   });
 

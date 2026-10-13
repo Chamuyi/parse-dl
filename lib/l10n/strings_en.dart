@@ -343,8 +343,6 @@ const Map<String, String> kStringsEn = {
   '，': ', ',
   '例如：抖音收藏': 'e.g. Douyin favourites',
   '选择': 'Choose',
-  '留空则使用 %USERPROFILE%\\Downloads\\解析下载器':
-      'Leave empty to use %USERPROFILE%\\Downloads\\Parse Downloader',
   '自定义（已手动修改）': 'Custom (edited)',
   '文件夹模板': 'Folder template',
   '文件模板': 'File template',
@@ -496,7 +494,6 @@ const Map<String, String> kStringsEn = {
   '已保存模板': 'Saved templates',
   '保存模板': 'Save template',
   '模板改动会自动保存': 'Template changes are saved automatically',
-  '跳过同名文件': 'Skip same file name',
   '按模板算出的完整路径已存在则跳过，不重新下载':
       'Skip when the full path computed from the template already exists',
   '填入默认': 'Fill defaults',
@@ -508,11 +505,9 @@ const Map<String, String> kStringsEn = {
   '参数格式：%VARIABLE,a=1,b=2%，如 %{ex}%（{desc}）。':
       'Parameter syntax: %VARIABLE,a=1,b=2%, e.g. %{ex}% ({desc}).',
   '{name}：{desc}（默认：{def}）': '{name}: {desc} (default: {def})',
-  '记录日志文件': 'Write log files',
   '开启后把 aria2 输出、X API 请求与错误写入本地日志（不影响应用速度）':
       'When on, aria2 output plus X API requests and errors go to a local log '
       '(does not slow the app down)',
-  '日志目录：{path}': 'Log folder: {path}',
   '今天还没有日志文件 —— 请先打开上面的开关，再操作一次':
       'No log file today — turn the switch on above, then do something once',
   '查看日志': 'View log',
@@ -692,17 +687,6 @@ const Map<String, String> kStringsEn = {
   '画质上限': 'Quality ceiling',
   '编码偏好': 'Codec preference',
   '下载完成后合并': 'Merge after download',
-  '外挂 ffmpeg（可选）': 'External ffmpeg (optional)',
-  '留空就用程序自带的那份。指一个目录可以换成你自己的完整版 ffmpeg —— '
-      '自带那份是精简构建（约 10 MB），只能把视频流和音频流原样合起来，'
-      '做不了转码、也没有 ffprobe。完整版能转码、烧字幕、看轨道信息。'
-      '目录里直接放 ffmpeg.exe，或者放它的 bin 子目录，两种都认。':
-      'Leave empty to use the bundled copy. Point it at a folder to use your own '
-          'full ffmpeg instead — the bundled one is a trimmed build (~10 MB) that '
-          'can only remux the video and audio streams together: no transcoding, '
-          'no ffprobe. A full build can transcode, burn in subtitles, and inspect '
-          'streams. Either keep ffmpeg.exe directly in that folder or in a bin '
-          'subfolder; both are recognised.',
   '（空 = 用自带那份）': '(empty = use the bundled one)',
   '改回用自带那份': 'Switch back to the bundled copy',
   '跳过已下载的分 P': 'Skip parts already downloaded',
@@ -711,28 +695,6 @@ const Map<String, String> kStringsEn = {
   '保存与命名': 'Save location and naming',
   '启用保存文件夹': 'Use save subfolder',
   '启用模版': 'Template preset',
-  '这里是「上限」而不是保证：B 站会按你账号的实际权限（大会员、付费稿件）'
-      '把拿不到的高阶档位直接裁掉，所以选了「1080P 60帧」也可能只下到 1080P。'
-      '这是 B 站和本项目另两个模块最大的行为差异 —— 那里档位由平台返回的候选决定，'
-      '这里还要多过一道账号权限，选高了不会报错，只会安静地退回能拿到的那一档。':
-      'This is a ceiling, not a guarantee: Bilibili drops the tiers your account '
-      'cannot reach (premium membership, paid content) before answering, so '
-      'picking 1080P 60fps may still download plain 1080P. This is the biggest '
-      'behavioral difference from the other two modules here — there the tier '
-      'comes from whatever the platform returns, here it also passes an account '
-      'permission check. Asking too high never errors, it quietly falls back to '
-      'the best tier you can actually get.',
-  '同一档画质 B 站通常同时给 H.264 / HEVC / AV1 三条流。选哪条不影响清晰度，'
-      '只影响体积和播放器兼容性 —— HEVC / AV1 同画质更小，但老播放器与部分剪辑软件不认；'
-      '「自动（兼容性优先）」挑哪边都能播的那条。这条同样只是偏好：稿件没有该编码的流时会退回其它编码，'
-      '画质上限那套账号裁档的规则对这里一样成立。':
-      'At the same quality Bilibili usually offers three streams: H.264, HEVC '
-      'and AV1. Picking one does not change sharpness, only file size and '
-      'playback compatibility — HEVC / AV1 are smaller at the same quality but '
-      'older players and some editors refuse them. Auto (compatibility first) '
-      'takes whichever plays everywhere. This is also only a preference: when '
-      'the video has no stream in that codec it falls back to another one, and '
-      'the account permission filter from the quality ceiling applies here too.',
   'B 站的视频流和音频流是分开的两个文件，下完是两个 .m4s，'
       '各自都不能单独播放 —— 必须先用 ffmpeg 合成一个 .mp4 才能看，所以默认开着。'
       '留这个开关只有一种用途：合并要用的 ffmpeg 被安全软件拦下时，'
@@ -756,34 +718,11 @@ const Map<String, String> kStringsEn = {
   '一个稿件的多个分 P 会占连续位置，跨稿件的才交错。关闭后严格按抓取顺序入队。':
       'Parts of one video take consecutive slots; only different videos '
       'interleave. When off, items are queued strictly in fetch order.',
-  'aria2 同时下载的任务数上限（默认 4）。这是那一个下载进程的全局上限，'
-      '不是只作用于 B 站的队列 —— 调大它，同时在下的别的内容也会一起挤这几个槽位。':
-      'Maximum concurrent aria2 transfers (default 4). This caps the whole '
-      'download process, not just the Bilibili queue — raising it lets other '
-      'downloads compete for the same slots.',
-  '模板变量 %CUSTOM_TEXT% 的输出内容，可用来给文件名加前缀、标注批次等。'
-      '留空时这个变量就是空串。':
-      'What %CUSTOM_TEXT% expands to — use it for a file name prefix, a batch '
-      'mark and so on. Left empty, the variable becomes an empty string.',
   '例如：追番清单': 'e.g. Anime watchlist',
-  'B 站下载存到哪个根目录、往下怎么建子文件夹、文件叫什么名字，都由下面这几项决定。'
-      '可用变量都是 B 站语义的：%WORK_TITLE% 作品标题、%PART_TITLE% 分P标题、'
-      '%P% 分P序号、%BVID% BV 号、%UP_NAME% UP 主昵称、%QUALITY% 画质、'
-      '%CODEC% 编码格式等。':
-      'Which root folder Bilibili downloads land in, what subfolders go under '
-      'it and what the files are called all come from the options below. Every '
-      'variable is Bilibili-flavoured: %WORK_TITLE% video title, %PART_TITLE% '
-      'part title, %P% part number, %BVID% BV id, %UP_NAME% uploader name, '
-      '%QUALITY% quality, %CODEC% codec.',
   '开启：按下面的「文件夹模板」建子目录再存；'
       '关闭：忽略文件夹模板，文件全部平铺在保存根目录里':
       'On: build subfolders from the folder template below. Off: ignore the '
       'folder template and lay every file in the save root.',
-  '从现成组合里挑一套，一键填进下面两个模板框；之后仍可手动微调，'
-      '改过之后这里会显示「自定义」。':
-      'Pick a ready-made pair and it fills both template fields below in one '
-      'go. You can still fine-tune them afterwards — once you do, this shows '
-      'Custom.',
   '留空则直接存到保存目录下': 'Leave empty to save straight into the save folder',
   '「启用保存文件夹」已关闭 —— 文件全部平铺在保存目录下':
       'Use save subfolder is off — every file goes flat into the save folder',
@@ -897,4 +836,118 @@ const Map<String, String> kStringsEn = {
   '抖音自动下载': 'Douyin Auto Download',
   '按目标批量滚动抓取': 'Batch-scroll targets',
   'X 主页': 'X Home',
+
+  // ── S9b 设置四页平铺：账号 / 应用 / 代理（2026-10-13）─────────
+  '登录状态': 'Sign-in state',
+  '已登录 X 账号': 'Signed in to X',
+  '尚未登录': 'Not signed in yet',
+  '已登录': 'Signed in',
+  '未登录': 'Not signed in',
+  '显示': 'Show',
+  '隐藏': 'Hide',
+  '重新登录': 'Sign in again',
+  '退出登录': 'Sign out',
+  '写日志到文件': 'Write logs to a file',
+  '启动时检查更新': 'Check for updates on startup',
+  '启动后自动查一次新版本；关掉则只能手动检查':
+      'Checks for a new version once after startup; when off you can only check '
+      'manually',
+  '加载中…': 'Loading…',
+  '代理地址': 'Proxy address',
+  '不用系统代理时必须填写下面的地址':
+      'Required when not using the system proxy — fill in the address below',
+  '测试连通性': 'Test connectivity',
+  '连通性正常': 'Connectivity OK',
+  '连通性异常': 'Connectivity failed',
+  '当前直连，不使用代理': 'Direct connection, no proxy',
+  '当前使用系统代理': 'Using the system proxy',
+  '还没填代理地址': 'No proxy address yet',
+
+  // ── S9b 设置四页平铺：B 站（2026-10-13）───────────────────────
+  '下载完合并': 'Merge after download',
+  '这里是「上限」而不是保证：B 站会按你账号的实际权限（大会员、付费稿件）'
+      '把拿不到的高阶档位直接裁掉，所以选了「1080P 60帧」也可能只下到 '
+      '1080P。选高了不会报错，只会安静地退回能拿到的那一档。':
+      'This is a ceiling, not a guarantee: Bilibili drops the tiers your account '
+      'cannot reach (premium membership, paid content) before answering, so '
+      'picking 1080P 60fps may still download plain 1080P. Asking too high '
+      'never errors, it quietly falls back to the best tier you can get.',
+  '容器与合并': 'Container and merging',
+  '保存弹幕': 'Save danmaku',
+  '转 ASS 后可内封': 'Embeddable once converted to ASS',
+  '保存字幕': 'Save subtitles',
+  '按语言筛可选；ASS 格式才能内封进 MKV':
+      'Optional language filter; only ASS can be embedded in MKV',
+  '保存封面': 'Save cover',
+  '原图存成 `<base>.封面.png`': 'Original saved as `<base>.封面.png`',
+  '保存章节': 'Save chapters',
+  '绝大多数稿件没有分段章节，没有时一个参数都不多加':
+      'Most videos have no chapters; when there are none, no extra parameter is '
+      'added',
+  '保存元数据': 'Save metadata',
+  'nfo 给媒体库读，会多取一次标签；json 是我们自己那份解析结果':
+      'NFO is for media libraries (one extra tag request); JSON is our own parse '
+      'result',
+  '把字幕内封进容器': 'Embed the subtitle track into the container',
+  '只在 MKV 下可用 —— 前提是开了合并、且字幕格式是 ASS':
+      'Only works with MKV — requires merging to be on and the subtitle format '
+      'to be ASS',
+  '字幕样式': 'Subtitle style',
+  '这四项在 B 站解析页的「下载选项」里改 —— 那里能即时看到排版效果。':
+      'These four are changed under Download options on the Bilibili page — the '
+      'layout updates there live.',
+  '默认（exe 同级）': 'Default (next to the exe)',
+  '命名模板': 'Naming templates',
+  '是': 'Yes',
+  '否': 'No',
+
+  // ── S9b 设置四页平铺：抖音（2026-10-13）───────────────────────
+  '下载源': 'Download source',
+  '质量优先策略': 'Quality-first strategy',
+  '图片格式': 'Image format',
+  '下载源决定一条视频从哪个地址下载：「质量优先」两档按 分辨率 0.4 / '
+      '码率 0.4 / 帧率 0.2 给全部候选打分后取第一名；「仅音频」下的是'
+      '该作品的背景音乐，不是从视频里抽音轨。':
+      'The download source decides which address a video comes from: the two '
+      'quality-first modes score every candidate at 0.4 resolution / 0.4 bitrate '
+      '/ 0.2 frame rate and take the winner; Audio only downloads the background '
+      'music of the post, it does not extract the audio track from the video.',
+  '筛选': 'Filters',
+  '滤掉低画质档位': 'Filter out low-quality tiers',
+  '排除档位名里带 low 的候选（如 low_720p）':
+      'Excludes candidates whose tier name contains low (e.g. low_720p)',
+  '排除 ByteVC1 编码': 'Exclude ByteVC1',
+  'ByteVC1 是抖音自有编码，体积小但兼容性差（部分播放器/剪辑软件打不开）':
+      'ByteVC1 is a Douyin-specific codec: smaller files, poorer compatibility '
+      '(some players and editors cannot open it)',
+  '下载实况图的配对视频': 'Download the paired video for Live Photos',
+  '图文作品里的实况图（Live Photo）会额外下一个同名视频，'
+      '与静态图共用序号，落盘后按 `_1.jpg` / `_1.mp4` 配对':
+      'A Live Photo inside an image post also downloads a video of the same '
+      'name; it shares the index with the still image, so on disk they pair up '
+      'as `_1.jpg` / `_1.mp4`',
+  '附带下载 BGM': 'Also download the BGM',
+  '图文作品额外下一份背景音乐（按地址在本批内去重）':
+      'Image posts get one extra background music file (de-duplicated by URL '
+      'within the batch)',
+  '按视频时长筛选': 'Filter by video duration',
+  '**只作用于视频本身时长**（图片不受影响），单位秒；默认 0~300 秒':
+      '**Applies to the video duration only** (images are unaffected), in '
+      'seconds; defaults to 0~300 s',
+  '批量与去重': 'Batch and de-duplication',
+  '跳过已下载作品': 'Skip already downloaded posts',
+  '按**作品**粒度记账：一条作品下过任意一个文件，整条就跳过':
+      'Booked per **post**: once any file of a post has been downloaded, the '
+      'whole post is skipped',
+  '同一作品的媒体排在一起': 'Keep media of one post together',
+  '关闭后严格按抓取顺序入队': 'When off, items are queued strictly in fetch order',
+
+  // ── S9b 设置四页平铺：下载（2026-10-13）───────────────────────
+  '同名文件': 'Same file name',
+  '全局并发': 'Global concurrency',
+  // 措辞刻意不点名平台：X 下载设置页出现另一个模块的名字属于术语串台，
+  // `test/module_boundary_test.dart` 会当场判红（见 `download_section.dart`）。
+  '这两项由下载引擎统一管理，编辑入口在各自模块的设置页。':
+      'Both are managed by the download engine; edit them on the settings '
+      'page of their own module.',
 };

@@ -45,7 +45,33 @@ class OptGrid<T> extends StatelessWidget {
   /// 给了才能交互；null = 纯展示（预览稿里也有一些只读的当前值）。
   final void Function(OptItem<T> item, T value)? onChanged;
 
-  const OptGrid({super.key, required this.items, this.onChanged});
+  /// **接管某一格的点击**，不再弹内置的 [showOptPicker]。
+  ///
+  /// 为什么需要它（2026-10-13 S9b 补的）：设置页的「窗口材质 / 导航形态 / 界面
+  /// 语言 / 主题模式」四项各自有一个**带缩略图或分段的富选择器**
+  /// （`MaterialPicker` / `NavLayoutPicker` / `_LocalePicker` / `_ThemeModePicker`），
+  /// 它们不能被一串纯文本候选顶掉 —— `appearance_controls_test` 的四条判据
+  /// （材质缩略图互异、语言与主题各是一组分段控件）正是钉在那些控件上的。
+  /// 于是格子仍然平铺当前值（预览稿 `.opt` 的语义），点开时弹出的却是那一个
+  /// 富选择器：同一格、同一份数据，只是候选列表长了图。
+  ///
+  /// 返回 true 表示「这一格我自己处理了」；false / 不返回则退回内置选择器。
+  /// null = 全部走内置（S9a 以来的默认行为，未改动）。
+  final bool Function(OptItem<T> item)? onTapCell;
+
+  /// 当前值的展示文本。null = `toString()`（对 String 恰好就是自身）。
+  ///
+  /// 枚举走 `toString()` 会印出 `BiliQuality.q1080` 这种带类名的串，所以
+  /// 调用方要么传本函数，要么把 [OptItem] 建成「显示串 + 值」两层。
+  final OptLabelOf<T>? labelOf;
+
+  const OptGrid({
+    super.key,
+    required this.items,
+    this.onChanged,
+    this.onTapCell,
+    this.labelOf,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -66,14 +92,18 @@ class OptGrid<T> extends StatelessWidget {
           _OptCell<T>(
             colors: c,
             item: item,
+            label: labelOf == null ? null : labelOf!(item.value),
             onTap: onChanged == null
                 ? null
                 : () async {
+                    // 富选择器优先：调用方自己弹（材质 / 导航 / 语言 / 主题）。
+                    if (onTapCell != null && onTapCell!(item)) return;
                     final picked = await showOptPicker<T>(
                       context,
                       title: item.label,
                       options: item.options,
                       current: item.value,
+                      labelOf: labelOf,
                     );
                     if (picked != null) onChanged!(item, picked);
                   },
@@ -106,10 +136,14 @@ class _OptCell<T> extends StatelessWidget {
   final OptItem<T> item;
   final VoidCallback? onTap;
 
+  /// 已算好的展示文本（[OptGrid.labelOf] 的产物）。null = 退回 `toString()`。
+  final String? label;
+
   const _OptCell({
     required this.colors,
     required this.item,
     this.onTap,
+    this.label,
   });
 
   @override
@@ -146,7 +180,7 @@ class _OptCell<T> extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      _labelOf(item.value),
+                      label ?? _labelOf(item.value),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -190,6 +224,18 @@ String _labelOf<T>(T v) => v.toString();
 /// dropdown 的菜单会变成一块与卡片无关的实色面板，在毛玻璃上很突兀
 /// （2026-10-11 真机撞过同一个毛病，`app_theme.dart:330` 记着）。
 /// bottom sheet 自己管底色，与其余浮层一致。
+///
+/// ### 容器是 `Material` 而不是 `DecoratedBox`（S9b 修）
+///
+/// 原来用带底色的 `DecoratedBox` 包住列表，SDK 的 [ListTile] 在 debug 下会报
+/// 「ListTile background color or ink splashes may be invisible」
+/// （`list_tile.dart` 的 `_debugCheckBackgroundIsHidden`）：它向上找最近的
+/// 有底色祖先，找到一个就断定「ListTile 自己的底色与水波纹会被挡掉」。
+/// 这条判断本身没错 —— ListTile 的底色与水波纹确实画在最近的 `Material` 上。
+/// 按 SDK 给的提示换成本 `Material`（`color` 就是原来那个底色）之后，
+/// ListTile 的最近 Material 祖先就是它自己那层，遮挡消失、水波纹也真的落在
+/// 这块面板上。`Material` 同时承担圆角裁切（`clipBehavior`），不再需要
+/// `DecoratedBox` 的 border 补边。
 Future<T?> showOptPicker<T>(
   BuildContext context, {
   required String title,
@@ -206,12 +252,10 @@ Future<T?> showOptPicker<T>(
     backgroundColor: Colors.transparent,
     // 内容短，别让 sheet 拖到半屏 —— 候选值大多是四五个短词。
     constraints: const BoxConstraints(maxWidth: 460),
-    builder: (ctx) => Container(
-      decoration: BoxDecoration(
-        color: c.surfaceFloat,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-        border: Border.all(color: c.line),
-      ),
+    builder: (ctx) => Material(
+      color: c.surfaceFloat,
+      clipBehavior: Clip.antiAlias,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
       child: SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,

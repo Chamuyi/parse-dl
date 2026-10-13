@@ -152,7 +152,11 @@ void main() {
       final store = await pumpSection(tester);
       final up = kBiliTemplatePresets.firstWhere((e) => e.id == 'up');
 
-      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      // 2026-10-13 S9b：「启用模版」不再是 DropdownButtonFormField，而是
+      // OptGrid 里的一格 —— 点格子弹 showOptPicker，再点候选。
+      await tester.ensureVisible(find.text(t('启用模版')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(t('启用模版')));
       await tester.pumpAndSettle();
       await tester.tap(find.text(t(up.label)).last);
       await tester.pumpAndSettle();
@@ -170,9 +174,14 @@ void main() {
       final store = await pumpSection(tester);
       expect(store.settings.bili.isDefault, isTrue);
 
-      await tester.tap(find.byType(DropdownButtonFormField<BiliQuality>));
+      // 2026-10-13 S9b：画质上限从 `DropdownButtonFormField` 换成 `OptGrid`
+      // 里的一格 —— 点格子弹 `showOptPicker`，再点候选值。
+      // 判据本身没变：仍然是「改这一项 → 落盘到 bili 那一份 → isDefault 翻 false」。
+      await tester.ensureVisible(find.text(t('画质上限')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('1080P'));
+      await tester.tap(find.text(t('画质上限')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(t(BiliQuality.q1080.label)).last);
       await tester.pumpAndSettle();
 
       expect(store.settings.bili.quality, BiliQuality.q1080);
@@ -191,9 +200,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.settings.bili.mergeAfterDownload, isFalse);
 
-      await tester.tap(find.byType(DropdownButtonFormField<BiliCodec>));
+      // 编码偏好同样是 `OptGrid` 一格（旧实现是 `DropdownButtonFormField`）。
+      await tester.ensureVisible(find.text(t('编码偏好')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('AV1'));
+      await tester.tap(find.text(t('编码偏好')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(t(BiliCodec.av1.label)).last);
       await tester.pumpAndSettle();
       expect(store.settings.bili.codec, BiliCodec.av1);
 

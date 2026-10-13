@@ -12,6 +12,10 @@ import '../services/settings_store.dart';
 import '../services/template_source.dart';
 import '../theme/app_theme.dart';
 import 'app_toast.dart';
+import 'field_row.dart';
+import 'opt_grid.dart';
+import 'sub_section.dart';
+import 'switch_row.dart';
 import 'template_row.dart';
 import '../l10n/l10n.dart';
 
@@ -181,60 +185,68 @@ class _BiliSectionState extends State<BiliSection> {
     final settings = context.watch<SettingsStore>();
     final b = settings.settings.bili;
 
+    // 卡「画质与编码」的网格（预览稿 `bili-settings:637-638` 的
+    // `opts([['画质上限',…],['编码偏好',…],['并发数',…],['下载完合并',…]])`）。
+    //
+    // 分派用**下标**：label 已 `t()` 过，英文档下不再是中文原文，拿它当 key
+    // 会在切语言时静默失配。「下载完合并」在预览稿里也是一格 `opts`，
+    // 但本应用里它带一条 ffmpeg 缺失提示（`bili_section_test` 钉着），
+    // 所以那一格做成只读当前值，真正的开关在网格下面单独一行 ——
+    // 开关配提示，比一个点开只有「是 / 否」的格子更直白。
+    final gridItems = <OptItem<Object>>[
+      OptItem<Object>(
+        label: t('画质上限'),
+        value: b.quality,
+        options: BiliQuality.values,
+      ),
+      OptItem<Object>(
+        label: t('编码偏好'),
+        value: b.codec,
+        options: BiliCodec.values,
+      ),
+      OptItem<Object>(
+        label: t('并发数'),
+        value: b.concurrency,
+        options: const [1, 2, 3, 4, 5, 6, 8, 10, 12, 16],
+      ),
+      OptItem<Object>(
+        label: t('下载完合并'),
+        value: b.mergeAfterDownload,
+      ),
+    ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-
-        // ① 画质上限
-        _label(
-          c,
-          t('画质上限'),
-          t('这里是「上限」而不是保证：B 站会按你账号的实际权限（大会员、付费稿件）'
-              '把拿不到的高阶档位直接裁掉，所以选了「1080P 60帧」也可能只下到 '
-              '1080P。这是 B 站和本项目另两个模块最大的行为差异 —— 那里档位由平台'
-              '返回的候选决定，这里还要多过一道账号权限，选高了不会报错，只会安静地'
-              '退回能拿到的那一档。'),
+        // ① 画质与编码
+        OptGrid<Object>(
+          items: gridItems,
+          labelOf: _optLabel,
+          onChanged: (item, v) => _applyOpt(gridItems.indexOf(item), v),
         ),
-        _dropdown<BiliQuality>(
-          value: b.quality,
-          items: [
-            for (final q in BiliQuality.values)
-              DropdownMenuItem(value: q, child: Text(t(q.label))),
-          ],
-          onChanged: (v) => _set((q) => q.quality = v),
+        // 画质上限的语义说明 —— 「上限」不是「保证」这件事必须写在控件旁边
+        // （只在文档里写、用户看不到，然后来报 bug）。
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            t('这里是「上限」而不是保证：B 站会按你账号的实际权限（大会员、付费稿件）'
+                '把拿不到的高阶档位直接裁掉，所以选了「1080P 60帧」也可能只下到 '
+                '1080P。选高了不会报错，只会安静地退回能拿到的那一档。'),
+            style: TextStyle(fontSize: 11.5, color: c.textMuted, height: 1.5),
+          ),
         ),
 
-        // ② 编码偏好
-        const SizedBox(height: 16),
-        _label(
-          c,
-          t('编码偏好'),
-          t('同一档画质 B 站通常同时给 H.264 / HEVC / AV1 三条流。选哪条'
-              '不影响清晰度，只影响体积和播放器兼容性 —— HEVC / AV1 同画质更小，'
-              '但老播放器与部分剪辑软件不认；「自动（兼容性优先）」挑哪边都能播的'
-              '那条。这条同样只是偏好：稿件没有该编码的流时会退回其它编码，'
-              '画质上限那套账号裁档的规则对这里一样成立。'),
-        ),
-        _dropdown<BiliCodec>(
-          value: b.codec,
-          items: [
-            for (final e in BiliCodec.values)
-              DropdownMenuItem(value: e, child: Text(t(e.label))),
-          ],
-          onChanged: (v) => _set((q) => q.codec = v),
-        ),
-
-        // ③ 合并
+        // ② 合并开关（预览稿把它也画成一格 opts，这里保留为开关 + 提示）
         const SizedBox(height: 8),
-        _switch(
-          c,
-          t('下载完成后合并'),
-          t('B 站的视频流和音频流是分开的两个文件，下完是两个 .m4s，'
+        SwitchRow(
+          label: t('下载完成后合并'),
+          subtitle: t('B 站的视频流和音频流是分开的两个文件，下完是两个 .m4s，'
               '各自都不能单独播放 —— 必须先用 ffmpeg 合成一个 .mp4 才能看，'
               '所以默认开着。留这个开关只有一种用途：合并要用的 ffmpeg 被安全软件'
               '拦下时，先拿到原始流自己处理，总比什么都拿不到强。'),
-          b.mergeAfterDownload,
-          (v) => _set((q) => q.mergeAfterDownload = v),
+          value: b.mergeAfterDownload,
+          onChanged: (v) => _set((q) => q.mergeAfterDownload = v),
         ),
         // 探测是下载合并层的事（要真起子进程问版本），这里只负责把结论说出来。
         if (b.mergeAfterDownload && widget.ffmpegAvailable == false)
@@ -246,108 +258,128 @@ class _BiliSectionState extends State<BiliSection> {
                 '下完只会得到两个不能单独播放的 .m4s 文件。'),
           ),
 
-        // ③-b 外挂 ffmpeg
-        const SizedBox(height: 18),
-        _label(
-          c,
-          t('外挂 ffmpeg（可选）'),
-          t('留空就用程序自带的那份。指一个目录可以换成你自己的完整版 ffmpeg —— '
-              '自带那份是精简构建（约 10 MB），只能把视频流和音频流原样合起来，'
-              '做不了转码、也没有 ffprobe。完整版能转码、烧字幕、看轨道信息。'
-              '目录里直接放 ffmpeg.exe，或者放它的 bin 子目录，两种都认。'),
+        // ③ 容器与合并（预览稿 `:639-640`）
+        SubSection(t('容器与合并')),
+        OptGrid<Object>(
+          items: [
+            OptItem<Object>(
+              label: t('容器'),
+              value: b.container,
+              options: BiliContainer.values,
+            ),
+            OptItem<Object>(
+              label: t('限速'),
+              value: b.speedLimitKbps,
+              options: const [0, 256, 512, 1024, 2048, 4096, 8192],
+            ),
+          ],
+          labelOf: _optLabel,
+          onChanged: (item, v) => _applyContainerOpt(item, v),
         ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _ffmpegDir,
-                onChanged: (v) => _set((q) => q.ffmpegDir = v.trim()),
-                style: const TextStyle(fontSize: 13.5),
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: t('（空 = 用自带那份）'),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: c.line),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: c.line),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            FilledButton.tonalIcon(
-              onPressed: _pickFfmpegDir,
-              icon: const Icon(Icons.folder_open_outlined, size: 18),
-              label: Text(t('选择'), style: TextStyle(fontSize: 13.5)),
-            ),
-            if (b.ffmpegDir.isNotEmpty) ...[
-              const SizedBox(width: 6),
-              IconButton(
+        const SizedBox(height: 8),
+        // 外挂 ffmpeg 目录（`b.ffmpegDir`）—— 预览稿那一格画的是路径本身，
+        // 这里用 `.row .field .btn`：路径 + 「选择」，清空走字段右侧的叉。
+        FieldRow(
+          value: b.ffmpegDir.isEmpty ? t('（空 = 用自带那份）') : b.ffmpegDir,
+          mono: true,
+          buttons: [
+            FieldButton(t('选择'), onPressed: _pickFfmpegDir),
+            if (b.ffmpegDir.isNotEmpty)
+              FieldButton(
+                t('改回用自带那份'),
+                ghost: true,
+                danger: true,
                 onPressed: _clearFfmpegDir,
-                icon: const Icon(Icons.close_rounded, size: 18),
-                tooltip: t('改回用自带那份'),
               ),
-            ],
           ],
         ),
 
-        // ④ 下载
-        const SizedBox(height: 6),
-        _switch(
-          c,
-          t('跳过已下载的分 P'),
-          t('按「BV 号 + 分 P 内容 ID」记账：下过的分 P 不再重下。'
+        // ④ 下载（原「跳过已下载 / 排序」两项，预览稿把它们并进了各自的选项组）
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('跳过已下载的分 P'),
+          subtitle: t('按「BV 号 + 分 P 内容 ID」记账：下过的分 P 不再重下。'
               '记的是台账而不是磁盘上的文件，所以把文件移走、甚至删掉，'
               '也仍然算下过 —— 想重下要么关掉这个开关，要么清掉记录。'),
-          b.skipDownloaded,
-          (v) => _set((q) => q.skipDownloaded = v),
+          value: b.skipDownloaded,
+          onChanged: (v) => _set((q) => q.skipDownloaded = v),
         ),
-
-        // ⑤ 排序
-        const SizedBox(height: 6),
-        _switch(
-          c,
-          t('同一稿件的分 P 排在一起'),
-          t('一个稿件的多个分 P 会占连续位置，跨稿件的才交错。'
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('同一稿件的分 P 排在一起'),
+          subtitle: t('一个稿件的多个分 P 会占连续位置，跨稿件的才交错。'
               '关闭后严格按抓取顺序入队。'),
-          b.groupByWork,
-          (v) => _set((q) => q.groupByWork = v),
+          value: b.groupByWork,
+          onChanged: (v) => _set((q) => q.groupByWork = v),
         ),
 
-        // ⑥ 并发数
-        const SizedBox(height: 16),
-        _label(
-          c,
-          t('并发数'),
-          t('aria2 同时下载的任务数上限（默认 4）。这是那一个下载进程的全局上限，'
-              '不是只作用于 B 站的队列 —— 调大它，同时在下的别的内容也会一起挤这'
-              '几个槽位。'),
+        // ⑤ 附加文件（预览稿 `:641-647`）
+        SubSection(t('附加文件')),
+        SwitchRow(
+          label: t('保存弹幕'),
+          subtitle: t('转 ASS 后可内封'),
+          value: b.saveDanmaku,
+          onChanged: (v) => _set((q) => q.saveDanmaku = v),
         ),
-        _dropdown<int>(
-          value: b.concurrency,
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('保存字幕'),
+          subtitle: t('按语言筛可选；ASS 格式才能内封进 MKV'),
+          value: b.saveSubtitle,
+          onChanged: (v) => _set((q) => q.saveSubtitle = v),
+        ),
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('保存封面'),
+          subtitle: t('原图存成 `<base>.封面.png`'),
+          value: b.saveCover,
+          onChanged: (v) => _set((q) => q.saveCover = v),
+        ),
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('保存章节'),
+          subtitle: t('绝大多数稿件没有分段章节，没有时一个参数都不多加'),
+          value: b.saveChapter,
+          onChanged: (v) => _set((q) => q.saveChapter = v),
+        ),
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('保存元数据'),
+          subtitle: t('nfo 给媒体库读，会多取一次标签；json 是我们自己那份解析结果'),
+          value: b.saveMetadata,
+          onChanged: (v) => _set((q) => q.saveMetadata = v),
+        ),
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('把字幕内封进容器'),
+          subtitle: t('只在 MKV 下可用 —— 前提是开了合并、且字幕格式是 ASS'),
+          value: b.embedSubtitleTrack,
+          onChanged: (v) => _set((q) => q.embedSubtitleTrack = v),
+        ),
+
+        // ⑥ 字幕样式（预览稿 `:648-649`，抄 B 站播放器定义）
+        SubSection(t('字幕样式')),
+        // 弹幕样式的四档取值：字体 / 字号 / 不透明度 / 底部边距 —— 都在
+        // 「下载选项」对话框里编辑（那是它原本的入口，也是唯一能预览的地方）。
+        // 这里平铺**当前值**，点开去那一处改，不另起一套控件。
+        OptGrid<String>(
           items: [
-            for (final n in const [1, 2, 3, 4, 5, 6, 8, 10, 12, 16])
-              DropdownMenuItem(value: n, child: Text('$n')),
+            OptItem<String>(label: t('字体'), value: b.danmakuFontFace),
+            OptItem<String>(label: t('字号'), value: '${b.danmakuFontSize}'),
+            OptItem<String>(label: t('不透明度'), value: '${b.danmakuOpacity}%'),
+            OptItem<String>(label: t('底部边距'), value: '${b.danmakuMarginV} px'),
           ],
-          onChanged: (v) => _set((q) => q.concurrency = v),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            t('这四项在 B 站解析页的「下载选项」里改 —— 那里能即时看到排版效果。'),
+            style: TextStyle(fontSize: 11.5, color: c.textFaint),
+          ),
         ),
 
-        // ⑦ 自定义文本
-        const SizedBox(height: 16),
-        _label(
-          c,
-          t('自定义文本'),
-          t('模板变量 %CUSTOM_TEXT% 的输出内容，可用来给文件名加前缀、标注批次等。'
-              '留空时这个变量就是空串。'),
-        ),
+        // ⑦ 自定义文本（`%CUSTOM_TEXT%`）
+        SubSection(t('自定义文本')),
         TextField(
           controller: _customText,
           style: TextStyle(fontSize: 13, color: c.textStrong),
@@ -377,92 +409,39 @@ class _BiliSectionState extends State<BiliSection> {
           ),
         ),
 
-        // ⑧ 保存与命名 —— 对齐另两个模块的设置，但**三个模块各自独立**
-        const SizedBox(height: 22),
-        Divider(height: 1, color: c.line),
-        const SizedBox(height: 18),
-        _label(
-          c,
-          t('保存与命名'),
-          t('B 站下载存到哪个根目录、往下怎么建子文件夹、文件叫什么名字，'
-              '都由下面这几项决定。可用变量都是 B 站语义的：%WORK_TITLE% 作品标题、'
-              '%PART_TITLE% 分P标题、%P% 分P序号、%BVID% BV 号、'
-              '%UP_NAME% UP 主昵称、%QUALITY% 画质、%CODEC% 编码格式等。'),
+        // ⑧ 保存与命名 —— 三个模块各自独立，不能因为预览稿没画这一段就删
+        SubSection(t('保存与命名')),
+        FieldRow(
+          value: _saveDir.text.isEmpty ? t('默认（exe 同级）') : _saveDir.text,
+          mono: true,
+          buttons: [FieldButton(t('选择'), onPressed: _pickSaveDir)],
         ),
-
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _saveDir,
-                readOnly: true,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: c.textStrong,
-                  fontFamily: 'Consolas',
-                ),
-                decoration: InputDecoration(
-                  hintText: t('留空则使用 %USERPROFILE%\\Downloads\\解析下载器'),
-                  hintStyle: TextStyle(fontSize: 12, color: c.textFaint),
-                  filled: true,
-                  fillColor: c.surfaceSunken,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: c.line),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: c.line),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            FilledButton.tonalIcon(
-              onPressed: _pickSaveDir,
-              icon: const Icon(Icons.folder_open_outlined, size: 18),
-              label: Text(t('选择'), style: TextStyle(fontSize: 13.5)),
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-
-        _switch(
-          c,
-          t('启用保存文件夹'),
-          t('开启：按下面的「文件夹模板」建子目录再存；'
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('启用保存文件夹'),
+          subtitle: t('开启：按下面的「文件夹模板」建子目录再存；'
               '关闭：忽略文件夹模板，文件全部平铺在保存根目录里'),
-          b.enableSaveFolder,
-          (v) => _set((q) => q.enableSaveFolder = v),
+          value: b.enableSaveFolder,
+          onChanged: (v) => _set((q) => q.enableSaveFolder = v),
         ),
-        const SizedBox(height: 18),
-
-        // 启用模版：一键填入一套现成组合
-        _label(
-          c,
-          t('启用模版'),
-          t('从现成组合里挑一套，一键填进下面两个模板框；之后仍可手动微调，'
-              '改过之后这里会显示「自定义」。'),
-        ),
-        _dropdown<String>(
-          value: _presetIdOf(b),
+        const SizedBox(height: 8),
+        OptGrid<String>(
           items: [
-            for (final p in kBiliTemplatePresets)
-              DropdownMenuItem(value: p.id, child: Text(t(p.label))),
-            DropdownMenuItem(
-              value: kBiliCustomPresetId,
-              child: Text(t('自定义（已手动修改）')),
+            OptItem<String>(
+              label: t('启用模版'),
+              value: _presetIdOf(b),
+              options: [
+                for (final p in kBiliTemplatePresets) p.id,
+                kBiliCustomPresetId,
+              ],
             ),
           ],
-          onChanged: _applyPreset,
+          labelOf: _presetLabel,
+          onChanged: (_, v) => _applyPreset(v),
         ),
-        const SizedBox(height: 18),
 
+        // ⑨ 命名模板（预览稿 `:650-658`）
+        SubSection(t('命名模板')),
         TemplateRow(
           label: t('文件夹模板'),
           hint: kBiliDefaultDirTemplate,
@@ -510,6 +489,46 @@ class _BiliSectionState extends State<BiliSection> {
     );
   }
 
+  /// 网格里某一格选中新值 → 落到对应字段。
+  ///
+  /// 下标与 `gridItems` 的构造顺序一一对应（label 是译文，不能当 key）。
+  /// 「下载完合并」那一格没有 `options`（只读），所以它不会被走到这里。
+  Future<void> _applyOpt(int index, Object value) async {
+    switch (index) {
+      case 0:
+        await _set((q) => q.quality = value as BiliQuality);
+      case 1:
+        await _set((q) => q.codec = value as BiliCodec);
+      case 2:
+        await _set((q) => q.concurrency = value as int);
+    }
+  }
+
+  /// 「容器与合并」那张网格的分派（容器 / 限速）。
+  Future<void> _applyContainerOpt(OptItem<Object> item, Object value) async {
+    if (value is BiliContainer) {
+      await _set((q) => q.container = value);
+      return;
+    }
+    if (value is int) await _set((q) => q.speedLimitKbps = value);
+  }
+
+  /// 枚举格子的显示文本（走各枚举自己的 `label`，与旧下拉里的文案逐字相同）。
+  String _optLabel(Object v) => switch (v) {
+    BiliQuality q => t(q.label),
+    BiliCodec e => t(e.label),
+    BiliContainer k => t(k.label),
+    int n => n == 0 ? t('不限') : '$n KB/s',
+    bool on => t(on ? '是' : '否'),
+    _ => '$v',
+  };
+
+  /// 「启用模版」那一格的显示文本：预设 id → 该预设的标签。
+  String _presetLabel(String id) {
+    if (id == kBiliCustomPresetId) return t('自定义（已手动修改）');
+    return t(kBiliTemplatePresets.firstWhere((p) => p.id == id).label);
+  }
+
   /// 应用「启用模版」预设 —— 两个模板框一起换掉。
   ///
   /// 不直接写 settings：文本框的监听器会去抖落盘，避免连点几次写多次磁盘。
@@ -551,90 +570,11 @@ class _BiliSectionState extends State<BiliSection> {
         kind: AppToastKind.info);
   }
 
-  // ── 小积木（与抖音分区同一套字号与间距，不另立规格）────────────
-
-  Widget _label(AppColors c, String title, String desc) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w500,
-            color: c.textStrong,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          desc,
-          style: TextStyle(fontSize: 12.5, color: c.textMuted, height: 1.5),
-        ),
-      ],
-    ),
-  );
-
-  Widget _dropdown<T>({
-    required T value,
-    required List<DropdownMenuItem<T>> items,
-    required void Function(T) onChanged,
-  }) {
-    final c = AppTheme.colorsOf(context);
-    return DropdownButtonFormField<T>(
-      initialValue: value,
-      isExpanded: true,
-      dropdownColor: c.surfaceSolid,
-      style: TextStyle(fontSize: 13, color: c.textStrong),
-      icon: Icon(Icons.expand_more_rounded, size: 18, color: c.textMuted),
-      decoration: InputDecoration(
-        filled: true,
-        fillColor: c.surfaceSunken,
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: c.line),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: c.line),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: c.accent, width: 1.4),
-        ),
-      ),
-      items: items,
-      onChanged: (v) {
-        if (v != null) onChanged(v);
-      },
-    );
-  }
-
-  Widget _switch(
-    AppColors c,
-    String title,
-    String subtitle,
-    bool value,
-    void Function(bool) onChanged,
-  ) => Material(
-    type: MaterialType.transparency,
-    child: SwitchListTile.adaptive(
-      contentPadding: EdgeInsets.zero,
-      title: Text(title, style: TextStyle(fontSize: 13.5, color: c.textStrong)),
-      subtitle: Text(
-        subtitle,
-        style: TextStyle(fontSize: 12, color: c.textMuted, height: 1.4),
-      ),
-      value: value,
-      activeThumbColor: c.accent,
-      onChanged: onChanged,
-    ),
-  );
+  // ── 小积木 ────────────────────────────────────────────────────
+  //
+  // S9b 平铺改造后，原先的 `_label` / `_dropdown` / `_switch` 三个自绘积木
+  // 已被共享组件（OptGrid / SwitchRow / SubSection）取代并删除 —— 留着它们
+  // 会让「同一页里两套字号与间距」复活，正是 S9 要消灭的东西。
 
   /// 一行挂在某个选项下面的小字（图标 + 文案），用来放「必须说的事」。
   Widget _hint(AppColors c, IconData icon, Color color, String text) => Padding(

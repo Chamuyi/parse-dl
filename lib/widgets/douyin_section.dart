@@ -13,6 +13,10 @@ import '../services/file_name_template.dart';
 import '../services/settings_store.dart';
 import '../services/template_source.dart';
 import '../theme/app_theme.dart';
+import 'field_row.dart';
+import 'opt_grid.dart';
+import 'sub_section.dart';
+import 'switch_row.dart';
 import 'template_row.dart';
 import 'app_toast.dart';
 import '../l10n/l10n.dart';
@@ -144,131 +148,98 @@ class _DouyinSectionState extends State<DouyinSection> {
     final settings = context.watch<SettingsStore>();
     final d = settings.settings.douyin;
 
+    // 卡「下载源与质量」的 2×2 网格（预览稿 `douyin-settings:537-538` 的
+    // `opts([['下载源',…],['质量优先策略',…],['图片格式',…],['并发数',…]])`）。
+    //
+    // 「质量优先策略」只在下载源是质量优先那两档时才成为一项 —— 预览稿是静态
+    // 截图，四格恒在；本应用里这一项对另外四档下载源毫无作用，摆一个点了也不
+    // 生效的格子属于假控件，所以它按条件进出网格（格数在 3 / 4 之间变）。
+    //
+    // 分派用**下标**而不是 `item.label`：label 已 `t()` 过，英文档下不再是
+    // 中文原文，拿它当 key 会在切语言时静默失配。下标由下面这张列表自己钉住。
+    final gridItems = <OptItem<Object>>[
+      OptItem<Object>(
+        label: t('下载源'),
+        value: d.source,
+        options: DouyinSource.values,
+      ),
+      if (d.source.needsQualityMode)
+        OptItem<Object>(
+          label: t('质量优先策略'),
+          value: d.qualityMode,
+          options: DouyinQualityMode.values,
+        ),
+      OptItem<Object>(
+        label: t('图片格式'),
+        value: d.imageFormat,
+        options: DouyinImageFormat.values,
+      ),
+      OptItem<Object>(
+        label: t('并发数'),
+        value: d.concurrency,
+        options: const [1, 2, 3, 4, 5, 6, 8, 10, 12, 16],
+      ),
+    ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-
-        // ① 下载源
-        _label(
-          c,
-          '下载源',
-          '决定一条视频从哪个地址下载。「质量优先」两档会按「质量优先策略」'
-              '给全部候选码率打分后取第一名（三个分量加权，权重见实现里的 '
-              'kDouyinQualityWeights）；'
-              '「仅音频」下载的是该作品的背景音乐，不是从视频里抽音轨。',
+        // ① 下载源与质量
+        OptGrid<Object>(
+          items: gridItems,
+          labelOf: _optLabel,
+          onChanged: (item, v) => _applyOpt(gridItems.indexOf(item), v),
         ),
-        _dropdown<DouyinSource>(
-          value: d.source,
-          items: [
-            for (final s in DouyinSource.values)
-              DropdownMenuItem(value: s, child: Text(t(s.label))),
-          ],
-          onChanged: (v) => _set((q) => q.source = v),
-        ),
-
-        // ② 质量优先策略（只有「质量优先」两档才需要）
-        if (d.source.needsQualityMode) ...[
-          const SizedBox(height: 16),
-          _label(
-            c,
-            '质量优先策略',
-            '「自动」按 分辨率 0.4 / 码率 0.4 / 帧率 0.2 打分，其余三档把'
-                '所选指标提到 0.7 权重。注意：任一变体缺分辨率、码率或帧率时'
-                '直接判 0 分 —— 刻意保留的行为，改动它会让某些作品换到另一个清晰度版本。',
+        // 下载源那一项的语义说明（原来挂在自绘下拉标题下面）。
+        // 平铺后格子只有键名与当前值，说明集中放这一条 —— 删掉它等于把
+        // 「质量优先」到底怎么算分这件事从界面上抹掉。
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            t('下载源决定一条视频从哪个地址下载：「质量优先」两档按 分辨率 0.4 / '
+                '码率 0.4 / 帧率 0.2 给全部候选打分后取第一名；「仅音频」下的是'
+                '该作品的背景音乐，不是从视频里抽音轨。'),
+            style: TextStyle(fontSize: 11.5, color: c.textMuted, height: 1.5),
           ),
-          _dropdown<DouyinQualityMode>(
-            value: d.qualityMode,
-            items: [
-              for (final m in DouyinQualityMode.values)
-                DropdownMenuItem(value: m, child: Text(t(m.label))),
-            ],
-            onChanged: (v) => _set((q) => q.qualityMode = v),
-          ),
-        ],
-
-        // ③ 图片格式
-        const SizedBox(height: 16),
-        _label(
-          c,
-          '图片格式',
-          '抖音图集会下发多个镜像地址（扩展名可能不同）。'
-              '「其它格式优先」把非 webp 的镜像排到前面 —— 只改顺序、'
-              '不改 URL，这样不会破坏 CDN 的签名校验。',
-        ),
-        _dropdown<DouyinImageFormat>(
-          value: d.imageFormat,
-          items: [
-            for (final f in DouyinImageFormat.values)
-              DropdownMenuItem(value: f, child: Text(t(f.label))),
-          ],
-          onChanged: (v) => _set((q) => q.imageFormat = v),
         ),
 
-        // ④ 候选过滤
+        // ② 筛选（预览稿 `:539-543`）
+        SubSection(t('筛选')),
+        SwitchRow(
+          label: t('滤掉低画质档位'),
+          subtitle: t('排除档位名里带 low 的候选（如 low_720p）'),
+          value: d.filterLowQuality,
+          onChanged: (v) => _set((q) => q.filterLowQuality = v),
+        ),
         const SizedBox(height: 8),
-        _switch(
-          c,
-          '滤掉低画质档位',
-          '排除档位名里带 low 的候选（如 low_720p）',
-          d.filterLowQuality,
-          (v) => _set((q) => q.filterLowQuality = v),
+        SwitchRow(
+          label: t('排除 ByteVC1 编码'),
+          subtitle: t('ByteVC1 是抖音自有编码，体积小但兼容性差（部分播放器/剪辑软件打不开）'),
+          value: d.filterByteVc1,
+          onChanged: (v) => _set((q) => q.filterByteVc1 = v),
         ),
-        _switch(
-          c,
-          '排除 ByteVC1 编码',
-          'ByteVC1 是抖音自有编码，体积小但兼容性差（部分播放器/剪辑软件打不开）',
-          d.filterByteVc1,
-          (v) => _set((q) => q.filterByteVc1 = v),
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('下载实况图的配对视频'),
+          subtitle: t('图文作品里的实况图（Live Photo）会额外下一个同名视频，'
+              '与静态图共用序号，落盘后按 `_1.jpg` / `_1.mp4` 配对'),
+          value: d.includeLivePhoto,
+          onChanged: (v) => _set((q) => q.includeLivePhoto = v),
         ),
-
-        // ⑤ 图文作品附加内容
-        const SizedBox(height: 6),
-        _switch(
-          c,
-          '下载实况图的配对视频',
-          '图文作品里的实况图（Live Photo）会额外下一个同名视频，'
-              '与静态图共用序号，落盘后按 `_1.jpg` / `_1.mp4` 配对',
-          d.includeLivePhoto,
-          (v) => _set((q) => q.includeLivePhoto = v),
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('附带下载 BGM'),
+          subtitle: t('图文作品额外下一份背景音乐（按地址在本批内去重）'),
+          value: d.includeBgm,
+          onChanged: (v) => _set((q) => q.includeBgm = v),
         ),
-        _switch(
-          c,
-          '附带下载 BGM',
-          '图文作品额外下一份背景音乐（按地址在本批内去重）',
-          d.includeBgm,
-          (v) => _set((q) => q.includeBgm = v),
-        ),
-
-        // ⑥ 已下载台账
-        const SizedBox(height: 6),
-        _switch(
-          c,
-          '跳过已下载作品',
-          '按**作品**粒度记账：一条作品下过任意一个文件，整条就跳过',
-          d.skipDownloaded,
-          (v) => _set((q) => q.skipDownloaded = v),
-        ),
-        _ledgerRow(c),
-
-        // ⑦ 排序
-        const SizedBox(height: 6),
-        _switch(
-          c,
-          '同一作品的媒体排在一起',
-          '关闭后严格按抓取顺序入队',
-          d.groupByAweme,
-          (v) => _set((q) => q.groupByAweme = v),
-        ),
-
-        // ⑧ 时长范围
-        const SizedBox(height: 6),
-        _switch(
-          c,
-          '按视频时长筛选',
-          '**只作用于视频本身时长**（图片不受影响），单位秒；'
-              '默认 0~300 秒',
-          d.timeRangeEnabled,
-          (v) => _set((q) => q.timeRangeEnabled = v),
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('按视频时长筛选'),
+          subtitle: t('**只作用于视频本身时长**（图片不受影响），单位秒；默认 0~300 秒'),
+          value: d.timeRangeEnabled,
+          onChanged: (v) => _set((q) => q.timeRangeEnabled = v),
         ),
         if (d.timeRangeEnabled) ...[
           const SizedBox(height: 10),
@@ -284,31 +255,61 @@ class _DouyinSectionState extends State<DouyinSection> {
           ),
         ],
 
-        // ⑨ 并发数
-        const SizedBox(height: 16),
-        _label(
-          c,
-          '并发数',
-          'aria2 同时下载的任务数上限（参照实现的 limit，默认 4）。'
-              '这是全局选项，X 的下载同样生效。',
+        // ③ 批量与去重（预览稿 `:544-547`）
+        SubSection(t('批量与去重')),
+        SwitchRow(
+          label: t('跳过已下载作品'),
+          subtitle: t('按**作品**粒度记账：一条作品下过任意一个文件，整条就跳过'),
+          value: d.skipDownloaded,
+          onChanged: (v) => _set((q) => q.skipDownloaded = v),
         ),
-        _dropdown<int>(
-          value: d.concurrency,
-          items: [
-            for (final n in const [1, 2, 3, 4, 5, 6, 8, 10, 12, 16])
-              DropdownMenuItem(value: n, child: Text('$n')),
-          ],
-          onChanged: _setConcurrency,
+        const SizedBox(height: 8),
+        _ledgerRow(c),
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('同一作品的媒体排在一起'),
+          subtitle: t('关闭后严格按抓取顺序入队'),
+          value: d.groupByAweme,
+          onChanged: (v) => _set((q) => q.groupByAweme = v),
         ),
 
-        // ⑩ 自定义文本
-        const SizedBox(height: 16),
-        _label(
-          c,
-          '自定义文本',
-          '模板变量 %CUSTOM_TEXT% 的输出内容（参照实现的「自定义文本」组件）。'
-              '可用来给文件名加前缀、标注批次等。',
+        // ④ 保存与命名 —— 对齐 X 下载的设置，但**两个模块各自独立**。
+        //    预览稿的抖音设置页没有这一段（那是三套皮肤并列展示时的静态稿），
+        //    本应用里抖音有自己的保存根目录与两个模板，不能因为预览稿没画就删。
+        SubSection(t('保存与命名')),
+        FieldRow(
+          value: _saveDir.text.isEmpty ? t('默认（exe 同级）') : _saveDir.text,
+          mono: true,
+          buttons: [FieldButton(t('选择'), onPressed: _pickSaveDir)],
         ),
+        const SizedBox(height: 8),
+        SwitchRow(
+          label: t('启用保存文件夹'),
+          subtitle: t('开启：按下面的「文件夹模板」建子目录再存；'
+              '关闭：忽略文件夹模板，文件全部平铺在保存根目录里'),
+          value: d.enableSaveFolder,
+          onChanged: (v) => _set((q) => q.enableSaveFolder = v),
+        ),
+        const SizedBox(height: 8),
+        // 启用模版：一键填入一套现成组合 —— 候选是一串预设 id，
+        // 与「图片格式」那类枚举同形，所以也用 OptGrid 一格。
+        OptGrid<String>(
+          items: [
+            OptItem<String>(
+              label: t('启用模版'),
+              value: _presetIdOf(d),
+              options: [
+                for (final p in kDouyinTemplatePresets) p.id,
+                kDouyinCustomPresetId,
+              ],
+            ),
+          ],
+          labelOf: _presetLabel,
+          onChanged: (_, v) => _applyPreset(v),
+        ),
+
+        // ⑤ 自定义文本（`%CUSTOM_TEXT%`）
+        SubSection(t('自定义文本')),
         TextField(
           controller: _customText,
           style: TextStyle(fontSize: 13, color: c.textStrong),
@@ -337,93 +338,9 @@ class _DouyinSectionState extends State<DouyinSection> {
             ),
           ),
         ),
-        // ⑪ 保存与命名 —— 对齐 X 下载的设置，但**两个模块各自独立**
-        const SizedBox(height: 22),
-        Divider(height: 1, color: c.line),
-        const SizedBox(height: 18),
-        _label(
-          c,
-          '保存与命名',
-          '抖音下载存到哪个根目录、往下怎么建子文件夹、文件叫什么名字，都由下面这几项决定。'
-              '可用变量都是抖音语义的：%AUTHOR% 作者、%AWEME_ID% 作品 ID、'
-              '%DESCRIPTION% 作品描述、%CREATE_TIME% 创建时间等。',
-        ),
 
-        // 保存路径—— 此前抖音侧没有这一项，抖音的下载一直落在
-        // 别处设的根目录上。留空时仍沿用那条旧规则，见 resolveSaveBase。
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _saveDir,
-                readOnly: true,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: c.textStrong,
-                  fontFamily: 'Consolas',
-                ),
-                decoration: InputDecoration(
-                  hintText: t('留空则使用 %USERPROFILE%\\Downloads\\解析下载器'),
-                  hintStyle: TextStyle(fontSize: 12, color: c.textFaint),
-                  filled: true,
-                  fillColor: c.surfaceSunken,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: c.line),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: c.line),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            FilledButton.tonalIcon(
-              onPressed: _pickSaveDir,
-              icon: const Icon(Icons.folder_open_outlined, size: 18),
-              label: Text(t('选择'), style: TextStyle(fontSize: 13.5)),
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-
-        _switch(
-          c,
-          '启用保存文件夹',
-          '开启：按下面的「文件夹模板」建子目录再存；'
-              '关闭：忽略文件夹模板，文件全部平铺在保存根目录里',
-          d.enableSaveFolder,
-          (v) => _set((q) => q.enableSaveFolder = v),
-        ),
-        const SizedBox(height: 18),
-
-        // 启用模版：一键填入一套现成组合
-        _label(
-          c,
-          '启用模版',
-          '从现成组合里挑一套，一键填进下面两个模板框；之后仍可手动微调，'
-              '改过之后这里会显示「自定义」。',
-        ),
-        _dropdown<String>(
-          value: _presetIdOf(d),
-          items: [
-            for (final p in kDouyinTemplatePresets)
-              DropdownMenuItem(value: p.id, child: Text(t(p.label))),
-            DropdownMenuItem(
-              value: kDouyinCustomPresetId,
-              child: Text(t('自定义（已手动修改）')),
-            ),
-          ],
-          onChanged: _applyPreset,
-        ),
-        const SizedBox(height: 18),
-
+        // ⑥ 命名模板（预览稿 `:548-556`）
+        SubSection(t('命名模板')),
         TemplateRow(
           label: t('文件夹模板'),
           hint: '%AUTHOR%',
@@ -463,9 +380,46 @@ class _DouyinSectionState extends State<DouyinSection> {
         ),
 
         const SizedBox(height: 6),
-        Text(t('改动会自动保存'), style: TextStyle(fontSize: 11.5, color: c.textFaint)),
+        Text(t('改动会自动保存'),
+            style: TextStyle(fontSize: 11.5, color: c.textFaint)),
       ],
     );
+  }
+
+  /// 网格里某一格选中新值 → 落到对应字段。
+  ///
+  /// 下标与上面 `gridItems` 的构造顺序一一对应（见那里的注释：不能用 label 当
+  /// key，label 是译文）。`needsQualityMode` 为假时列表短一格，所以质量优先
+  /// 那一档的判定放在 `d.source` 上重算一次，而不是靠固定下标。
+  Future<void> _applyOpt(int index, Object value) async {
+    final d = context.read<SettingsStore>().settings.douyin;
+    final hasQuality = d.source.needsQualityMode;
+    // 有「质量优先策略」时下标 1 是它；没有时下标 1 是「图片格式」。
+    final i = hasQuality ? index : index + 1;
+    switch (i) {
+      case 0:
+        await _set((q) => q.source = value as DouyinSource);
+      case 1:
+        await _set((q) => q.qualityMode = value as DouyinQualityMode);
+      case 2:
+        await _set((q) => q.imageFormat = value as DouyinImageFormat);
+      case 3:
+        await _setConcurrency(value as int);
+    }
+  }
+
+  /// 枚举格子的显示文本（走各枚举自己的 `label`，与旧下拉里的文案逐字相同）。
+  String _optLabel(Object v) => switch (v) {
+    DouyinSource s => t(s.label),
+    DouyinQualityMode m => t(m.label),
+    DouyinImageFormat f => t(f.label),
+    _ => '$v',
+  };
+
+  /// 「启用模版」那一格的显示文本：预设 id → 该预设的标签。
+  String _presetLabel(String id) {
+    if (id == kDouyinCustomPresetId) return t('自定义（已手动修改）');
+    return t(kDouyinTemplatePresets.firstWhere((p) => p.id == id).label);
   }
 
   /// 应用「启用模版」预设 —— 两个模板框一起换掉。
@@ -509,89 +463,6 @@ class _DouyinSectionState extends State<DouyinSection> {
         kind: AppToastKind.info);
   }
   // ── 小积木 ────────────────────────────────────────────────
-
-  Widget _label(AppColors c, String title, String desc) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w500,
-            color: c.textStrong,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          desc,
-          style: TextStyle(fontSize: 12.5, color: c.textMuted, height: 1.5),
-        ),
-      ],
-    ),
-  );
-
-  Widget _dropdown<T>({
-    required T value,
-    required List<DropdownMenuItem<T>> items,
-    required void Function(T) onChanged,
-  }) {
-    final c = AppTheme.colorsOf(context);
-    return DropdownButtonFormField<T>(
-      initialValue: value,
-      isExpanded: true,
-      dropdownColor: c.surfaceSolid,
-      style: TextStyle(fontSize: 13, color: c.textStrong),
-      icon: Icon(Icons.expand_more_rounded, size: 18, color: c.textMuted),
-      decoration: InputDecoration(
-        filled: true,
-        fillColor: c.surfaceSunken,
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: c.line),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: c.line),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: c.accent, width: 1.4),
-        ),
-      ),
-      items: items,
-      onChanged: (v) {
-        if (v != null) onChanged(v);
-      },
-    );
-  }
-
-  Widget _switch(
-    AppColors c,
-    String title,
-    String subtitle,
-    bool value,
-    void Function(bool) onChanged,
-  ) => Material(
-    type: MaterialType.transparency,
-    child: SwitchListTile.adaptive(
-      contentPadding: EdgeInsets.zero,
-      title: Text(title, style: TextStyle(fontSize: 13.5, color: c.textStrong)),
-      subtitle: Text(
-        subtitle,
-        style: TextStyle(fontSize: 12, color: c.textMuted, height: 1.4),
-      ),
-      value: value,
-      activeThumbColor: c.accent,
-      onChanged: onChanged,
-    ),
-  );
 
   Widget _numField(
     AppColors c,

@@ -59,43 +59,58 @@ class SwitchRow extends StatelessWidget {
     final c = AppTheme.colorsOf(context);
     final sub = subtitle;
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(11, 9, 11, 9),
-      decoration: BoxDecoration(
-        color: c.surfaceSunken,
+    // 整行都是热区（点文字也能切）。
+    //
+    // 预览稿的 `.sw` 是**静态原型**（`<div class="sw">` 里没有 click 处理器，
+    // 也没有 `cursor:pointer`），照抄的话整行不可点；但本应用改造前的
+    // `SwitchListTile` 是整行可点的，真机用户习惯点文字 —— 只留 36×20 的
+    // 小开关会让「点了没反应」，这是**功能退化**而不是「更贴预览稿」。
+    // 所以这里用 `InkWell` 包整行，开关本体保留自己的 onChanged（点开关时
+    // 命中开关、点文字时命中 InkWell，两条路都写同一个值，不会双触发）。
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: onChanged == null ? null : () => onChanged!(!value),
         borderRadius: BorderRadius.circular(9),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(fontSize: 12.5, color: c.textStrong),
-                ),
-                if (sub != null && sub.isNotEmpty) ...[
-                  const SizedBox(height: 1),
-                  Text(
-                    sub,
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      color: c.textMuted.withValues(alpha: 0.5),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(11, 9, 11, 9),
+          decoration: BoxDecoration(
+            color: c.surfaceSunken,
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(fontSize: 12.5, color: c.textStrong),
                     ),
-                  ),
-                ],
-              ],
-            ),
+                    if (sub != null && sub.isNotEmpty) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        sub,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: c.textMuted.withValues(alpha: 0.5),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 9),
+              Switch.adaptive(
+                value: value,
+                onChanged: onChanged,
+                activeTrackColor: c.accent,
+              ),
+            ],
           ),
-          const SizedBox(width: 9),
-          Switch.adaptive(
-            value: value,
-            onChanged: onChanged,
-            activeTrackColor: c.accent,
-          ),
-        ],
+        ),
       ),
     );
   }

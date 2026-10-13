@@ -7,6 +7,9 @@ import '../services/app_state.dart';
 import '../services/x_api.dart';
 import '../theme/app_theme.dart';
 import 'app_toast.dart';
+import 'field_row.dart';
+import 'status_badge.dart';
+import 'switch_row.dart';
 import '../l10n/l10n.dart';
 
 /// 「账号 / X 登录」设置区。
@@ -425,18 +428,72 @@ class _AccountSectionState extends State<AccountSection> {
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        // ① 状态条
-        _StatusBar(
-          loggedIn: loggedIn,
-          status: _status,
-          statusText: _statusText,
-          colors: c,
-          onLogout: _logout,
+        // ① 登录状态行 —— 预览稿 `x-settings:441-442` 的 `.sw` + `.st2`：
+        //    左侧「登录状态」+ 副题（已登录 @user / 尚未登录），右侧一枚胶囊徽章。
+        //    这里**不是** SwitchRow：预览稿这一行右边是徽章而不是开关，
+        //    开关会读成「可以在这里登出」，而登出是下面那一行的按钮。
+        _StatusRow(
+          label: t('登录状态'),
+          subtitle: loggedIn
+              ? (_status == 'saved' && _statusText.isNotEmpty
+                  ? _statusText
+                  : t('已登录 X 账号'))
+              : (_statusText.isNotEmpty ? _statusText : t('尚未登录')),
+          kind: loggedIn
+              ? StatusKind.done
+              : (_status == 'invalid' || _status == 'expired'
+                  ? StatusKind.err
+                  : StatusKind.wait),
+          badgeText: t(loggedIn ? '已登录' : '未登录'),
         ),
         const SizedBox(height: 10),
 
-        // ② 获取凭据的入口
+        // ② 两个必填框 —— `auth_token` / `ct0` 是账号分区的本体，标签保留
+        //    （settings_scope_test 的正控制就是拿这两个字串证明账号在 X 页）。
+        _CookieField(
+          label: 'auth_token',
+          hint: t('十六进制字符串（约 40 位）'),
+          controller: _authTokenCtrl,
+          obscure: _obscure,
+          colors: c,
+          onChanged: _maybeAutoSplit,
+        ),
+        const SizedBox(height: 10),
+        _CookieField(
+          label: 'ct0',
+          hint: t('32 位十六进制（CSRF token）'),
+          controller: _ct0Ctrl,
+          obscure: _obscure,
+          colors: c,
+          onChanged: _maybeAutoSplit,
+        ),
+        const SizedBox(height: 10),
+
+        // ③ 合并后的 cookie 一览 + 「显示 / 复制」（预览稿 `:443-444` 的
+        //    `.row` + `.field.mono` + 两枚 `.btn.sm`）。
+        FieldRow(
+          value: _obscure ? '••••••••••••••••（已隐藏）' : _mergedCookie,
+          mono: true,
+          buttons: [
+            FieldButton(
+              t(_obscure ? '显示' : '隐藏'),
+              onPressed: () => setState(() => _obscure = !_obscure),
+            ),
+            FieldButton(
+              t('复制'),
+              ghost: true,
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: _mergedCookie));
+                _toast(t('已复制完整 cookie'));
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // ④ 取凭据的两个入口（原版保留：登录页 + 智能导入）
         Row(
           children: [
             Expanded(
@@ -460,63 +517,25 @@ class _AccountSectionState extends State<AccountSection> {
             ),
           ],
         ),
-        const SizedBox(height: 12),
-
-        // ③ 两个必填框
-        _CookieField(
-          label: 'auth_token',
-          hint: t('十六进制字符串（约 40 位）'),
-          controller: _authTokenCtrl,
-          obscure: _obscure,
-          colors: c,
-          onChanged: _maybeAutoSplit,
-        ),
         const SizedBox(height: 10),
-        _CookieField(
-          label: 'ct0',
-          hint: t('32 位十六进制（CSRF token）'),
-          controller: _ct0Ctrl,
-          obscure: _obscure,
-          colors: c,
-          onChanged: _maybeAutoSplit,
-        ),
-        const SizedBox(height: 4),
 
-        // ④ 操作行
+        // ⑤ 提交 / 退出（预览稿 `:445-446`：重新登录 + 退出登录(danger)）。
+        //    「重新登录」= 原「在浏览器登录」那条路径的显式入口；「退出登录」危险色。
         Row(
           children: [
-            TextButton.icon(
-              onPressed: () => setState(() => _obscure = !_obscure),
-              icon: Icon(
-                _obscure
-                    ? Icons.visibility_outlined
-                    : Icons.visibility_off_outlined,
-                size: 14,
-                color: c.textMuted,
-              ),
-              label: Text(
-                _obscure ? '显示' : '隐藏',
-                style: TextStyle(fontSize: 12, color: c.textMuted),
-              ),
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
+            FilledButton.tonal(
+              onPressed: _openLogin,
+              style: FilledButton.styleFrom(minimumSize: Size.zero),
+              child: Text(t('重新登录'), style: const TextStyle(fontSize: 11.5)),
             ),
-            TextButton.icon(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: _mergedCookie));
-                _toast(t('已复制完整 cookie'));
-              },
-              icon: Icon(Icons.copy_all_outlined, size: 14, color: c.textMuted),
-              label: Text(t('复制'),
-                  style: TextStyle(fontSize: 12, color: c.textMuted)),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: loggedIn ? _logout : null,
               style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
                 minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                foregroundColor: c.danger,
               ),
+              child: Text(t('退出登录'), style: const TextStyle(fontSize: 11.5)),
             ),
             const Spacer(),
             FilledButton.icon(
@@ -530,14 +549,13 @@ class _AccountSectionState extends State<AccountSection> {
                     )
                   : const Icon(Icons.verified_outlined, size: 16),
               label: Text(t(_verifying ? '验证中…' : '保存并验证'),
-                  style: const TextStyle(fontSize: 13.5)),
+                  style: const TextStyle(fontSize: 11.5)),
             ),
           ],
         ),
+        const SizedBox(height: 10),
 
-        const SizedBox(height: 6),
-
-        // ⑤ 获取方式说明 —— 外层「账号」分区已整体折叠，这里直接平铺
+        // ⑥ 获取方式说明 —— 平铺后常驻（原来它在分区展开态里）
         Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -548,10 +566,10 @@ class _AccountSectionState extends State<AccountSection> {
           ),
           child: Text(
             t('获取方式：点「在浏览器登录」登录 x.com → 按 F12 → Application → '
-            'Cookies → x.com → 找到 auth_token 与 ct0 两行，双击 Value 列复制值，'
-            '分别填到上面两个框。\n'
-            '省事做法：把整段 cookie（或直接从 DevTools 复制的多行内容）粘进任一框，'
-            '会自动拆分出这两个值。'),
+                'Cookies → x.com → 找到 auth_token 与 ct0 两行，双击 Value 列复制值，'
+                '分别填到上面两个框。\n'
+                '省事做法：把整段 cookie（或直接从 DevTools 复制的多行内容）粘进任一框，'
+                '会自动拆分出这两个值。'),
             style: TextStyle(fontSize: 11.5, color: c.textMuted, height: 1.55),
           ),
         ),
@@ -636,87 +654,68 @@ class _CookieField extends StatelessWidget {
   }
 }
 
-// ── 状态条 ───────────────────────────────────────────────
+// ── 登录状态行 ────────────────────────────────────────────
 
-class _StatusBar extends StatelessWidget {
-  final bool loggedIn;
-  final String? status; // 'saved' / 'invalid' / 'expired'
-  final String statusText;
-  final AppColors colors;
-  final VoidCallback onLogout;
+/// 「登录状态」这一行 —— 预览稿 `x-settings:441-442` 的 `.sw` + `.st2`。
+///
+/// 原来是自带图标、底色与「退出」按钮的状态条。平铺改造后按预览稿收成一行：
+/// **左侧标题 + 副题，右侧一枚胶囊徽章**。退出按钮移到下面的操作行
+/// （预览稿 `:446` 的「退出登录(danger)」也在那里），这一行只回答
+/// 「现在登没登」。
+///
+/// 底色仍取 `surfaceSunken`（`.sw` 的凹陷块语义），与 [SwitchRow] 同一档 ——
+/// 这一页上「一行设置」的视觉重量因此统一。
+class _StatusRow extends StatelessWidget {
+  final String label;
+  final String subtitle;
+  final StatusKind kind;
 
-  const _StatusBar({
-    required this.loggedIn,
-    required this.status,
-    required this.statusText,
-    required this.colors,
-    required this.onLogout,
+  /// 徽章文案（已 `t()`）。
+  final String badgeText;
+
+  const _StatusRow({
+    required this.label,
+    required this.subtitle,
+    required this.kind,
+    required this.badgeText,
   });
 
   @override
   Widget build(BuildContext context) {
-    // 显示优先级：已登录 > 格式错 > 验证失败 > 未登录
-    final (icon, iconColor, bg, label) = loggedIn
-        ? (
-            Icons.verified_user_rounded,
-            colors.accent,
-            colors.accent.withValues(alpha: 0.10),
-            status == 'saved' && statusText.isNotEmpty ? statusText : '已登录 X 账号'
-          )
-        : status == 'invalid'
-            ? (
-                Icons.error_outline_rounded,
-                colors.danger,
-                colors.dangerSoft,
-                statusText.isEmpty ? '输入不正确' : statusText
-              )
-            : status == 'expired'
-                ? (
-                    Icons.report_outlined,
-                    colors.danger,
-                    colors.dangerSoft,
-                    statusText.isEmpty ? '登录已失效' : statusText
-                  )
-                : (
-                    Icons.info_outline_rounded,
-                    colors.textMuted,
-                    colors.surfaceSunken,
-                    '尚未登录'
-                  );
+    final c = AppTheme.colorsOf(context);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(11, 9, 11, 9),
       decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(8),
+        color: c.surfaceSunken,
+        borderRadius: BorderRadius.circular(9),
       ),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: iconColor),
-          const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                color: iconColor,
-                fontWeight: FontWeight.w500,
-              ),
-              overflow: TextOverflow.ellipsis,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(fontSize: 12.5, color: c.textStrong)),
+                if (subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: c.textMuted.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-          if (loggedIn)
-            TextButton(
-              onPressed: onLogout,
-              style: TextButton.styleFrom(
-                foregroundColor: colors.danger,
-                textStyle: const TextStyle(fontSize: 12),
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: Text(t('退出')),
-            ),
+          const SizedBox(width: 9),
+          StatusBadge(kind: kind, text: badgeText),
         ],
       ),
     );

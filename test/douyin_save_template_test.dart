@@ -11,6 +11,7 @@ import 'package:parse_dl/services/douyin_store.dart';
 import 'package:parse_dl/services/settings_store.dart';
 import 'package:parse_dl/services/template_source.dart';
 import 'package:parse_dl/theme/app_theme.dart';
+import 'package:parse_dl/widgets/switch_row.dart';
 
 /// 抖音「保存与命名」回归测试。
 ///
@@ -294,16 +295,20 @@ void main() {
     testWidgets('开关默认是开的，点一下能关掉', (tester) async {
       await pumpDouyinSettings(tester);
 
+      // S9b 平铺改造：原来的自绘 `SwitchListTile` 换成了共享 `SwitchRow`
+      // （`lib/widgets/switch_row.dart`，预览稿 `.sw` 的对应物）。定位方式随之
+      // 从 `SwitchListTile` 换成 `SwitchRow` 内的 `Switch` —— **判据本身没放宽**：
+      // 仍然是「找到那一行的开关 → 断言初值 → 点它 → 断言翻转」。
       final sw = find.ancestor(
         of: find.text('启用保存文件夹'),
-        matching: find.byType(SwitchListTile),
+        matching: find.byType(SwitchRow),
       );
       expect(sw, findsOneWidget);
-      expect(tester.widget<SwitchListTile>(sw).value, isTrue);
+      expect(tester.widget<Switch>(find.descendant(of: sw, matching: find.byType(Switch))).value, isTrue);
 
       await tester.tap(find.text('启用保存文件夹'));
       await tester.pumpAndSettle();
-      expect(tester.widget<SwitchListTile>(sw).value, isFalse);
+      expect(tester.widget<Switch>(find.descendant(of: sw, matching: find.byType(Switch))).value, isFalse);
     });
 
     testWidgets('启用模版下拉默认停在「按作者分文件夹」', (tester) async {
