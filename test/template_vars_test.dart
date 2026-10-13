@@ -6,6 +6,8 @@ import 'package:parse_dl/services/file_name_template.dart';
 import 'package:parse_dl/services/settings_store.dart';
 import 'package:parse_dl/theme/app_theme.dart';
 import 'package:parse_dl/widgets/download_section.dart';
+import 'package:parse_dl/widgets/field_row.dart';
+import 'package:parse_dl/widgets/template_row.dart';
 
 /// 「可用变量」区块的回归测试。
 ///
@@ -19,11 +21,15 @@ import 'package:parse_dl/widgets/download_section.dart';
 ///   1. 两个模板字段**各有一份**变量表，且都摆在**本字段输入框上方**；
 ///   2. 点哪一份的变量就插进哪个字段，**不依赖焦点状态**。
 void main() {
-  /// `_TemplateRow` 在 Section 里的出现顺序，用于按索引取 TextField：
-  /// 0 = 保存路径（只读）、1 = 文件夹模板、2 = 文件名模板。
-  const idxSaveDir = 0;
-  const idxDirTpl = 1;
-  const idxNameTpl = 2;
+  /// 两个模板行的标签 —— 页面上按**语义**定位的锚点。
+  ///
+  /// S9b 之前这里按下标取 `TextField`（0 = 保存路径、1 = 文件夹模板、
+  /// 2 = 文件名模板）。平铺改造把「保存路径」换成了 `FieldRow`（只读文本 +
+  /// 按钮，不再是 `TextField`），页面上只剩两个输入框：下标整体左移一位、
+  /// `.at(2)` 直接越界。判据本身没变（仍是「这个模板字段的输入框」），
+  /// 所以改成按行的标签找它，不再依赖控件类型与顺序。
+  const dirLabel = '文件夹模板';
+  const nameLabel = '文件名模板';
 
   /// 与 `DownloadSettings.fileNameTemplate` 的默认值一致
   const defaultNameTpl =
@@ -57,9 +63,27 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// 取第 index 个模板输入框的当前文本
-  String tplText(WidgetTester tester, int index) =>
-      tester.widget<TextField>(find.byType(TextField).at(index)).controller!.text;
+  /// 某个模板行的整行 —— 按行标签定位（页面上两个标签各自唯一）。
+  Finder tplRow(String label) => find.ancestor(
+        of: find.text(label),
+        matching: find.byType(TemplateRow),
+      );
+
+  /// 某个模板行的输入框 —— 本行唯一那一个。
+  Finder tplField(String label) => find.descendant(
+        of: tplRow(label),
+        matching: find.byType(TextField),
+      );
+
+  /// 某个模板行的变量表里的某一颗变量。
+  Finder varChip(String label, String token) => find.descendant(
+        of: tplRow(label),
+        matching: find.text(token),
+      );
+
+  /// 取某个模板输入框的当前文本
+  String tplText(WidgetTester tester, String label) =>
+      tester.widget<TextField>(tplField(label)).controller!.text;
 
   /// 点变量 → 触发去抖保存 + 弹出 SnackBar，把这几十毫秒走完，
   /// 否则测试结束时留下未触发的 Timer 会报错。
@@ -94,12 +118,12 @@ void main() {
   testWidgets('每份变量表都摆在「自己那个」输入框的上方', (tester) async {
     await pumpSection(tester);
 
-    final dirInput = tester.getCenter(find.byType(TextField).at(idxDirTpl));
-    final nameInput = tester.getCenter(find.byType(TextField).at(idxNameTpl));
+    final dirInput = tester.getCenter(tplField(dirLabel));
+    final nameInput = tester.getCenter(tplField(nameLabel));
 
     // 渲染顺序：文件夹变量 → 文件夹输入框 → 文件名变量 → 文件名输入框
-    final dirVar = tester.getCenter(find.text('%USER_SCREEN_NAME%').at(0));
-    final nameVar = tester.getCenter(find.text('%USER_SCREEN_NAME%').at(1));
+    final dirVar = tester.getCenter(varChip(dirLabel, '%USER_SCREEN_NAME%'));
+    final nameVar = tester.getCenter(varChip(nameLabel, '%USER_SCREEN_NAME%'));
 
     expect(dirVar.dy, lessThan(dirInput.dy),
         reason: '文件夹模板的变量表应在文件夹模板输入框上方');
@@ -112,22 +136,22 @@ void main() {
   testWidgets('点文件夹模板的变量 → 只写进文件夹模板', (tester) async {
     await pumpSection(tester);
 
-    expect(tplText(tester, idxDirTpl), isEmpty);
-    await tapAndSettle(tester, find.text('%USER_SCREEN_NAME%').at(0));
+    expect(tplText(tester, dirLabel), isEmpty);
+    await tapAndSettle(tester, varChip(dirLabel, '%USER_SCREEN_NAME%'));
 
-    expect(tplText(tester, idxDirTpl), '%USER_SCREEN_NAME%');
-    expect(tplText(tester, idxNameTpl), defaultNameTpl,
+    expect(tplText(tester, dirLabel), '%USER_SCREEN_NAME%');
+    expect(tplText(tester, nameLabel), defaultNameTpl,
         reason: '文件名模板必须保持不变');
   });
 
   testWidgets('点文件名模板的变量 → 只写进文件名模板', (tester) async {
     await pumpSection(tester);
 
-    await tapAndSettle(tester, find.text('%USER_SCREEN_NAME%').at(1));
+    await tapAndSettle(tester, varChip(nameLabel, '%USER_SCREEN_NAME%'));
 
-    expect(tplText(tester, idxNameTpl), startsWith('%POST_TIME%'));
-    expect(tplText(tester, idxNameTpl), endsWith('%USER_SCREEN_NAME%'));
-    expect(tplText(tester, idxDirTpl), isEmpty,
+    expect(tplText(tester, nameLabel), startsWith('%POST_TIME%'));
+    expect(tplText(tester, nameLabel), endsWith('%USER_SCREEN_NAME%'));
+    expect(tplText(tester, dirLabel), isEmpty,
         reason: '文件夹模板必须保持不变');
   });
 
@@ -135,13 +159,13 @@ void main() {
     await pumpSection(tester);
 
     // 全程不 focus 任何 TextField，直接点文件夹模板那一份的第一颗变量
-    final firstDirVar = find.text('%${kXTemplateVars.first.name}%').at(0);
-    await tapAndSettle(tester, firstDirVar);
+    final token = '%${kXTemplateVars.first.name}%';
+    await tapAndSettle(tester, varChip(dirLabel, token));
 
-    expect(tplText(tester, idxDirTpl), '%${kXTemplateVars.first.name}%');
-    expect(tplText(tester, idxNameTpl), defaultNameTpl);
+    expect(tplText(tester, dirLabel), token);
+    expect(tplText(tester, nameLabel), defaultNameTpl);
 
-    // 焦点确实不在任何模板框上（默认焦点在保存路径那个只读框上或者无焦点）
+    // 焦点确实不在任何模板框上（保存路径那一行 S9b 后不再是输入框）
     final focused = tester
         .widgetList<TextField>(find.byType(TextField))
         .where((t) => t.focusNode?.hasFocus ?? false)
@@ -172,11 +196,18 @@ void main() {
   testWidgets('输出示例仍在输入框下方（顺序未被改坏）', (tester) async {
     await pumpSection(tester);
 
-    final nameInput = tester.getCenter(find.byType(TextField).at(idxNameTpl));
-    final example = tester.getCenter(find.text('输出示例：').last);
+    final nameInput = tester.getCenter(tplField(nameLabel));
+    final example = tester.getCenter(
+      find.descendant(
+        of: tplRow(nameLabel),
+        matching: find.text('输出示例：'),
+      ),
+    );
     expect(nameInput.dy, lessThan(example.dy));
 
-    final saveDir = tester.getCenter(find.byType(TextField).at(idxSaveDir));
+    // 保存路径整行仍在最上面。S9b 后它是 `FieldRow`（只读文本 + 选择按钮），
+    // 不再是 `TextField` —— 判据本身没变，仍是「保存路径排在模板之前」。
+    final saveDir = tester.getCenter(find.byType(FieldRow));
     expect(saveDir.dy, lessThan(nameInput.dy));
   });
 }
