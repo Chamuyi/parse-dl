@@ -17,7 +17,9 @@ import '../widgets/douyin_section.dart';
 import '../widgets/material_picker.dart';
 import '../widgets/nav_layout_picker.dart';
 import '../widgets/proxy_section.dart';
+import '../widgets/section_card.dart';
 import '../widgets/style_picker.dart';
+import '../widgets/sub_section.dart';
 import '../widgets/tint_picker.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/page_header.dart';
@@ -106,7 +108,6 @@ class SettingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = context.watch<SettingsStore>();
     final appearance = store.settings.appearance;
-    final proxy = store.settings.proxy;
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
@@ -123,16 +124,23 @@ class SettingsPage extends StatelessWidget {
           ),
         ),
 
-        // ── 外观 ──────────────────────────────────────────────
+        // ── 全局设置：双栏平铺 ────────────────────────────────
+        // 预览稿 `.cols`（`app.css:111`）：两个 `flex:1` 的 pane、间距 11px。
+        // 左 pane = 外观 + 代理，右 pane = 下载 + 应用（`index.html:662-697`）。
+        // 每张卡改用共享 [SectionCard] 平铺，去掉折叠壳 —— 打开设置页即见当前值。
         if (scope == SettingsScope.global)
-          CollapsibleGroup(
-            storageId: 'section.appearance',
-            variant: CollapsibleVariant.section,
-            title: t('外观'),
-            icon: Icons.palette_rounded,
-            summary: t('窗口材质、自定义色调、导航形态、主题模式、背景图片、界面语言'),
-            expandLabel: t('展开设置'),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SectionCard(
+                      title: t('外观'),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
               _Field(
                 label: t('界面语言'),
                 description:
@@ -216,6 +224,47 @@ class SettingsPage extends StatelessWidget {
                       store.setAppearance((a) => a.backgroundImage = v),
                   onOpacityChanged: (v) =>
                       store.setAppearance((a) => a.backgroundImageOpacity = v),
+                ),
+              ),
+                        ],
+                      ),
+                    ),
+                    SectionCard(
+                      title: t('代理'),
+                      child: const ProxySection(),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SectionCard(
+                      title: t('下载'),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SubSection(t('分模块设置')),
+                          for (final m in _kModuleSettingsEntries)
+                            _ModuleSettingsEntry(
+                              title: t(m.title),
+                              // 副标题直接复用各模块设置页里那份「收起态概要」的措辞，
+                              // 不另写一套 —— 两处说的是同一件事，措辞分叉就会互相矛盾。
+                              description: t(m.description),
+                              onOpen: onNavigate == null
+                                  ? null
+                                  : () => onNavigate!(m.routeId),
+                            ),
+                        ],
+                      ),
+                    ),
+                    SectionCard(
+                      title: t('应用'),
+                      child: const AppSection(),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -312,64 +361,6 @@ class SettingsPage extends StatelessWidget {
             children: const [BiliSection()],
           ),
 
-        // ── 代理 ──────────────────────────────────────────────
-        if (scope == SettingsScope.global)
-          CollapsibleGroup(
-            storageId: 'section.proxy',
-            variant: CollapsibleVariant.section,
-            title: t('代理'),
-            icon: Icons.public_rounded,
-            summary: t('启用代理、使用系统代理、自定义代理地址、连通性测试'),
-            expandLabel: t('展开设置'),
-            // 「启用代理 + 不用系统代理 + 地址为空」时地址是必填项 →
-            // 自动展开，保证收起状态不会把必需项藏起来。
-            forceExpand:
-                proxy.enable && !proxy.useSystem && proxy.url.trim().isEmpty,
-            children: const [ProxySection()],
-          ),
-
-        // ── 分模块设置 ────────────────────────────────────────
-        // 三个下载模块各有自己的设置页，入口本来只在侧边栏 / Dock 上。
-        // 这里再给一条「从全局设置直接跳过去」的路：用户找「抖音怎么改画质」
-        // 时先落到全局设置，原来只能看到外观/代理/应用，得自己想到去侧边栏
-        // 找模块标题行。
-        //
-        // 三个入口的**跳转方式完全一致**（同一个 onNavigate，传各自的
-        // 设置页路由 id），所以这里不写三套控件 —— 用一份数据 + 一个循环，
-        // 加第四个模块时只加一行数据。
-        if (scope == SettingsScope.global)
-          CollapsibleGroup(
-            storageId: 'section.module_settings',
-            variant: CollapsibleVariant.section,
-            title: t('分模块设置'),
-            icon: Icons.widgets_rounded,
-            summary: t('X 下载、抖音解析下载、B 站解析下载各自的设置页入口'),
-            expandLabel: t('展开设置'),
-            children: [
-              for (final m in _kModuleSettingsEntries)
-                _ModuleSettingsEntry(
-                  title: t(m.title),
-                  // 副标题直接复用各模块设置页里那份「收起态概要」的措辞，
-                  // 不另写一套 —— 两处说的是同一件事，措辞分叉就会互相矛盾。
-                  description: t(m.description),
-                  onOpen: onNavigate == null
-                      ? null
-                      : () => onNavigate!(m.routeId),
-                ),
-            ],
-          ),
-
-        // ── 应用 ──────────────────────────────────────────────
-        if (scope == SettingsScope.global)
-          CollapsibleGroup(
-            storageId: 'section.app',
-            variant: CollapsibleVariant.section,
-            title: t('应用'),
-            icon: Icons.tune_rounded,
-            summary: t('日志记录、日志目录与文件'),
-            expandLabel: t('展开设置'),
-            children: const [AppSection()],
-          ),
       ],
     );
   }
