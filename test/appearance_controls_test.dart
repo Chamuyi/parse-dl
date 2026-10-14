@@ -16,6 +16,7 @@ import 'package:parse_dl/theme/app_theme.dart';
 import 'package:parse_dl/theme/window_material.dart';
 import 'package:parse_dl/widgets/material_picker.dart';
 import 'package:parse_dl/widgets/nav_items.dart';
+import 'package:parse_dl/widgets/section_card.dart';
 
 /// 外观分区的四条界面回归（2026-09-30 弹层实拍挑出来的）。
 ///
@@ -28,10 +29,15 @@ import 'package:parse_dl/widgets/nav_items.dart';
 ///    导航与材质卡片用低饱和主色底配主色描边。
 ///
 /// 外加一条顺带修到的漏翻：分区展开后头部的「收起」没走 `t()`。
+///
+/// 2026-10-14 平铺改造：设置页的折叠壳（`CollapsibleGroup`）整体退役，每块
+/// 内容改成平铺的 [SectionCard]，**打开页面即见当前值**。所以泵页面后不再
+/// 需要「先点开『外观』分区」这一步，`appearanceSection` 也从折叠内容容器的
+/// key 改成「外观」那张卡本身 —— 搜索范围仍是同一个子树，判据一条没放宽。
 void main() {
   const c = AppColors.dark;
 
-  /// 泵出全局设置页并展开「外观」分区。[locale] 非空时按该语言渲染。
+  /// 泵出全局设置页。[locale] 非空时按该语言渲染。
   Future<void> pumpAppearance(
     WidgetTester tester, {
     AppLocale? locale,
@@ -71,14 +77,12 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    // 分区标题本身也要跟着语言走，否则英文档找不到点击目标
-    await tester.tap(find.text(t('外观')));
-    await tester.pumpAndSettle();
   }
 
-  /// 外观分区内容子树
-  final appearanceSection = find.byKey(
-    const ValueKey('collapsible-content-section.appearance'),
+  /// 外观分区内容子树 —— 平铺后就是「外观」那一张 [SectionCard]。
+  final appearanceSection = find.ancestor(
+    of: find.text('外观'),
+    matching: find.byType(SectionCard),
   );
 
   /// 找到把 [label] 框住的那个分段控件底框（surfaceSunken + 描边）
@@ -354,25 +358,11 @@ void main() {
   });
 
   // ══════════════════════════════════════════════════════════
-  group('分区头部的展开/收起提示', () {
-    // 这条不是"漏翻表"问题：'收起' 在 strings_en 里一直有（抖音页的 tooltip 在用），
-    // 漏的是 collapsible_group 渲染时根本没走 t()，所以英文界面下展开态夹中文。
-    // 现有的「源码里每条 t(…) 都有英文对照」那条覆盖面测试抓不到它 —— 它压根没进 t()。
-    testWidgets('英文界面下展开态显示 Collapse，不留裸「收起」', (tester) async {
-      await pumpAppearance(tester, locale: AppLocale.en);
-
-      expect(
-        find.text('Collapse'),
-        findsOneWidget,
-        reason: '只有「外观」分区是展开的，收起提示该出现一次',
-      );
-      expect(
-        find.text('收起'),
-        findsNothing,
-        reason: '展开态夹中文 = 这处没走 t()',
-      );
-      expect(find.text('Show settings'), findsNWidgets(3),
-          reason: '另外三个分区的收起态提示本来就是翻好的');
-    });
-  });
+  // 分区头部的展开/收起提示
+  //
+  // 2026-10-14 平铺改造后，设置页里已经没有折叠组（`CollapsibleGroup` 的
+  // 调用点全部退役），这条判据**在设置页上不再有对象** —— 它测的本来就是
+  // 组件行为，所以整条迁到 `collapsible_group_test.dart` 的
+  // 「展开/收起提示走 t()」用例，覆盖面一条没丢。
+  // ══════════════════════════════════════════════════════════
 }
