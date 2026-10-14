@@ -150,13 +150,67 @@ class _DownloadManagementPageState extends State<DownloadManagementPage> {
       children: [
         PageHeader(title: t(title), subtitle: t(subtitle)),
         const SizedBox(height: 12),
+
+        // ① Tab 条 —— 预览稿 `index.html:394-395` 的 `.tabs2.card`：
+        // 它**自己是一张卡**，宽度按内容取（`align-self:flex-start`），
+        // 不跟下面的任务卡挤在同一个容器里。
+        Align(
+          alignment: Alignment.centerLeft,
+          child: AppCard(
+            padding: const EdgeInsets.fromLTRB(0, 4, 0, 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final tab in _tabs)
+                  _TabButton(
+                    label: t(tab.$1),
+                    // 角标只算 aria2 里的任务，和点进去看到的列表严格一致。
+                    // 原版把「创建中」的任务数也加进「下载中」角标，结果是
+                    // 角标写着 16、列表却是空的（创建中的用户在上方那个区块里，
+                    // 不在这个列表里）—— 看着像坏了。
+                    count: store
+                        .tasksByStatuses(tab.$2, source: feed.source)
+                        .length,
+                    selected: currentName == tab.$1,
+                    onTap: () => store.setCurrentTab(tab.$1),
+                  ),
+                if (historyTab case final tab?)
+                  _TabButton(
+                    label: t(tab),
+                    count: historyCount,
+                    selected: currentName == tab,
+                    onTap: () => store.setCurrentTab(tab),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        // ② 工具栏行 —— 预览稿 `:396-401` 的 `.row`。**不在卡里**。
+        Row(
+          children: [
+            // 一键重试只在「错误」Tab 出现：别的 Tab 里没有可重试的东西，
+            // 常驻一个灰按钮只会让人以为"全部暂停"那种全局动作。
+            if (currentName == _tabs[1].$1)
+              _RetryAllFailed(
+                failed: store.tasksByStatuses(_tabs[1].$2, source: feed.source),
+                coordinator: coordinator,
+              ),
+            _Toolbar(coordinator: coordinator, store: store, feed: feed),
+            const SizedBox(width: 8),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // ③ 任务卡 —— 预览稿 `:402-403` 的 `.card`。
         Expanded(
           child: AppCard(
             padding: const EdgeInsets.fromLTRB(0, 4, 0, 4),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // ① aria2 启动状态（不在顶部显示「启动中…」，避免每次切换都要抖动）
+                // aria2 启动状态（不在顶部显示「启动中…」，避免每次切换都要抖动）
                 if (!coordinator.booted)
                   Container(
                     margin: const EdgeInsets.fromLTRB(14, 8, 14, 0),
@@ -174,7 +228,7 @@ class _DownloadManagementPageState extends State<DownloadManagementPage> {
                           width: 14,
                           height: 14,
                           child: CircularProgressIndicator(
-                            strokeWidth: 1.6, color: c.danger),
+                              strokeWidth: 1.6, color: c.danger),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -187,49 +241,10 @@ class _DownloadManagementPageState extends State<DownloadManagementPage> {
                       ],
                     ),
                   ),
-                // ② 「创建中」的任务（对应原版 CreationTasks 组件）—— 只有 X 侧有翻页抓取
+                // 「创建中」的任务（对应原版 CreationTasks 组件）—— 只有 X 侧有翻页抓取
                 if (feed.hasCreationTasks) const _CreationTasksSection(),
 
-                // ③ Tab 头 + 工具栏
-                Row(
-                  children: [
-                    for (final tab in _tabs)
-                      _TabButton(
-                        label: t(tab.$1),
-                        // 角标只算 aria2 里的任务，和点进去看到的列表严格一致。
-                        // 原版把「创建中」的任务数也加进「下载中」角标，结果是
-                        // 角标写着 16、列表却是空的（创建中的用户在上方那个区块里，
-                        // 不在这个列表里）—— 看着像坏了。
-                        count: store
-                            .tasksByStatuses(tab.$2, source: feed.source)
-                            .length,
-                        selected: currentName == tab.$1,
-                        onTap: () => store.setCurrentTab(tab.$1),
-                      ),
-                    if (historyTab case final tab?)
-                      _TabButton(
-                        label: t(tab),
-                        count: historyCount,
-                        selected: currentName == tab,
-                        onTap: () => store.setCurrentTab(tab),
-                      ),
-                    const Spacer(),
-                    // 一键重试只在「错误」Tab 出现：别的 Tab 里没有可重试的东西，
-                    // 常驻一个灰按钮只会让人以为"全部暂停"那种全局动作。
-                    if (currentName == _tabs[1].$1)
-                      _RetryAllFailed(
-                        failed: store.tasksByStatuses(
-                            _tabs[1].$2, source: feed.source),
-                        coordinator: coordinator,
-                      ),
-                    _Toolbar(
-                        coordinator: coordinator, store: store, feed: feed),
-                    const SizedBox(width: 8),
-                  ],
-                ),
-                Divider(height: 0.5, thickness: 0.5, color: c.line),
-
-                // ② 内容
+                // 内容
                 Expanded(
                   child: (historyTab != null && currentName == historyTab)
                       ? _historyBody(feed)
