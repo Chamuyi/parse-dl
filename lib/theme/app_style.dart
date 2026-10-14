@@ -224,6 +224,26 @@ extension AppStyleRadiusTokens on AppStyle {
 /// **能力边界（如实记录）**：CSS 的 `inset 0 -14px 26px -18px …` 那道底部内光晕
 /// 用 Flutter 的 [BoxDecoration] 无法表达（它没有 inset shadow），这里只取
 /// 「可表达的 1px 顶部高光」这一半，不做近似伪造。
+///
+/// ### [top] 不再进 `Border`（2026-10-15 修一个真机缺陷）
+///
+/// 原实现把 [top] 与 [side] 分写成 `Border(top:…, left:…, right:…, bottom:…)`。
+/// 只要 [top] 与 [side] 不同色，`Border.isUniform` 就是 `false`，而
+/// `BoxDecoration` 在**非 uniform 边框 + `borderRadius`** 下会走逐边绘制路径，
+/// **把子内容整片盖住** —— 真机表现为「液体玻璃风格下卡片里什么都没有」，
+/// 而 frosted / clay（四边同色 → uniform）完全正常。
+///
+/// 最小复现（同一容器、只差边框形式，量渲染结果里的深色像素）：
+/// ```
+/// Border.all(...)                 isUniform=true   darkPixels=6725  ✅
+/// 四边分写、顶边不同色（旧实现）    isUniform=false  darkPixels=361   ❌
+/// 四边分写、四边同色              isUniform=true   darkPixels=6725  ✅
+/// ```
+///
+/// 所以 [toBorder] 现在**恒返回四边同色的边框**（用 [side]），[top] 单独由
+/// [AppCard] 用「顶部 1px 内阴影」表达 —— 这也更贴近 CSS 原意：
+/// 预览稿里那道顶边高光本来就是 `box-shadow: inset 0 1px 0 …`，**不是 border**，
+/// 当初把它译成「顶边换个颜色」才是误译。
 @immutable
 class StyleBorder {
   final Color top;
@@ -234,12 +254,14 @@ class StyleBorder {
   /// 顶部高光与三边同色时用这个（磨砂 / 陶土都没有独立的高光边）。
   const StyleBorder.uniform(this.side) : top = side;
 
-  Border toBorder() => Border(
-        top: BorderSide(color: top),
-        left: BorderSide(color: side),
-        right: BorderSide(color: side),
-        bottom: BorderSide(color: side),
-      );
+  /// 四边同色的边框。
+  ///
+  /// **必须保持 uniform**：非 uniform 边框在带圆角的 `BoxDecoration` 上会让
+  /// 子内容消失（见类文档的最小复现）。顶边高光不走这里。
+  Border toBorder() => Border.all(color: side, width: 1);
+
+  /// 顶部那道 1px 高光是否与三边不同（决定要不要额外画一条内阴影）。
+  bool get hasTopHighlight => top != side;
 
   @override
   bool operator ==(Object other) =>

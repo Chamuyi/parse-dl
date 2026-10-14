@@ -69,12 +69,29 @@ class AppCard extends StatelessWidget {
     final cardColor =
         hovered ? Color.alphaBlend(style.hoverColor(brightness), baseColor) : baseColor;
 
-    // 边框：液体玻璃有一条更亮的顶边（CSS 的 `inset 0 1px 0`），另三边是 `--rim`；
-    // 磨砂 / 陶土四边同色。[glow] 仍能把三边换成强调色描边（老调用点的语义）。
+    // 边框：四边同色（`--rim`）。液体玻璃另有一条**更亮的顶边高光**，但它在
+    // CSS 里是 `box-shadow: inset 0 1px 0 …` 而**不是** border —— 所以这里
+    // 用内阴影表达（见 [StyleBorder] 类文档里那段最小复现：把顶边写成另一种
+    // 颜色的 `Border` 会让 `isUniform=false`，带圆角时子内容整片消失）。
+    // [glow] 仍能把三边换成强调色描边（老调用点的语义）。
     final rim = style.cardBorderOf(c, brightness);
     final border = glow
-        ? StyleBorder(top: rim.top, side: c.accentLine).toBorder()
+        ? Border.all(color: c.accentLine, width: 1)
         : rim.toBorder();
+
+    // 顶边 1px 高光：内阴影（`inset 0 1px 0`）在 Flutter 里没有直接对应物，
+    // 用「紧贴顶边、只向下扩散 1px 的浅色内描边」近似 —— 画在内容**下面**，
+    // 因此不会盖住子内容。只有 [StyleBorder.hasTopHighlight] 的风格才画。
+    final topHighlight = rim.hasTopHighlight
+        ? [
+            BoxShadow(
+              color: rim.top,
+              offset: const Offset(0, 1),
+              blurRadius: 0,
+              spreadRadius: 0,
+            ),
+          ]
+        : const <BoxShadow>[];
 
     final body = Container(
       padding: padding,
@@ -89,7 +106,7 @@ class AppCard extends StatelessWidget {
             : null,
         borderRadius: BorderRadius.circular(r),
         border: border,
-        boxShadow: style.cardShadows(brightness),
+        boxShadow: [...topHighlight, ...style.cardShadows(brightness)],
       ),
       child: child,
     );
