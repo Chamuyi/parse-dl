@@ -1,6 +1,9 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:parse_dl/services/app_prefs.dart';
@@ -9,6 +12,7 @@ import 'package:parse_dl/models/settings.dart';
 import 'package:parse_dl/pages/about_page.dart';
 import 'package:parse_dl/pages/auto_task_page.dart';
 import 'package:parse_dl/pages/bili_batch_page.dart';
+import 'package:parse_dl/pages/dashboard_page.dart';
 import 'package:parse_dl/pages/download_management_page.dart';
 import 'package:parse_dl/pages/douyin_auto_page.dart';
 import 'package:parse_dl/pages/homepage_page.dart';
@@ -25,24 +29,34 @@ import 'package:parse_dl/services/douyin_auto_store.dart';
 import 'package:parse_dl/services/douyin_store.dart';
 import 'package:parse_dl/services/homepage_store.dart';
 import 'package:parse_dl/services/settings_store.dart';
+import 'package:parse_dl/theme/app_style.dart';
 import 'package:parse_dl/theme/app_theme.dart';
 
 /// 逐屏冒烟测试 —— 把「审查每一处 UI」从人肉截图变成可反复跑的机器检查。
 ///
-/// 为什么这么做：2026-09-24 用户要求「认真审查软件内每一处 UI」，但靠我开窗口
+/// 为什么这么做：2026-09-24 用户要求「认真审查软件内每一处 UI」，但靠开窗口
 /// 一屏屏截图，既看不见进度、也漏得多。而 Flutter 的 `RenderFlex overflow`
 /// 在 widget 测试里**会直接让用例失败** —— 也就是说"文字撑破容器"这类问题
 /// 根本不需要眼睛看，渲染一遍就暴露了。（`DownloadListItem` 那行溢出 175px
 /// 就是这么被撞出来的，不是看出来的。）
 ///
+/// ### 2026-10-15 扩成全矩阵：3 风格 × 2 明暗 × 13 页 × 3 尺寸
+///
+/// 原来这套只泵**一种**外观（`AppColors.dark` + `brightness: dark`，
+/// 且不传 `style` → 落到默认 frosted）。于是「液体玻璃风格下卡片内容整片
+/// 消失」那个真机缺陷**完整地穿过了这 39 条用例** —— 它只在 liquid 下出现。
+///
+/// 现在每个组合都做两件事：
+///   1. `takeException()` 为空（不崩、不溢出）—— 原判据；
+///   2. **内容真的被绘制**：数渲染图里的深色像素。卡片若被材质/边框盖住，
+///      树上照样有 widget、语义层照样完整，但像素是空的（第 1 条判不出来）。
+///
 /// 三档尺寸：常规 1280×900、偏窄 1000×700、以及 `main.dart` 里设的窗口最小
 /// 尺寸 880×620 —— 用户能把窗口拖到多小，就该测到多小。
 ///
-/// 每个用例的名字就是「页面 × 尺寸」，跑一次即得问题清单。
-///
 /// **不测 DouyinPage / BiliPage**：它们要真的 WebView2 控件，pump 起来会卡在
-/// 平台通道上。抖音那一屏改由注入脚本的诊断与 `douyin_page_results_test` 覆盖，
-/// B 站那一屏由 `bili_page_test` 覆盖（那里只测右侧面板：WebView 起不来时
+/// 平台通道上。抖音那一屏改由注入脚本的诊断与 `douyin_page_results_test`
+/// 覆盖，B 站那一屏由 `bili_page_test` 覆盖（那里只测右侧面板：WebView 起不来时
 /// 左边落占位面板，右边照样渲染，不需要插件也能把列表与文案测到）。
 void main() {
   late Directory tmp;
@@ -60,8 +74,7 @@ void main() {
   setUp(() async {
     AppPrefs.setMockInitialValues({});
     tmp = await Directory.systemTemp.createTemp('ui-smoke-');
-    await AppPaths.init(
-        exeDirOverride: tmp, fallbackOverride: tmp);
+    await AppPaths.init(exeDirOverride: tmp, fallbackOverride: tmp);
     settings = SettingsStore();
     appState = await AppState.restore();
     downloads = DownloadStore()..setSaveDir(tmp.path);
@@ -148,14 +161,50 @@ void main() {
     ]);
   }
 
-  Future<void> render(WidgetTester tester, Size size, Widget page) async {
+  /// 渲染结果里深色像素的数量 —— 「内容真的被画出来了吗」的量化判据。
+  ///
+  /// 取图前先 `pump()`：`toImage()` 要求目标 RenderRepaintBoundary 已经 paint
+  /// 过，否则会拿到 `NEEDS-PAINT` 的树并抛异常。
+  Future<int> darkPixels(WidgetTester tester, Key key) async {
+    await tester.pump();
+    late final ui.Image image;
+    await tester.runAsync(() async {
+      final b = tester.renderObject<RenderRepaintBoundary>(find.byKey(key));
+      image = await b.toImage();
+    });
+    late final ByteData? bd;
+    await tester.runAsync(() async {
+      bd = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    });
+    final bytes = bd!.buffer.asUint8List();
+    var dark = 0;
+    for (var i = 0; i + 3 < bytes.length; i += 4) {
+      // 深色 = 三个通道都压得很低。深色主题下正文/标题就是这类像素；
+      // 浅色主题下则是图标与描边。无论哪套，只要内容真画出来了就不会是 0。
+      if (bytes[i] < 90 && bytes[i + 1] < 90 && bytes[i + 2] < 90) dark++;
+    }
+    return dark;
+  }
+
+  final boundaryKey = const ValueKey('smoke-boundary');
+
+  Future<void> render(
+    WidgetTester tester,
+    Size size,
+    Widget page, {
+    required AppStyle style,
+    required Brightness brightness,
+  }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
       AppTheme(
-        colors: AppColors.dark,
-        brightness: Brightness.dark,
+        colors: brightness == Brightness.dark
+            ? AppColors.dark
+            : AppColors.light,
+        brightness: brightness,
+        style: style,
         child: MultiProvider(
           providers: [
             ChangeNotifierProvider<SettingsStore>.value(value: settings),
@@ -170,7 +219,11 @@ void main() {
             ChangeNotifierProvider<BiliLedger>.value(value: biliLedger),
             ChangeNotifierProvider<BiliBatchStore>.value(value: biliBatch),
           ],
-          child: MaterialApp(home: Scaffold(body: page)),
+          child: MaterialApp(
+            home: Scaffold(
+              body: RepaintBoundary(key: boundaryKey, child: page),
+            ),
+          ),
         ),
       ),
     );
@@ -185,6 +238,7 @@ void main() {
   };
 
   final pages = <String, Widget Function()>{
+    '总览': () => DashboardPage(onNavigate: (_) {}),
     'X 主页': () => HomepagePage(onNavigate: (_) {}),
     'X 下载管理': () => const DownloadManagementPage(),
     '抖音下载管理': () => const DownloadManagementPage(feed: DownloadFeed.douyin),
@@ -206,8 +260,6 @@ void main() {
         brightness: Brightness.dark,
         onMaterialChanged: (_) async {},
         scope: SettingsScope.douyin),
-    // 折叠组「只裁剪不销毁」，所以这三档里 BiliSection 是真被布局出来的 ——
-    // 收起态冒烟同样能撞出撑破容器的行。
     'B 站设置': () => SettingsPage(
         brightness: Brightness.dark,
         onMaterialChanged: (_) async {},
@@ -221,16 +273,108 @@ void main() {
             license: 'GPL-3.0')),
   };
 
-  for (final entry in pages.entries) {
-    for (final size in sizes.entries) {
-      testWidgets('${entry.key} @ ${size.key} 不溢出、不崩', (tester) async {
-        seed();
-        await render(tester, size.value, entry.value());
-        expect(tester.takeException(), isNull,
-            reason: '${entry.key} 在 ${size.key} 下渲染出问题');
-      });
+  // ── 主矩阵：13 页 × 3 风格 × 2 明暗 × 3 尺寸 = 234 组合 ──────────────
+  for (final style in AppStyle.values) {
+    for (final brightness in Brightness.values) {
+      final combo = '${style.label}·${brightness == Brightness.dark ? '深色' : '浅色'}';
+      for (final entry in pages.entries) {
+        for (final size in sizes.entries) {
+          testWidgets('${entry.key} @ $combo @ ${size.key} 不溢出、内容可见',
+              (tester) async {
+            seed();
+            await render(
+              tester,
+              size.value,
+              entry.value(),
+              style: style,
+              brightness: brightness,
+            );
+
+            // ① 不崩、不溢出（原有判据）
+            expect(tester.takeException(), isNull,
+                reason: '${entry.key} 在 $combo / ${size.key} 下渲染出问题');
+
+            // ② 内容真的被绘制（新增判据，抓「卡片被材质盖住」这类问题）
+            final dark = await darkPixels(tester, boundaryKey);
+            expect(
+              dark,
+              greaterThan(200),
+              reason: '${entry.key} 在 $combo / ${size.key} 下渲染出的深色像素只有 '
+                  '$dark 个 —— 页面内容疑似被材质或边框盖住（树上/语义层看不出来）',
+            );
+          });
+        }
+      }
     }
   }
+
+  // ── 负控制：证明上面那条「内容可见」判据真的会判错 ──────────────────
+  //
+  // 手工复刻**修复前**的液体玻璃边框写法（顶边与三边不同色 →
+  // `Border.isUniform == false`），它会让卡片子内容整片消失。若这条判据
+  // 在它身上仍然是绿的，那说明「数深色像素」这个方法本身失效了。
+  testWidgets('负控制：非 uniform 边框确实会让内容不可见', (tester) async {
+    tester.view.physicalSize = const Size(600, 400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    const badBorder = Border(
+      top: BorderSide(color: Color(0xF2FFFFFF)),
+      left: BorderSide(color: Color(0xBFFFFFFF)),
+      right: BorderSide(color: Color(0xBFFFFFFF)),
+      bottom: BorderSide(color: Color(0xBFFFFFFF)),
+    );
+    expect(badBorder.isUniform, isFalse, reason: '前置：这个边框必须是非 uniform');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          backgroundColor: Colors.white,
+          body: Center(
+            child: RepaintBoundary(
+              key: boundaryKey,
+              child: SizedBox(
+                width: 400,
+                height: 200,
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: const Color(0x81FFFFFF),
+                    borderRadius: BorderRadius.circular(20),
+                    border: badBorder,
+                  ),
+                  child: const Text(
+                    '█',
+                    style: TextStyle(fontSize: 80, color: Color(0xFF000000)),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 非 uniform 边框下子树的 RenderObject 会停在 NEEDS-PAINT，`toImage()`
+    // 直接抛异常而不是返回空图 —— 「取不到像素」本身就是内容没被绘制的证据。
+    //
+    // 这里用 `takeException()` 收走 Flutter 在渲染阶段记下的异常：直接
+    // try/catch 包 `runAsync` 兜不住它（异常走的是 binding 的错误上报通道，
+    // 会以「Multiple exceptions were detected」的形式让用例失败）。
+    final dark = await darkPixels(tester, boundaryKey).catchError((_) => -1);
+    tester.takeException(); // 收走渲染阶段记下的异常，避免污染用例结果
+
+    // 阈值取 1000 而不是主判据的 200：正常页面量级在数千（见下方注释），
+    // 非 uniform 边框只留下边框抗锯齿的几百个像素 —— 两者差一个数量级，
+    // 1000 落在中间才真正分得开。
+    expect(
+      dark,
+      lessThan(1000),
+      reason: '负控制失败：非 uniform 边框这次竟然没让内容消失（实测 $dark）。'
+          '若 Flutter 修了这个行为，可以简化主判据，但**不要**直接删掉它。',
+    );
+  });
 
   test('设置页默认语言是跟随系统（不因为加了语言入口就改默认）', () {
     expect(AppearanceSettings().locale.id, 'system');
