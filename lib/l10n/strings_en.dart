@@ -42,9 +42,6 @@ const Map<String, String> kStringsEn = {
   '全局设置': 'General Settings',
   '抖音解析下载设置': 'Douyin Download Settings',
   '外观': 'Appearance',
-  '窗口材质、自定义色调、导航形态、主题模式、背景图片、界面语言':
-      'Window material, custom tint, navigation style, theme mode, background image, language',
-  '展开设置': 'Show settings',
   '窗口材质': 'Window material',
   '云母材质需要 Windows 11，亚克力需要 Windows 10 1809 以上；系统不支持时会退回纯色背景。':
       'Mica requires Windows 11 and acrylic requires Windows 10 1809 or newer. '
@@ -128,16 +125,12 @@ const Map<String, String> kStringsEn = {
   '下载源、质量优先策略、图片格式、批量与筛选选项':
       'Download source, quality priority, image format, batch and filter options',
   '代理': 'Proxy',
-  '启用代理、使用系统代理、自定义代理地址、连通性测试':
-      'Enable proxy, use system proxy, custom proxy address, connectivity test',
   // 「接口缓存」原本是全局设置里的「高级」分区，现在整块归到 X 下载设置页。
   '接口缓存': 'API cache',
   'X 接口标识缓存（搜索用户或加载媒体失败时使用）':
       'X GraphQL operation-id cache (used when user search or media loading fails)',
   // 全局设置里的「分模块设置」入口（三个模块各一行）。
   '分模块设置': 'Per-module settings',
-  'X 下载、抖音解析下载、B 站解析下载各自的设置页入口':
-      'Entry points to the X, Douyin and Bilibili settings pages',
   '刷新 X 接口缓存': 'Refresh X API cache',
   '搜索用户或加载媒体失败时（如提示「找不到该用户」或长时间无响应），通常是 X 更换了内部接口标识。点此清除缓存后重新搜索即可。':
       'When user search or media loading fails ("user not found", or no response '
@@ -146,7 +139,6 @@ const Map<String, String> kStringsEn = {
   '清除缓存并重试': 'Clear cache and retry',
   '已清除 X 接口缓存，请重新搜索': 'X API cache cleared — search again',
   '应用': 'Application',
-  '日志记录、日志目录与文件': 'Logging, log folder and files',
   '页面「{route}」迁移中': 'Page "{route}" is still being migrated',
 
   // ── 关于页 ───────────────────────────────────────────────────
@@ -209,7 +201,6 @@ const Map<String, String> kStringsEn = {
   '使用系统代理': 'Use system proxy',
   '自动读取 Windows「Internet 选项」里的代理设置（推荐）':
       'Read the proxy from Windows Internet Options (recommended)',
-  '自定义代理地址': 'Custom proxy address',
   '还没填代理地址 —— 「测试连接」与下载都会失败':
       'No proxy address yet — both the connectivity test and downloads will fail',
   '已保存': 'Saved',
