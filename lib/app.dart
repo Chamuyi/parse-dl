@@ -39,6 +39,12 @@ import 'widgets/douyin_result_overlay.dart';
 import 'widgets/sidebar_nav.dart';
 import 'widgets/title_bar.dart';
 
+/// 上一次已经下发到原生窗口的明暗（见 `build` 里那段说明）。
+///
+/// 用模块级变量而不是实例字段：`XDownloaderApp` 是 `StatelessWidget`。
+/// 初值 null = 「还没下发过」，保证首帧一定会应用一次。
+Brightness? _lastAppliedDark;
+
 /// 应用版本号。
 ///
 /// **规则**：公开基线起从 `1.0` 重新开始，每迭代一次 +0.1。
@@ -144,6 +150,27 @@ class XDownloaderApp extends StatelessWidget {
               l.languageCode,
           ];
           final locale = activeLocale.flutterLocale;
+
+          // 窗口外观的明暗跟着**应用明暗**走（`flutter_acrylic` 的 `dark`
+          // 参数管的是系统绘制的标题栏/边框）。
+          //
+          // 2026-10-15 之前这件事在 `main.dart` 启动时做一次，且 `dark` 是按
+          // 「材质是不是 mica」猜的 —— 浅色+Mica / 深色+亚克力两种组合都传反。
+          // 现在挪到这里：① 明暗有唯一出处（`_resolveBrightness`）；
+          // ② 用户切换明暗时窗口外观**跟着变**（原来切了不会变，得重启）。
+          //
+          // 只在变化时调用，避免每帧都打一次原生通道。用模块级变量而不是
+          // 实例字段：`XDownloaderApp` 是 `StatelessWidget`（见类定义），
+          // 存不了可变状态。
+          if (_lastAppliedDark != brightness) {
+            _lastAppliedDark = brightness;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              applyWindowMaterial(
+                s.settings.appearance.windowMaterial,
+                dark: brightness == Brightness.dark,
+              );
+            });
+          }
 
           return AppTheme(
             // 色板按「风格 + 亮度」取：三套风格各有自己的整套色彩令牌，
@@ -584,8 +611,16 @@ class _AppShellState extends State<_AppShell> {
   ///
   /// 这个函数特意把失败原因算好了交回界面（系统关掉「透明效果」时
   /// 只能提示用户，程序无法代劳）—— 以前三处调用点把返回值丢了。
+  ///
+  /// `dark` 取**应用当前的实际明暗**（`AppTheme.of(context).brightness`）：
+  /// 它描述窗口外观（系统绘制的标题栏/边框）的明暗，与选哪种材质无关。
+  /// 2026-10-15 之前这里按「材质是不是 mica」猜明暗，浅色+Mica 与
+  /// 深色+亚克力两种组合都传反了。
   Future<void> _applyMaterial(WindowMaterial m) async {
-    final r = await applyWindowMaterial(m);
+    final r = await applyWindowMaterial(
+      m,
+      dark: AppTheme.of(context).brightness == Brightness.dark,
+    );
     if (!r.ok && mounted) {
       // 用 State.context：build 的参数 context 会被 lint 认为与
       // State.mounted 无关（异步间隙后无法证明它还活着）。

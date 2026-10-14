@@ -15,9 +15,27 @@ import '../theme/window_material.dart';
 /// 关于 Win11 24H2/25H2：社区反馈（window-vibrancy issue #183）
 /// 显示 Mica 在较新的 Windows 上可能被改坏，而亚克力仍可用。
 /// 若用户反馈「Mica 没效果」，优先建议改用亚克力。
+///
+/// ### [dark] 必须传**应用当前的明暗**，不是按材质猜（2026-10-15 修）
+///
+/// 原来这里写的是 `dark: material == mica || material == micaAlt` ——
+/// 拿「材质类型」当「窗口明暗」用。`flutter_acrylic` 的 `dark` 参数描述的是
+/// **窗口外观是深色还是浅色**（用于系统绘制的标题栏/边框），与选哪种材质
+/// 无关。原写法在浅色模式下选 Mica 会传 `dark: true`、深色模式下选亚克力会
+/// 传 `dark: false`，两处都反了。
+///
+/// ### 细亚克力与亚克力在原生层是同一个效果（能力边界，如实记录）
+///
+/// `flutter_acrylic` 只有三个效果：`acrylic` / `mica` / `tabbed`，
+/// **没有「细亚克力」这一档**，所以 [WindowMaterial.acrylicThin] 只能落到
+/// `acrylic`。两者在 [WindowMaterial] 里参数不同（seeThrough 0.62 / blur 1.6
+/// 对 0.45 / 3.2），那是**应用内卡片材质**的差异；窗口背景这一层目前
+/// 由系统统一绘制，程序无法区分得更细。真机对照时这两张截图会一模一样，
+/// 是预期行为，不是没生效。
 Future<MaterialApplyResult> applyWindowMaterial(
-  WindowMaterial material,
-) async {
+  WindowMaterial material, {
+  required bool dark,
+}) async {
   if (!Platform.isWindows) {
     return const MaterialApplyResult(
       ok: false,
@@ -29,16 +47,13 @@ Future<MaterialApplyResult> applyWindowMaterial(
     WindowMaterial.mica => acrylic.WindowEffect.mica,
     WindowMaterial.micaAlt => acrylic.WindowEffect.tabbed,
     WindowMaterial.acrylic => acrylic.WindowEffect.acrylic,
+    // 见类文档：库没有独立的「细亚克力」效果，只能落到 acrylic。
     WindowMaterial.acrylicThin => acrylic.WindowEffect.acrylic,
     WindowMaterial.none => acrylic.WindowEffect.disabled,
   };
 
   try {
-    await acrylic.Window.setEffect(
-      effect: effect,
-      dark: material == WindowMaterial.mica ||
-          material == WindowMaterial.micaAlt,
-    );
+    await acrylic.Window.setEffect(effect: effect, dark: dark);
     return MaterialApplyResult(
       ok: true,
       message: material == WindowMaterial.none

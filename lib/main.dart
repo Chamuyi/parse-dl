@@ -27,7 +27,6 @@ import 'services/douyin_webview_env.dart';
 import 'services/homepage_store.dart';
 import 'services/settings_store.dart';
 import 'services/shutdown_guard.dart';
-import 'services/window_effect.dart';
 import 'services/x_api.dart';
 
 /// 启动流程：
@@ -263,7 +262,11 @@ Future<void> main() async {
   // 没有它的话 aria2c 会变成孤儿进程继续跑（实测出现过，会让下次启动再也下不动）。
   await ShutdownGuard.install(downloadStore: downloadStore);
 
-  await applyWindowMaterial(store.settings.appearance.windowMaterial);
+  // 窗口材质**不在这里应用**：`flutter_acrylic` 的 `dark` 参数要的是
+  // 「应用当前的明暗」，而明暗由 `themeMode` + 系统亮度共同决定
+  // （`app.dart` 的 `_resolveBrightness`）—— 这里还没有 BuildContext，
+  // 算不出系统亮度。改由 `app.dart` 的 build 里统一应用，顺带让
+  // 「切换明暗」也能即时反映到窗口外观（2026-10-15 修）。
 
   runApp(XDownloaderApp(
     store: store,
