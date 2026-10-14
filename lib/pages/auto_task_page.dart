@@ -120,101 +120,148 @@ class _AutoTaskPageState extends State<AutoTaskPage> {
             text: t('尚未登录 X 账号，请先在【设置】中登录后再执行批量任务。'),
           ),
 
-        // ② 名单来源
-        AppCard(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SectionTitle('名单来源', colors: c),
-              const SizedBox(height: 12),
-              _FilePickerRow(
-                fileName: store.fileName,
-                disabled: store.running,
-                onPick: _pickFile,
+        // ② 双栏（预览稿 `.cols`，`app.css:111`）：左 flex 1.15、右 flex 1、
+        // 间距 11px。左栏 = 名单 + 历史预设 + 下载配置 + 执行设置；
+        // 右栏 = 执行结果（进度条 + 任务表，原来嵌在「执行设置」卡里）。
+        // 整页仍由外层 ListView 滚动，两栏各自**不**套滚动。
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 115,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // 名单来源
+                  AppCard(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _SectionTitle('名单来源', colors: c),
+                        const SizedBox(height: 12),
+                        _FilePickerRow(
+                          fileName: store.fileName,
+                          disabled: store.running,
+                          onPick: _pickFile,
+                        ),
+                        const SizedBox(height: 10),
+                        _RawTextArea(
+                          value: store.rawText,
+                          disabled: store.running,
+                          onChanged: (v) =>
+                              context.read<AutoTaskStore>().setRawText(v),
+                        ),
+                        const SizedBox(height: 8),
+                        _ParseSummary(
+                          ids: parsed.ids,
+                          skipped: parsed.skipped,
+                          colors: c,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // 历史预设（持久化名单）
+                  _PresetsSection(store: store, colors: c),
+
+                  const SizedBox(height: 14),
+
+                  // 下载配置（与主页共用）
+                  AppCard(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _SectionTitle('下载配置（与主页共用）', colors: c),
+                        const SizedBox(height: 14),
+                        _DownloadConfigForm(),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // 执行设置
+                  AppCard(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _SectionTitle('执行设置', colors: c),
+                        const SizedBox(height: 14),
+                        _ExecutionSettings(),
+                        const SizedBox(height: 16),
+                        _ActionButtons(
+                          running: store.running,
+                          paused: store.paused,
+                          canStart: !store.running &&
+                              appState.isLoggedIn &&
+                              parsed.ids.isNotEmpty,
+                          onStart: _onStart,
+                          onTogglePause: () =>
+                              context.read<AutoTaskStore>().togglePause(),
+                          onStop: () => context.read<AutoTaskStore>().stop(),
+                          onClear: () =>
+                              context.read<AutoTaskStore>().clearList(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              _RawTextArea(
-                value: store.rawText,
-                disabled: store.running,
-                onChanged: (v) => context.read<AutoTaskStore>().setRawText(v),
+            ),
+            const SizedBox(width: 11),
+            Expanded(
+              flex: 100,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // 执行结果。空名单时给一句空态提示 —— 否则这一栏是一片
+                  // 没有任何内容的空白，看不出这里本该有东西。
+                  AppCard(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                    child: store.list.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 24),
+                            child: Center(
+                              child: Text(
+                                t('还没有下载记录'),
+                                style:
+                                    TextStyle(fontSize: 13, color: c.textFaint),
+                              ),
+                            ),
+                          )
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _ProgressBar(items: store.list),
+                              const SizedBox(height: 8),
+                              _TaskTable(
+                                items: store.list,
+                                page: _page,
+                                pageSize: _pageSize,
+                                onPageChanged: (p) {
+                                  setState(() {
+                                    _page = p;
+                                  });
+                                },
+                                onPageSizeChanged: (ps) {
+                                  setState(() {
+                                    _pageSize = ps;
+                                    _page = 1;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-              _ParseSummary(
-                ids: parsed.ids,
-                skipped: parsed.skipped,
-                colors: c,
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 14),
-
-        // ④ 历史预设（持久化名单）
-        _PresetsSection(store: store, colors: c),
-
-        const SizedBox(height: 14),
-
-        // ③ 下载配置（与主页共用）
-        AppCard(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SectionTitle('下载配置（与主页共用）', colors: c),
-              const SizedBox(height: 14),
-              _DownloadConfigForm(),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 14),
-
-        // ④ 执行设置
-        AppCard(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SectionTitle('执行设置', colors: c),
-              const SizedBox(height: 14),
-              _ExecutionSettings(),
-              const SizedBox(height: 16),
-              _ActionButtons(
-                running: store.running,
-                paused: store.paused,
-                canStart: !store.running &&
-                    appState.isLoggedIn &&
-                    parsed.ids.isNotEmpty,
-                onStart: _onStart,
-                onTogglePause: () => context.read<AutoTaskStore>().togglePause(),
-                onStop: () => context.read<AutoTaskStore>().stop(),
-                onClear: () => context.read<AutoTaskStore>().clearList(),
-              ),
-              if (store.list.isNotEmpty) ...[
-                const SizedBox(height: 18),
-                _ProgressBar(items: store.list),
-                const SizedBox(height: 8),
-                _TaskTable(
-                  items: store.list,
-                  page: _page,
-                  pageSize: _pageSize,
-                  onPageChanged: (p) {
-                    setState(() {
-                      _page = p;
-                    });
-                  },
-                  onPageSizeChanged: (ps) {
-                    setState(() {
-                      _pageSize = ps;
-                      _page = 1;
-                    });
-                  },
-                ),
-              ],
-            ],
-          ),
+            ),
+          ],
         ),
 
         const SizedBox(height: 12),
