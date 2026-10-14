@@ -39,17 +39,24 @@ class StatGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView.count(
+    return GridView(
       // 嵌在页面滚动容器（ListView / Column）里，不能自己滚 —— 外层负
       // 责滚动，否则同一方向上两个滚动视图会抢手势。
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 4,
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      // 60 / 2.0 的宽高比：数字 24px 行高 26 + k 行 16 + sub 行 14 + 上下
-      // padding 26 ≈ 82px 高、340px 宽，撑得住 4 位数字不长歪。
-      childAspectRatio: 2.0,
+      // **高度固定，不按宽高比**（2026-10-15 修，与 [OptGrid] / [QuickGrid]
+      // 同一处问题）。原来 `childAspectRatio: 2.0` 按栏宽算高度：整页宽
+      // （约 980px）下每格 245，高 122 —— 比内容（k 行 16 + 5 + 数字行 26 +
+      // 3 + sub 行 14 + 上下 padding 26 ≈ 90）高出 30 多像素，四格显得空。
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 4,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        // 内容实测约 93px（含 sub 小注那格：k 行 16 + 5 + 数字行 26 + 3 +
+        // sub 行 14 + 上下 padding 26 = 90，加上文字行高取整到 93）；
+        // 给 96 留 3px 余量。曾按 92 设过，实测溢出 1px（判据当场报红）。
+        mainAxisExtent: 96,
+      ),
       children: [for (final cell in cells) _StatTile(cell: cell)],
     );
   }

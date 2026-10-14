@@ -33,16 +33,25 @@ class QuickGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView.count(
+    return GridView(
       // 嵌在页面滚动容器里：快捷卡是「两行三列」的固定网格，外层滚动。
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 3,
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      // 380 / 1.6 的宽高比 ≈ 62px 高：图标块 34 + 上下 padding 26 刚好，
-      // 标题两行时靠 [Flexible] 截断而不是把格子顶高。
-      childAspectRatio: 1.6,
+      // **高度固定，不按宽高比**（2026-10-15 修，与 [OptGrid] 同一处问题）。
+      //
+      // 原来用 `childAspectRatio: 1.6` —— 按栏宽算高度：格子宽 180 时高 112，
+      // 比内容（图标块 34 + 上下 padding 26 = 60）高出一大截，真机上表现为
+      // 卡片里大片留白、副题被挤成省略号。改成固定 `mainAxisExtent` 后，
+      // 高度与栏宽解耦。
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        // 高度按**较高的一侧**取：图标块 34 与「标题 17 + 1 + 副题两行 28」
+        // 里的 46，加下上 padding 26 → 72。实测 74 仍溢出 2px（中文行高比
+        // 估算的略大），给到 78。
+        mainAxisExtent: 78,
+      ),
       children: [for (final cell in cells) _QuickTile(cell: cell)],
     );
   }
@@ -109,12 +118,19 @@ class _QuickTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 1),
+                // 副题**允许换行**（最多两行）—— 预览稿 `app.css:775` 的
+                // `.qc .tx small` 既没有 `nowrap` 也没有 `ellipsis`，就是
+                // 自然换行；原来这里写死 `maxLines: 1 + ellipsis`，真机上
+                // 「输入用户 ID 批量下载」被截成「输入用户 ID...」，与预览稿
+                // 不符（2026-10-15 真机对照发现）。两行放不下时仍省略，
+                // 不至于把格子顶破。
                 Text(
                   cell.sub,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 10.5,
+                    height: 1.35,
                     color: c.textMuted.withValues(alpha: 0.5),
                   ),
                 ),

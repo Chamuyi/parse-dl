@@ -77,16 +77,26 @@ class OptGrid<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = AppTheme.colorsOf(context);
 
-    return GridView.count(
+    return GridView(
       // 嵌入卡片内部，不能自己滚 —— 外层页面负责滚动。
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
-      mainAxisSpacing: 8,
-      crossAxisSpacing: 8,
-      // 内容实测高约 53px（k 行 14 + 3 + v 行 18 + 上下 padding 18）；
-      // 400px 宽的 pane 每格 196，196 / 3.0 ≈ 65 留一行余量防截断。
-      childAspectRatio: 3.0,
+      // **高度固定，不按宽高比**（2026-10-15 修）。
+      //
+      // 原来用 `GridView.count(childAspectRatio: 3.0)` —— 那是个按**栏宽**
+      // 算高度的比例：格子宽 196 时高 65（合适），但同一个组件放进整页宽的
+      // 模块设置页（格子宽约 486）时高度就变成 162，格子里只有顶上一条有字、
+      // 下面全是空白。真机上就是这么被看出来的。
+      //
+      // 格子的高度本来就该由**内容**决定（k 行 14 + 间距 3 + v 行 18 +
+      // 上下 padding 18 ≈ 53），与栏宽无关，所以改成固定 `mainAxisExtent`。
+      // 内容实测 53px，给 66px 留一行余量（与原来 400px 栏宽下的取值一致）。
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        mainAxisExtent: 66,
+      ),
       children: [
         for (final item in items)
           _OptCell<T>(
