@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:parse_dl/l10n/app_locale.dart';
+import 'package:parse_dl/l10n/l10n.dart';
 import 'package:parse_dl/theme/app_theme.dart';
 import 'package:parse_dl/widgets/collapsible_group.dart';
 
@@ -34,6 +36,7 @@ void main() {
     bool forceExpand = false,
     bool modified = false,
     CollapsibleVariant variant = CollapsibleVariant.field,
+    String expandLabel = '展开',
     List<Widget>? children,
     Size size = const Size(900, 1200),
   }) async {
@@ -56,6 +59,7 @@ void main() {
                 modified: modified,
                 initiallyExpanded: initiallyExpanded,
                 forceExpand: forceExpand,
+                expandLabel: expandLabel,
                 children: children ??
                     const [
                       Text('详细内容 A'),
@@ -321,6 +325,41 @@ void main() {
       await tester.pumpAndSettle();
       // 展开后内容就在眼前，圆点仍保留（不影响功能）
       expect(find.byTooltip('组内有已改动的设置'), findsOneWidget);
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════
+  group('展开/收起提示走 t()', () {
+    // 2026-10-14 从 `appearance_controls_test.dart` 迁来 —— 那条判据原本挂在
+    // 设置页的「外观」分区上，平铺改造后设置页已无折叠组，对象消失；但它测的
+    // 本来就是**组件行为**，所以移到组件自己的测试里，覆盖面一条没丢。
+    //
+    // 这条不是"漏翻表"问题：'收起' 在 strings_en 里一直有（抖音页的 tooltip 在用），
+    // 漏的是 collapsible_group 渲染时根本没走 t()，所以英文界面下展开态夹中文。
+    // 「源码里每条 t(…) 都有英文对照」那条覆盖面测试抓不到它 —— 它压根没进 t()。
+    testWidgets('英文界面下展开态显示 Collapse，不留裸「收起」', (tester) async {
+      applyLocaleSetting(AppLocale.en);
+      addTearDown(() => applyLocaleSetting(AppLocale.system));
+
+      // 契约（`collapsible_group.dart:356`）：`expandLabel` 是**调用方**给的成品串
+      // （组件不再套一层 t()），`collapseLabel` 是裸中文默认值、**由组件内部 t()**。
+      // 当年修的漏翻正是后半句 —— 所以这条判据只钉组件自己负责的那一半。
+      await pumpGroup(
+        tester,
+        id: 'sec',
+        variant: CollapsibleVariant.section,
+        expandLabel: 'Show settings',
+      );
+
+      // 收起态：调用方传什么就显示什么（组件不该再翻一次）
+      expect(find.text('Show settings'), findsOneWidget);
+
+      await tester.tap(find.text('更多设置'));
+      await tester.pumpAndSettle();
+
+      // 展开态：组件内部对 collapseLabel 走 t() → Collapse
+      expect(find.text('Collapse'), findsOneWidget);
+      expect(find.text('收起'), findsNothing, reason: '展开态夹中文 = 这处没走 t()');
     });
   });
 }
