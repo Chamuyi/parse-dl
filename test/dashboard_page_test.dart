@@ -107,13 +107,29 @@ void main() {
   /// 按 `label → 卡片 → 数值` 定位，而不是全页 `find.text('2')`：
   /// 页面上别处也可能出现同一个数字，全页找会把「统计读对了」
   /// 变成「恰好哪里有个 2」。
+  ///
+  /// 2026-10-15 总览页改用共享 [StatGrid]（`lib/widgets/stat_grid.dart`）后，
+  /// 数值那一行是 `Text.rich`（数字 + 单位两个 `TextSpan`，单位要小一号），
+  /// 所以 `Text.data` 是 `null` —— 得从 `textSpan.toPlainText()` 取。
+  /// **判据语义没变**：仍然是「按 label 找到那张卡，读它里面的数值」。
   Finder statValue(String label) => find.descendant(
         of: find.ancestor(
           of: find.text(label),
           matching: find.byType(AppCard),
         ),
-        matching: find.textContaining(RegExp(r'^\d')),
+        matching: find.byWidgetPredicate(
+          (w) =>
+              w is Text &&
+              w.textSpan != null &&
+              RegExp(r'^\d').hasMatch(w.textSpan!.toPlainText()),
+        ),
       );
+
+  /// 读出 [statValue] 定位到的那段文本（`Text.rich` 走 `textSpan`）。
+  String statText(WidgetTester tester, String label) {
+    final w = tester.widget<Text>(statValue(label));
+    return w.data ?? w.textSpan!.toPlainText();
+  }
 
   group('判据 1 · 四段式区块都在', () {
     testWidgets('欢迎条 / 统计块 / 快捷开始 / 最近活动四段都渲染出来', (tester) async {
@@ -173,9 +189,9 @@ void main() {
       await pump(tester);
 
       expect(statValue('进行中'), findsOneWidget);
-      expect(tester.widget<Text>(statValue('进行中')).data, '2',
+      expect(statText(tester, '进行中'), startsWith('2'),
           reason: '进行中应等于 active 条数');
-      expect(tester.widget<Text>(statValue('已完成')).data, '1',
+      expect(statText(tester, '已完成'), startsWith('1'),
           reason: '已完成应等于 complete 条数');
     });
 
@@ -184,15 +200,15 @@ void main() {
       seed(DownloadStatus.active);
       seed(DownloadStatus.complete);
       await pump(tester);
-      expect(tester.widget<Text>(statValue('进行中')).data, '2');
+      expect(statText(tester, '进行中'), startsWith('2'));
 
       // 同样的页面，数据换成空 —— 数字必须跟着走
       downloads.clearWhere((_) => true);
       await tester.pumpAndSettle();
 
-      expect(tester.widget<Text>(statValue('进行中')).data, '0',
+      expect(statText(tester, '进行中'), startsWith('0'),
           reason: '清空后仍是 2 → 这个数字是写死的');
-      expect(tester.widget<Text>(statValue('已完成')).data, '0');
+      expect(statText(tester, '已完成'), startsWith('0'));
     });
 
     testWidgets('四种非终态都算「进行中」，error 不算', (tester) async {
@@ -204,9 +220,9 @@ void main() {
 
       await pump(tester);
 
-      expect(tester.widget<Text>(statValue('进行中')).data, '4',
+      expect(statText(tester, '进行中'), startsWith('4'),
           reason: 'pending/active/waiting/paused 应合计 4（error 不算）');
-      expect(tester.widget<Text>(statValue('已完成')).data, '0');
+      expect(statText(tester, '已完成'), startsWith('0'));
     });
 
     testWidgets('台账合计 = BiliLedger.count + DouyinLedger.count', (tester) async {
@@ -225,7 +241,7 @@ void main() {
 
       await pump(tester);
 
-      expect(tester.widget<Text>(statValue('下载台账')).data, '3',
+      expect(statText(tester, '下载台账'), startsWith('3'),
           reason: '2 条 B 站 + 1 条抖音 = 3');
     });
   });

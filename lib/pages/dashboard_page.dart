@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -11,7 +10,10 @@ import '../services/douyin_store.dart';
 import '../services/settings_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
+import '../widgets/hero_banner.dart';
 import '../widgets/page_header.dart';
+import '../widgets/quick_grid.dart';
+import '../widgets/stat_grid.dart';
 
 /// 首页「总览」。
 ///
@@ -116,64 +118,61 @@ class DashboardPage extends StatelessWidget {
         ),
         const SizedBox(height: 14),
 
-        // ① 欢迎条
-        _HeroBar(
-          colors: c,
-          engineReady: Aria2Coordinator.engineReady,
-        ),
-
-        // ② 统计块 ×4
+        // ① 欢迎条 —— 共享 [HeroBanner]（预览稿 `hero2`，`index.html:290-300`）。
+        // 头像块用真 logo（`imageAsset`）；右侧两个 pill：引擎就绪信号与版本号。
         //
-        // 必须套 [IntrinsicHeight]：四张卡要等高，靠 `stretch` 才对齐；而
-        // `stretch` 需要父级给一个**有限**高度，`ListView` 给的是无限 —— 直接
-        // 写 `Row(crossAxisAlignment: stretch)` 会当场抛「BoxConstraints forces
-        // an infinite height」。IntrinsicHeight 先把最高的一张量出来，
-        // 再把那个高度给整行。
-        IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: _StatCard(
-                  colors: c,
-                  icon: Icons.hourglass_empty_rounded,
-                  label: t('进行中'),
-                  value: '$running',
-                  unit: t('个'),
-                ),
+        // 引擎状态来自 `Aria2Coordinator.engineReady`（一个 ValueListenable），
+        // 而 `HeroBanner.pills` 只收 `List<HeroPill>`（纯值），塞不进 builder ——
+        // 所以把监听器提到**整条横幅外面**：引擎一挂，整条 hero 重建。
+        ValueListenableBuilder<bool>(
+          valueListenable: Aria2Coordinator.engineReady,
+          builder: (context, ready, _) => HeroBanner(
+            badge: '解',
+            imageAsset: 'assets/logo.png',
+            large: true,
+            title: t('解析下载器'),
+            subtitle: t('批量下载 X、抖音与 B 站上的图片与视频'),
+            pills: [
+              HeroPill(
+                t(ready ? '下载引擎就绪' : '下载引擎未就绪'),
+                dotColor: ready ? c.success : c.danger,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StatCard(
-                  colors: c,
-                  icon: Icons.check_circle_outline_rounded,
-                  label: t('已完成'),
-                  value: '$done',
-                  unit: t('条'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StatCard(
-                  colors: c,
-                  icon: Icons.receipt_long_rounded,
-                  label: t('下载台账'),
-                  value: '$ledgerTotal',
-                  unit: t('条'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StatCard(
-                  colors: c,
-                  icon: Icons.sd_storage_outlined,
-                  label: t('磁盘占用'),
-                  value: _humanBytes(_totalBytes(tasks)),
-                  unit: '',
-                ),
-              ),
+              HeroPill('v$kDashboardVersion'),
             ],
           ),
+        ),
+
+        // ② 统计块 ×4 —— 共享 [StatGrid]（预览稿 `.stats .stat`，
+        // `app.css:756-761`）。它内部用 `GridView.count` 排四格，**天生等高**，
+        // 所以原来那个 `IntrinsicHeight` 绕法（`stretch` 在 `ListView` 的无限
+        // 高度下会抛「BoxConstraints forces an infinite height」）随之退役。
+        StatGrid(
+          cells: [
+            StatCell(
+              key: t('进行中'),
+              value: '$running',
+              unit: t('个'),
+              icon: Icons.hourglass_empty_rounded,
+            ),
+            StatCell(
+              key: t('已完成'),
+              value: '$done',
+              unit: t('条'),
+              icon: Icons.check_circle_outline_rounded,
+            ),
+            StatCell(
+              key: t('下载台账'),
+              value: '$ledgerTotal',
+              unit: t('条'),
+              icon: Icons.receipt_long_rounded,
+              sub: t('三个模块合计'),
+            ),
+            StatCell(
+              key: t('磁盘占用'),
+              value: _humanBytes(_totalBytes(tasks)),
+              icon: Icons.sd_storage_outlined,
+            ),
+          ],
         ),
 
         const SizedBox(height: 12),
@@ -261,69 +260,6 @@ String _humanBytes(int bytes) {
   return '$text ${units[i]}';
 }
 
-/// ① 欢迎条：应用名 + 一句话 + 引擎状态 + 版本。
-class _HeroBar extends StatelessWidget {
-  final AppColors colors;
-  final ValueListenable<bool> engineReady;
-
-  const _HeroBar({required this.colors, required this.engineReady});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = colors;
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
-      child: Row(
-        children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(13),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Image.asset('assets/logo.png', fit: BoxFit.cover),
-          ),
-          const SizedBox(width: 18),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  t('解析下载器'),
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w600,
-                    color: c.textStrong,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  t('批量下载 X、抖音与 B 站上的图片与视频'),
-                  style: TextStyle(fontSize: 13.5, color: c.textMuted),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          // 引擎就绪信号与顶部红色告警条同源（`Aria2Coordinator.engineReady`）
-          ValueListenableBuilder<bool>(
-            valueListenable: engineReady,
-            builder: (context, ready, _) => _Pill(
-              colors: c,
-              text: t(ready ? '下载引擎就绪' : '下载引擎未就绪'),
-              dotColor: ready ? c.success : c.danger,
-            ),
-          ),
-          const SizedBox(width: 8),
-          _Pill(colors: c, text: 'v$kDashboardVersion'),
-        ],
-      ),
-    );
-  }
-}
-
 /// 版本号。
 ///
 /// **不从 `app.dart` import `kAppVersion`**：那会造成 `app.dart` → 页面 →
@@ -332,114 +268,7 @@ class _HeroBar extends StatelessWidget {
 /// 钉在一起，改了那边不改这里会红。
 const String kDashboardVersion = '1.3';
 
-/// 小药丸标签。
-class _Pill extends StatelessWidget {
-  final AppColors colors;
-  final String text;
-  final Color? dotColor;
-
-  const _Pill({required this.colors, required this.text, this.dotColor});
-
-  @override
-  Widget build(BuildContext context) {
-    final dot = dotColor;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: colors.surfaceSunken,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: colors.line, width: 0.8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (dot != null) ...[
-            Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 6),
-          ],
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: 12.5,
-              color: colors.textNormal,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// ② 单个统计块。
-class _StatCard extends StatelessWidget {
-  final AppColors colors;
-  final IconData icon;
-  final String label;
-  final String value;
-  final String unit;
-
-  const _StatCard({
-    required this.colors,
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.unit,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = colors;
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 15, color: c.accent),
-              const SizedBox(width: 7),
-              Text(
-                label,
-                style: TextStyle(fontSize: 12.5, color: c.textMuted),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              // 数值单独一个 Text：判据 2 靠它断言「真读数据」
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w600,
-                  color: c.textStrong,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-              if (unit.isNotEmpty) ...[
-                const SizedBox(width: 4),
-                Text(
-                  unit,
-                  style: TextStyle(fontSize: 12.5, color: c.textMuted),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// ③ 快捷开始：6 张卡，两行三列。
+/// ① 快捷开始：6 张卡，两行三列。
 class _QuickStartCard extends StatelessWidget {
   final AppColors colors;
   final void Function(String routeId)? onNavigate;
@@ -467,30 +296,22 @@ class _QuickStartCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          // 两行三列：Row 套 Expanded，每行 3 张。用固定两行而不是 Wrap，
-          // 窄窗口下 6 张卡会变成 3+2+1 的不齐排列，看起来像漏了一张。
-          // 每行套 IntrinsicHeight 让三张卡等高（理由同统计块那一段）。
-          for (var row = 0; row < 2; row++) ...[
-            if (row > 0) const SizedBox(height: 10),
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (var col = 0; col < 3; col++) ...[
-                    if (col > 0) const SizedBox(width: 10),
-                    Expanded(
-                      child: _QuickTile(
-                        colors: c,
-                        entry: entries[row * 3 + col],
-                        onTap: () =>
-                            onNavigate?.call(entries[row * 3 + col].routeId),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
+          // 两行三列 —— 共享 [QuickGrid]（预览稿 `.quick .qc`，
+          // `app.css:764-776`）。它内部用 `GridView.count(crossAxisCount: 3)` 排，
+          // **天生等高**，所以原来那段「两行 Row + 每行 IntrinsicHeight」的绕法
+          // 随之退役（理由同统计块：`stretch` 在 `ListView` 的无限高度下会抛）。
+          QuickGrid(
+            cells: [
+              for (final e in entries)
+                QuickCell(
+                  icon: e.icon,
+                  title: t(e.title),
+                  sub: t(e.sub),
+                  // 判据钉在「onTap 必须把 entry.routeId 透传给 onNavigate」
+                  onTap: onNavigate == null ? null : () => onNavigate!(e.routeId),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -498,79 +319,6 @@ class _QuickStartCard extends StatelessWidget {
 }
 
 /// 一张快捷入口卡。
-class _QuickTile extends StatefulWidget {
-  final AppColors colors;
-  final ({String routeId, IconData icon, String title, String sub}) entry;
-  final VoidCallback onTap;
-
-  const _QuickTile({
-    required this.colors,
-    required this.entry,
-    required this.onTap,
-  });
-
-  @override
-  State<_QuickTile> createState() => _QuickTileState();
-}
-
-class _QuickTileState extends State<_QuickTile> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = widget.colors;
-    final e = widget.entry;
-
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        // 判据 3 找的就是这个 onTap（它必须把 entry.routeId 透传给 onNavigate）
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOut,
-          padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-          decoration: BoxDecoration(
-            color: c.surfaceSunken,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: _hover ? c.accentLine : c.line,
-              width: 0.8,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(e.icon, size: 18, color: _hover ? c.accent : c.textNormal),
-              const SizedBox(height: 8),
-              Text(
-                t(e.title),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: c.textStrong,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                t(e.sub),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11.5, color: c.textFaint),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// ③ 最近活动：任务按时间倒序前 5 条。
 class _RecentActivityCard extends StatelessWidget {
   final AppColors colors;
   final List<DownloadTask> tasks;

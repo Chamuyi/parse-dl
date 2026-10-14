@@ -52,6 +52,7 @@ const Map<String, String> kStringsEn = {
   // 总览页（dashboard_page.dart）的文案。
   '进行中': 'In progress',
   '下载台账': 'Download ledger',
+  '三个模块合计': 'All three modules',
   '磁盘占用': 'Disk usage',
   '下载引擎就绪': 'Download engine ready',
   '下载引擎未就绪': 'Download engine not ready',
