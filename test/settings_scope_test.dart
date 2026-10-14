@@ -9,6 +9,7 @@ import 'package:parse_dl/services/download_store.dart';
 import 'package:parse_dl/services/douyin_store.dart';
 import 'package:parse_dl/services/settings_store.dart';
 import 'package:parse_dl/theme/app_theme.dart';
+import 'package:parse_dl/widgets/section_card.dart';
 
 /// P5 设置页重组的归属判据。
 ///
@@ -24,9 +25,17 @@ import 'package:parse_dl/theme/app_theme.dart';
 /// 例如「全局页不含账号」用的是 `auth_token`：它是 `AccountSection` 里的
 /// 输入框标签，账号分区一搬走它就整块消失（负控制实测会红，见下方注释）。
 void main() {
-  /// 分区**内容容器**的 key —— 分区存不存在用它判断最准（比 find.text 稳，
-  /// 不会跟别处的同名文字撞车）。
-  Key contentKey(String id) => ValueKey('collapsible-content-$id');
+  /// 按**卡头标题**定位那一张卡的子树。
+  ///
+  /// 2026-10-14 平铺改造后，折叠容器（`collapsible-content-<id>`）连同它的
+  /// key 一起退役 —— 设置页每块内容现在都是 [SectionCard]，卡头标题就是
+  /// 那一块的名字。用「标题 → 最近的 SectionCard」当锚点，搜索范围仍然
+  /// **限定在这一张卡里**，与原来按分区 key 定位是同一个用途：
+  /// 别处的同名文字（如变量表里的「自定义文本」）不会撞进来。
+  Finder cardOf(String title) => find.ancestor(
+    of: find.text(title),
+    matching: find.byType(SectionCard),
+  );
 
   Future<SettingsStore> pumpPage(
     WidgetTester tester, {
@@ -78,33 +87,27 @@ void main() {
       await pumpPage(tester, scope: SettingsScope.xDownload);
 
       expect(
-        find.byKey(contentKey('section.account')),
+        cardOf('账号'),
         findsOneWidget,
         reason: 'X 账号登录属于 X 下载模块，必须在 X 设置页里',
       );
       expect(
-        find.byKey(contentKey('section.x_api_cache')),
+        cardOf('接口缓存'),
         findsOneWidget,
         reason: 'X 接口缓存是 X 自己的排障项，必须在 X 设置页里',
       );
-
-      // 连标题文字也在（分区在树上 ≠ 标题没被改名成别的）
-      expect(find.text('账号'), findsOneWidget);
-      expect(find.text('接口缓存'), findsOneWidget);
     });
 
-    testWidgets('接口缓存分区展开后能看到清除按钮与说明', (tester) async {
+    testWidgets('接口缓存卡里能看到清除按钮与说明', (tester) async {
       await pumpPage(tester, scope: SettingsScope.xDownload);
 
-      await tester.tap(find.text('接口缓存'));
-      await tester.pumpAndSettle();
-
-      // 按钮与说明都在该分区的内容子树里 —— 搬过来的是**整块**，不是只剩标题
+      // 平铺后内容直接可见，不再需要「先点开分区」这一步 —— 判据本身
+      // （按钮与说明随这一块一起在）不变，只是不用再展开。
       final inSection = find.descendant(
-        of: find.byKey(contentKey('section.x_api_cache')),
+        of: cardOf('接口缓存'),
         matching: find.text('刷新 X 接口缓存'),
       );
-      expect(inSection, findsOneWidget, reason: '「刷新 X 接口缓存」字段应随分区一起搬过来');
+      expect(inSection, findsOneWidget, reason: '「刷新 X 接口缓存」字段应随这一块一起在');
       expect(find.text('清除缓存并重试'), findsOneWidget, reason: '清除按钮不能丢');
     });
 
@@ -112,13 +115,13 @@ void main() {
       await pumpPage(tester);
 
       expect(
-        find.byKey(contentKey('section.x_api_cache')),
+        cardOf('接口缓存'),
         findsNothing,
         reason: '接口缓存属于 X 模块，不该留在全局设置里',
       );
       // 「高级」分区移空后整块去掉 —— 空壳留着比去掉更糟：点开是空的
       expect(
-        find.byKey(contentKey('section.advanced')),
+        cardOf('高级'),
         findsNothing,
         reason: '「高级」移空后应当整块删除，不留空壳',
       );
@@ -165,11 +168,10 @@ void main() {
       final opened = <String>[];
       await pumpPage(tester, onNavigate: opened.add);
 
-      await tester.tap(find.text('分模块设置'));
-      await tester.pumpAndSettle();
-
+      // 平铺后「分模块设置」是「下载」卡里的一个小节（预览稿 `:681` 的
+      // `.sec`），不再有自己的折叠壳 —— 三个入口就在这张卡里。
       final inSection = find.descendant(
-        of: find.byKey(contentKey('section.module_settings')),
+        of: cardOf('下载'),
         matching: find.text('打开'),
       );
       expect(inSection, findsNWidgets(3), reason: 'X / 抖音 / B 站 三个入口，一个都不能少');
@@ -177,10 +179,7 @@ void main() {
       // 三个入口都在这一块里（模块名逐个点名 —— 少一个就红）
       for (final name in ['X 下载', '抖音解析下载', 'B 站解析下载']) {
         expect(
-          find.descendant(
-            of: find.byKey(contentKey('section.module_settings')),
-            matching: find.text(name),
-          ),
+          find.descendant(of: cardOf('下载'), matching: find.text(name)),
           findsOneWidget,
           reason: '分模块设置里必须有「$name」这个入口',
         );
@@ -201,11 +200,8 @@ void main() {
     testWidgets('没有跨页能力时按钮置灰而不是消失（三个入口仍可见）', (tester) async {
       await pumpPage(tester);
 
-      await tester.tap(find.text('分模块设置'));
-      await tester.pumpAndSettle();
-
       final inSection = find.descendant(
-        of: find.byKey(contentKey('section.module_settings')),
+        of: cardOf('下载'),
         matching: find.text('打开'),
       );
       expect(inSection, findsNWidgets(3), reason: '按钮不该因为点不动就消失');
@@ -231,11 +227,14 @@ void main() {
       //
       // 这里**不能**用 `t(key)` 断言：`t()` 走的是当前语言档，测试里默认是
       // 中文档（原样返回），拿它比会永远等于原文 —— 直接查表才判得动。
-      for (final key in const [
-        '接口缓存',
-        '分模块设置',
-        'X 下载、抖音解析下载、B 站解析下载各自的设置页入口',
-      ]) {
+      //
+      // 2026-10-14 平铺改造后，`'X 下载、抖音解析下载、B 站解析下载各自的设置页入口'`
+      // 从这份点名清单里退役：它原本是「分模块设置」折叠壳的收起态概要，平铺后
+      // 那一块按预览稿 `index.html:681` 只剩一个 `.sec` 小节标题（没有 trailing），
+      // 该文案在 lib/ 里已零引用。留着这条 pin 会与 l10n_test 的
+      // 「英文表里没有源码已经不再使用的旧条目」**直接冲突** —— 一边要求它存在、
+      // 一边要求它不存在。所以按退役处理，不再点名。
+      for (final key in const ['接口缓存', '分模块设置']) {
         expect(kStringsEn.containsKey(key), isTrue, reason: '「$key」缺英文对照');
         expect(
           kStringsEn[key],
@@ -243,13 +242,19 @@ void main() {
           reason: '「$key」的英文条目不能还是中文原文',
         );
       }
-      // 「高级」这个 key 随分区一起退役 —— 英文表里留着它就是死条目
+      // 随折叠结构一起退役的 key —— 英文表里留着就是死条目
       // （l10n_test 的「英文表里没有源码已经不再使用的旧条目」会红）。
-      expect(
-        kStringsEn.containsKey('高级'),
-        isFalse,
-        reason: '「高级」分区已删除，英文表里的旧条目要一起清掉',
-      );
+      for (final key in const [
+        '高级',
+        '展开设置',
+        'X 下载、抖音解析下载、B 站解析下载各自的设置页入口',
+      ]) {
+        expect(
+          kStringsEn.containsKey(key),
+          isFalse,
+          reason: '「$key」随折叠结构退役，英文表里的旧条目要一起清掉',
+        );
+      }
     });
   });
 }
