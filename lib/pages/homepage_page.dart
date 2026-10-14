@@ -13,8 +13,10 @@ import '../services/homepage_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/hero_banner.dart';
 import '../l10n/l10n.dart';
 import '../widgets/page_header.dart';
+import '../widgets/section_card.dart';
 
 /// 主页：搜索用户 → 加载用户信息 → 预览媒体列表 → 触发下载。
 ///
@@ -176,38 +178,32 @@ class _HomepagePageState extends State<HomepagePage> {
         ),
         const SizedBox(height: 14),
 
-        // ① Hero 搜索区
-        AppCard(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 22),
+        // ① Hero 横幅（预览稿 `home` 的 `.hero`）——标题与副题归这里，
+        // 下面那张搜索卡就只剩「输入用户 ID」这一件事。
+        HeroBanner(
+          badge: 'X',
+          title: t('下载某个 X 用户的全部媒体'),
+          subtitle: t('输入用户 ID，加载后开始批量下载图片与视频'),
+          pills: [
+            // 登录态：`AppState` 只暴露 cookie 与 `isLoggedIn`，拿不到
+            // screen_name（XApi.getCurrentUserScreenName 要发网络请求，不能
+            // 塞进 build）—— 所以已登录只说「已登录」，不编造 @昵称。
+            if (loggedIn)
+              HeroPill(t('已登录'), dotColor: c.success)
+            else
+              HeroPill(t('未登录'), dotColor: c.textMuted),
+          ],
+        ),
+        const SizedBox(height: 14),
+
+        // 搜索卡（窄卡）——预览稿 `home` 的 `.card`，卡头只剩「输入用户 ID」。
+        // 标题沿用已有 key「请输入用户 ID」（预览稿写作「输入用户 ID」，
+        // 但那个串不在 strings_en.dart 里，新增 key 会越界）。
+        SectionCard(
+          title: t('请输入用户 ID'),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          t('下载某个 X 用户的全部媒体'),
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            color: c.textStrong,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          t('输入用户 ID，加载后开始批量下载图片与视频'),
-                          style: TextStyle(
-                              fontSize: 13, color: c.textMuted),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
               _SearchBar(
                 controller: _inputCtrl,
                 loading: hp.loadingUser,
