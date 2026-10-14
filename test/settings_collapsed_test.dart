@@ -9,61 +9,67 @@ import 'package:parse_dl/services/download_store.dart';
 import 'package:parse_dl/services/douyin_store.dart';
 import 'package:parse_dl/services/settings_store.dart';
 import 'package:parse_dl/theme/app_theme.dart';
+import 'package:parse_dl/widgets/collapsible_group.dart';
+import 'package:parse_dl/widgets/section_card.dart';
 
-/// 设置页回归测试 —— 两件事一起钉。
+/// 设置页回归测试 —— 三件事一起钉。
 ///
-/// **一、折叠行为**（原有约定）
-///   1. **都折叠** —— 分区默认全部收起，内容可见高度为 0；分区内部没有第二层折叠。
-///   2. **不外漏** —— 收起态只给一行**中性概要**（说明该分区管什么），
-///      **绝不写入当前值**：材质、路径、模板、代理地址、登录状态都不露。
-///   唯一例外是「代理」分区：地址变成必填时自动展开（`forceExpand`）。
-///
-/// **二、设置归属**（模块化改造）
-///   - 全局设置页**只保留全局设置**：外观 / 代理 / 高级 / 应用；
+/// **一、设置归属**（模块化改造）
+///   - 全局设置页**只保留全局设置**：外观 / 代理 / 分模块设置 / 应用；
 ///   - **X 下载设置**是独立一页：账号（登录）+ 下载（保存路径与模板）。
 ///     账号归在这里，是因为它是 X 下载的前置条件：没登录就抓不到媒体；
 ///   - **抖音解析下载设置**是独立一页：只有抖音分区；
 ///   - **B 站解析下载设置**是独立一页：只有 B 站分区；
 ///   - 互不混入，各模块的设置也互不合并。
+///
+/// **二、平铺**（2026-10-14 取代原来的「都折叠」）
+///
+/// 用户 2026-10-13 看真机后裁定：预览稿 `index.html` 是**视觉层与页面骨架的
+/// 统一基准**，设置页要「所见即所得」—— 打开页面就把当前值摊在卡片上，
+/// 不再需要逐个点开。于是 `CollapsibleGroup` 在设置页整体退役，每块内容
+/// 改成平铺的 [SectionCard]。
+///
+/// 这条裁定**反转了下面这些 UI 可见性判据**（原来是「收起态不外漏」，
+/// 现在是「当前值必须直接可见」）：
+///   - 「不外漏」组 → 「所见即所得」组；
+///   - 「代理地址必填」原来靠 `forceExpand` 自动展开保证可见，
+///     现在收起态不存在了，改由 [ProxySection] 的红框 + 红字常驻表达。
+///
+/// **数据层断言一字未改**：Store 读写（`setDownload` / `setProxy` /
+/// `setBili` / `setAppearance` / `setDouyin`）与组件归属（哪个模块的设置
+/// 在哪一页）全部原样保留，只是承载它们的容器换了。
 void main() {
-  /// 全局设置页该有的分区（账号已挪到 X 下载模块）
+  /// 全局设置页该有的卡（账号已挪到 X 下载模块）
   ///
   /// 「高级」那个分区原本只装一项「刷新 X 接口缓存」—— 接口缓存搬到 X 设置页后
-  /// 它就成了空壳，所以整块去掉，全局页换成「分模块设置」入口。
-  const globalSectionIds = <String>[
-    'section.appearance',
-    'section.proxy',
-    'section.module_settings',
-    'section.app',
-  ];
+  /// 它就成了空壳，所以整块去掉，全局页换成「分模块设置」小节（在「下载」卡里）。
+  const globalCardTitles = <String>['外观', '代理', '下载', '应用'];
 
-  /// X 下载设置页该有的分区（按页面里的渲染顺序：账号 → 接口缓存 → 下载）
-  const xSectionIds = <String>[
-    'section.account',
-    'section.x_api_cache',
-    'section.download',
-  ];
+  /// X 下载设置页该有的卡（按页面里的渲染顺序：账号 → 接口缓存 → 下载）
+  const xCardTitles = <String>['账号', '接口缓存', '下载'];
 
-  /// 抖音解析下载设置页该有的分区
-  const douyinSectionIds = <String>['section.douyin'];
+  /// 抖音解析下载设置页该有的卡
+  const douyinCardTitles = <String>['抖音'];
 
-  /// B 站解析下载设置页该有的分区
-  const biliSectionIds = <String>['section.bili'];
+  /// B 站解析下载设置页该有的卡
+  const biliCardTitles = <String>['B 站'];
 
-  /// 每个分区的收起概要 —— 必须是中性描述，不含任何用户当前值
-  const summaries = <String, String>{
-    'section.appearance': '窗口材质、自定义色调、导航形态、主题模式、背景图片、界面语言',
-    'section.account': '登录状态、cookie 输入与验证',
-    'section.x_api_cache': 'X 接口标识缓存（搜索用户或加载媒体失败时使用）',
-    'section.download': '保存路径、文件夹 / 文件名模板、同名文件处理',
-    'section.douyin': '下载源、质量优先策略、图片格式、批量与筛选选项',
-    'section.bili': '画质上限、编码偏好、下载完合并、命名模板',
-    'section.proxy': '启用代理、使用系统代理、自定义代理地址、连通性测试',
-    'section.module_settings': 'X 下载、抖音解析下载、B 站解析下载各自的设置页入口',
-    'section.app': '日志记录、日志目录与文件',
+  /// 每张卡的**卡头灰字** —— 必须是中性描述，不含任何用户当前值
+  ///
+  /// 平铺后卡头右侧的灰字承接了原来「收起态概要」的位置与语义（[SectionCard.trailing]）：
+  /// 它说明这一块管什么，但不写当前值。
+  const cardTrailings = <String, String>{
+    '账号': '登录状态、cookie 输入与验证',
+    '接口缓存': 'X 接口标识缓存（搜索用户或加载媒体失败时使用）',
+    '下载': '保存路径、文件夹 / 文件名模板、同名文件处理',
+    '抖音': '下载源、质量优先策略、图片格式、批量与筛选选项',
+    'B 站': '画质上限、编码偏好、下载完合并、命名模板',
   };
 
-  /// 这些值只要出现在概要里就算「外漏」
+  /// 这些值只要出现在**卡头灰字**里就算「外漏」
+  ///
+  /// 平铺后卡头右侧的灰字（[SectionCard.trailing]）承接了原来「收起态概要」
+  /// 的位置，所以它同样只许写中性描述、不许写当前值。
   const sentinels = <String>[
     '%USER_SCREEN_NAME%',
     '%POST_ID%%EXT%',
@@ -74,27 +80,31 @@ void main() {
     '127.0.0.1',
   ];
 
-  /// 可见高度必须量 `SizeTransition` 本身：它里面的孩子仍保留自然高度。
-  Key contentAnim(String id) => ValueKey('collapsible-content-anim-$id');
-
-  /// 概要行的 `Text`（收起时唯一露在屏幕上的文字）
-  Key summaryKey(String id) => ValueKey('collapsible-summary-$id');
-
-  /// 分区内容容器的 key —— 分区**存不存在**用它判断最准
-  Key contentKey(String id) => ValueKey('collapsible-content-$id');
-
-  /// 只在该分区**内容子树**里找文字。
+  /// 按**卡头标题**定位那一张卡的子树。
   ///
-  /// 折叠组「只裁剪不销毁」，别处的同名文字仍在元素树上 ——
-  /// 例如「下载」分区变量表里的「自定义文本」会跟「抖音」分区的
-  /// 同名标题撞车，全页 `find.text` 会数出 3 个。
-  Finder inSection(String id, String text) => find.descendant(
-    of: find.byKey(contentKey(id)),
-    matching: find.text(text),
+  /// 2026-10-14 平铺改造后，折叠容器（`collapsible-content-<id>`）连同它的
+  /// key 一起退役 —— 设置页每块内容现在都是 [SectionCard]，卡头标题就是
+  /// 那一块的名字。用「标题 → 最近的 SectionCard」当锚点，搜索范围仍然
+  /// **限定在这一张卡里**：别处的同名文字不会撞进来。
+  ///
+  /// **不要加 `.first`**：`Finder.first` 在匹配为空时会抛 `Bad state: No element`，
+  /// 而这里大量用于 `findsNothing` 的负向断言（判某张卡**不在**这一页）——
+  /// 加了 `.first` 会让那些断言从「找不到」变成「测试报错」。卡头标题与卡片
+  /// 内容里的文字重名时（如「下载」），`findsOneWidget` 若数出多个会当场暴露，
+  /// 比静默取第一个更安全。
+  Finder cardOf(String title) => find.ancestor(
+    of: find.text(title),
+    matching: find.byType(SectionCard),
   );
 
-  double contentHeight(WidgetTester tester, String id) =>
-      tester.getSize(find.byKey(contentAnim(id))).height;
+  /// 只在该卡**内容子树**里找文字。
+  ///
+  /// 别处的同名文字仍在元素树上 —— 例如「下载」卡变量表里的「自定义文本」
+  /// 会跟「抖音」卡的同名标题撞车，全页 `find.text` 会数出 3 个。
+  Finder inCard(String title, String text) => find.descendant(
+    of: cardOf(title),
+    matching: find.text(text),
+  );
 
   /// 泵出设置页。
   ///
@@ -104,9 +114,9 @@ void main() {
     SettingsScope scope = SettingsScope.global,
     SettingsStore? store,
   }) async {
-    // 画布要足够高，保证全部分区都被 `ListView` 建出来。
-    // `ListView` 是懒构建的：画布只放得下前半截时，后面的分区根本不在
-    // 元素树上，`find.byKey(...)` 会直接抛 `Bad state: No element`。
+    // 画布要足够高，保证全部卡片都被 `ListView` 建出来。
+    // `ListView` 是懒构建的：画布只放得下前半截时，后面的卡根本不在
+    // 元素树上，`find.byType(...)` 会直接抛 `Bad state: No element`。
     tester.view.physicalSize = const Size(1200, 4000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -145,13 +155,20 @@ void main() {
     return settings;
   }
 
-  /// 断言这些分区的概要**逐字**是中性描述，且不含任何 sentinel
-  void expectSummariesClean(List<String> ids, WidgetTester tester) {
-    for (final id in ids) {
-      final t = tester.widget<Text>(find.byKey(summaryKey(id)));
-      expect(t.data, summaries[id], reason: '$id 的概要必须是固定的中性描述');
+  /// 断言这些卡的卡头灰字**逐字**是中性描述，且不含任何 sentinel
+  ///
+  /// 只审**卡头灰字确实存在**的那些卡：全局页的「下载」卡没有灰字（它装的是
+  /// 分模块入口，不是一个模块的设置块），所以泵全局页时传的清单里不含它。
+  void expectTrailingsClean(List<String> titles, WidgetTester tester) {
+    for (final title in titles) {
+      final trailing = cardTrailings[title];
+      if (trailing == null) continue;
+      final w = tester.widget<Text>(
+        find.descendant(of: cardOf(title), matching: find.text(trailing)),
+      );
+      expect(w.data, trailing, reason: '「$title」卡的卡头灰字必须是固定的中性描述');
       for (final s in sentinels) {
-        expect(t.data, isNot(contains(s)), reason: '$id 的概要把当前值「$s」漏出去了');
+        expect(w.data, isNot(contains(s)), reason: '「$title」卡头把当前值「$s」漏出去了');
       }
     }
   }
@@ -160,122 +177,64 @@ void main() {
   // 一、设置归属：全局页只留全局，三个模块各自独立成页
   // ══════════════════════════════════════════════════════════
   group('设置归属', () {
-    testWidgets('全局设置页只有全局分区：账号/下载/抖音/B 站都不在', (tester) async {
+    testWidgets('全局设置页只有全局卡：账号/抖音/B 站都不在', (tester) async {
       await pumpPage(tester);
 
-      for (final id in globalSectionIds) {
-        expect(
-          find.byKey(contentKey(id)),
-          findsOneWidget,
-          reason: '全局设置页应当有 $id',
-        );
+      for (final title in globalCardTitles) {
+        expect(cardOf(title), findsOneWidget, reason: '全局设置页应当有「$title」卡');
       }
-      // 这些分区已经搬到各自模块里，全局页里连节点都不该有
+      // 这些卡已经搬到各自模块里，全局页里连节点都不该有
+      expect(cardOf('账号'), findsNothing, reason: 'X 账号登录属于 X 下载模块，不该留在全局设置里');
+      expect(cardOf('抖音'), findsNothing, reason: '抖音解析下载的设置不该混进全局设置页');
+      expect(cardOf('B 站'), findsNothing, reason: 'B 站解析下载的设置不该混进全局设置页');
+      // 「下载」这张卡全局页也有（里面是分模块入口），所以不能靠标题判它不在 ——
+      // 要判的是**内容**：全局页那张「下载」卡里没有 X 的保存路径与模板字段。
       expect(
-        find.byKey(contentKey('section.account')),
+        find.text('文件夹模板'),
         findsNothing,
-        reason: 'X 账号登录属于 X 下载模块，不该留在全局设置里',
+        reason: 'X 下载的模板设置不该混进全局设置页',
       );
-      expect(
-        find.byKey(contentKey('section.download')),
-        findsNothing,
-        reason: 'X 下载的设置不该混进全局设置页',
-      );
-      expect(
-        find.byKey(contentKey('section.douyin')),
-        findsNothing,
-        reason: '抖音解析下载的设置不该混进全局设置页',
-      );
-      expect(
-        find.byKey(contentKey('section.bili')),
-        findsNothing,
-        reason: 'B 站解析下载的设置不该混进全局设置页',
-      );
-
-      // 连标题文字也不该出现
-      expect(find.text('账号'), findsNothing);
-      expect(find.text('下载'), findsNothing);
-      expect(find.text('抖音'), findsNothing);
-      expect(find.text('B 站'), findsNothing);
     });
 
     testWidgets('X 下载设置页：账号登录与下载设置都在，没有抖音、没有 B 站', (tester) async {
       await pumpPage(tester, scope: SettingsScope.xDownload);
 
       expect(find.text('X 下载设置'), findsOneWidget, reason: '页头要表明这是哪个模块的设置');
-      for (final id in xSectionIds) {
-        expect(find.byKey(contentKey(id)), findsOneWidget);
+      for (final title in xCardTitles) {
+        expect(cardOf(title), findsOneWidget, reason: 'X 设置页应当有「$title」卡');
       }
-      // 账号登录是 X 下载的前置条件，必须在这一页
-      expect(find.text('账号'), findsOneWidget);
-      expect(find.text('下载'), findsOneWidget);
 
-      expect(
-        find.byKey(contentKey('section.douyin')),
-        findsNothing,
-        reason: '抖音的设置不该出现在 X 下载的设置页里',
-      );
-      expect(
-        find.byKey(contentKey('section.bili')),
-        findsNothing,
-        reason: 'B 站的设置不该出现在 X 下载的设置页里',
-      );
-      // 全局分区也不该跟过来
-      expect(find.byKey(contentKey('section.appearance')), findsNothing);
-      expect(find.byKey(contentKey('section.proxy')), findsNothing);
+      expect(cardOf('抖音'), findsNothing, reason: '抖音的设置不该出现在 X 下载的设置页里');
+      expect(cardOf('B 站'), findsNothing, reason: 'B 站的设置不该出现在 X 下载的设置页里');
+      // 全局卡也不该跟过来
+      expect(cardOf('外观'), findsNothing);
+      expect(cardOf('代理'), findsNothing);
     });
 
-    testWidgets('抖音解析下载设置页：只有抖音分区，没有账号/下载/B 站', (tester) async {
+    testWidgets('抖音解析下载设置页：只有抖音卡，没有账号/B 站', (tester) async {
       await pumpPage(tester, scope: SettingsScope.douyin);
 
       expect(find.text('抖音解析下载设置'), findsOneWidget);
-      for (final id in douyinSectionIds) {
-        expect(find.byKey(contentKey(id)), findsOneWidget);
+      for (final title in douyinCardTitles) {
+        expect(cardOf(title), findsOneWidget, reason: '抖音设置页应当有「$title」卡');
       }
-      expect(
-        find.byKey(contentKey('section.account')),
-        findsNothing,
-        reason: 'X 账号登录不属于抖音模块',
-      );
-      expect(
-        find.byKey(contentKey('section.download')),
-        findsNothing,
-        reason: 'X 下载的设置不该出现在抖音设置页里',
-      );
-      expect(
-        find.byKey(contentKey('section.bili')),
-        findsNothing,
-        reason: 'B 站的设置不该出现在抖音设置页里',
-      );
-      expect(find.byKey(contentKey('section.appearance')), findsNothing);
-      expect(find.byKey(contentKey('section.proxy')), findsNothing);
+      expect(cardOf('账号'), findsNothing, reason: 'X 账号登录不属于抖音模块');
+      expect(cardOf('B 站'), findsNothing, reason: 'B 站的设置不该出现在抖音设置页里');
+      expect(cardOf('外观'), findsNothing);
+      expect(cardOf('代理'), findsNothing);
     });
 
-    testWidgets('B 站解析下载设置页：只有 B 站分区，没有账号/下载/抖音', (tester) async {
+    testWidgets('B 站解析下载设置页：只有 B 站卡，没有账号/抖音', (tester) async {
       await pumpPage(tester, scope: SettingsScope.bili);
 
-      expect(find.text('B 站解析下载设置'), findsOneWidget,
-          reason: '页头要表明这是哪个模块的设置');
-      for (final id in biliSectionIds) {
-        expect(find.byKey(contentKey(id)), findsOneWidget);
+      expect(find.text('B 站解析下载设置'), findsOneWidget, reason: '页头要表明这是哪个模块的设置');
+      for (final title in biliCardTitles) {
+        expect(cardOf(title), findsOneWidget, reason: 'B 站设置页应当有「$title」卡');
       }
-      expect(
-        find.byKey(contentKey('section.account')),
-        findsNothing,
-        reason: 'X 账号登录不属于 B 站模块',
-      );
-      expect(
-        find.byKey(contentKey('section.download')),
-        findsNothing,
-        reason: 'X 下载的设置不该出现在 B 站设置页里',
-      );
-      expect(
-        find.byKey(contentKey('section.douyin')),
-        findsNothing,
-        reason: '抖音的设置不该出现在 B 站设置页里',
-      );
-      expect(find.byKey(contentKey('section.appearance')), findsNothing);
-      expect(find.byKey(contentKey('section.proxy')), findsNothing);
+      expect(cardOf('账号'), findsNothing, reason: 'X 账号登录不属于 B 站模块');
+      expect(cardOf('抖音'), findsNothing, reason: '抖音的设置不该出现在 B 站设置页里');
+      expect(cardOf('外观'), findsNothing);
+      expect(cardOf('代理'), findsNothing);
     });
 
     testWidgets('三个模块的设置页互不相同（不合并成同一页）', (tester) async {
@@ -309,118 +268,81 @@ void main() {
   });
 
   // ══════════════════════════════════════════════════════════
-  // 二、折叠行为
+  // 二、平铺：打开页面即见当前值（取代原来的「都折叠」）
+  //
+  // 用户 2026-10-13 裁定：预览稿是页面骨架的统一基准，设置页要「所见即所得」。
+  // 于是折叠壳整体退役，下面这些判据**语义反转**：原来要求「收起态不露内容」，
+  // 现在要求「当前值直接可见、不需要任何点击」。
   // ══════════════════════════════════════════════════════════
-  group('都折叠', () {
-    testWidgets('全局页的分区默认全部收起（内容可见高度均为 0）', (tester) async {
+  group('所见即所得', () {
+    testWidgets('全局页的四张卡都在，且没有折叠壳', (tester) async {
       await pumpPage(tester);
 
-      for (final id in globalSectionIds) {
-        expect(contentHeight(tester, id), 0, reason: '$id 默认必须收起');
+      for (final title in globalCardTitles) {
+        expect(cardOf(title), findsOneWidget, reason: '全局页的「$title」卡不能丢');
       }
-    });
-    testWidgets('分区标题都在，动作文案统一是「展开」', (tester) async {
-      await pumpPage(tester);
-
-      for (final t in ['外观', '代理', '分模块设置', '应用']) {
-        expect(find.text(t), findsOneWidget, reason: '分区「$t」的标题不能丢');
-      }
-
-      // 四个普通分区 —— 「展开诊断工具」那个特例已经统一掉，
-      // 动作文案现在全站只有一个词。
-      expect(find.text('展开设置'), findsNWidgets(4));
-      expect(find.text('展开诊断工具'), findsNothing);
+      // 折叠时代的三样东西一个都不该剩下
+      expect(find.text('展开设置'), findsNothing, reason: '平铺后没有「展开设置」这种动作文案');
       expect(find.text('收起'), findsNothing);
+      expect(find.byType(CollapsibleGroup), findsNothing,
+          reason: '设置页不该再有任何折叠组');
     });
 
-    testWidgets('展开一个分区不影响其它分区', (tester) async {
+    testWidgets('外观卡的字段一次性全部可见 —— 不需要点开任何东西', (tester) async {
       await pumpPage(tester);
 
-      await tester.tap(find.text('外观'));
-      await tester.pumpAndSettle();
-
-      expect(contentHeight(tester, 'section.appearance'), greaterThan(0));
-      for (final id in globalSectionIds.where(
-        (s) => s != 'section.appearance',
-      )) {
-        expect(contentHeight(tester, id), 0, reason: '$id 不该被连带展开');
+      // 七个字段直接摊在卡上（原来要先点开「外观」分区才看得到）
+      for (final f in [
+        '界面语言',
+        '窗口材质',
+        '界面风格',
+        '自定义色调',
+        '导航形态',
+        '主题模式',
+        '背景图片',
+      ]) {
+        expect(
+          inCard('外观', f),
+          findsOneWidget,
+          reason: '「$f」应当直接可见，不需要展开',
+        );
       }
-      expect(find.text('收起'), findsOneWidget);
     });
 
-    testWidgets('再次点击分区标题 → 收回', (tester) async {
-      await pumpPage(tester);
-
-      await tester.tap(find.text('外观'));
-      await tester.pumpAndSettle();
-      expect(contentHeight(tester, 'section.appearance'), greaterThan(0));
-
-      await tester.tap(find.text('外观'));
-      await tester.pumpAndSettle();
-      expect(contentHeight(tester, 'section.appearance'), 0);
-      expect(find.text('收起'), findsNothing);
-    });
-
-    testWidgets('展开后字段平铺 —— 没有第二层折叠', (tester) async {
-      await pumpPage(tester);
-
-      await tester.tap(find.text('外观'));
-      await tester.pumpAndSettle();
-
-      // 五个字段一次性全部可见，展开后不需要再点一次
-      for (final f in ['窗口材质', '自定义色调', '导航形态', '主题模式', '背景图片']) {
-        expect(find.text(f), findsOneWidget, reason: '「$f」应在展开后直接可见');
-      }
-      // 「自定义色调」曾经被同一个分区渲染了两遍，这里守住只出现一次
-      expect(find.text('自定义色调'), findsOneWidget);
-    });
-
-    testWidgets('X 下载设置页：账号分区展开后能看到登录状态', (tester) async {
+    testWidgets('X 下载设置页：账号与下载卡的内容直接可见', (tester) async {
       await pumpPage(tester, scope: SettingsScope.xDownload);
 
-      await tester.tap(find.text('账号'));
-      await tester.pumpAndSettle();
-
+      // 账号卡：登录状态直接可见（原来要先点开「账号」分区）
       expect(
-        contentHeight(tester, 'section.account'),
-        greaterThan(0),
-        reason: '账号分区展开后内容要真的露出来',
+        find.text('登录状态'),
+        findsWidgets,
+        reason: '账号卡里的登录状态应当直接可见',
       );
-    });
 
-    testWidgets('X 下载设置页：下载分区展开后模板字段与变量表直接可见', (tester) async {
-      await pumpPage(tester, scope: SettingsScope.xDownload);
-
-      await tester.tap(find.text('下载'));
-      await tester.pumpAndSettle();
-
+      // 下载卡：模板字段与变量表直接可见
       expect(find.text('文件夹模板'), findsOneWidget);
       expect(find.text('文件名模板'), findsOneWidget);
       // 两个字段各自一份可用变量表，且都是展开的
       expect(find.text('可用变量'), findsNWidgets(2));
     });
 
-    testWidgets('抖音设置页：抖音分区展开后各选项直接可见（没有第二层折叠）', (tester) async {
+    testWidgets('抖音设置页：各选项直接可见（没有第二层折叠）', (tester) async {
       await pumpPage(tester, scope: SettingsScope.douyin);
-
-      await tester.tap(find.text('抖音'));
-      await tester.pumpAndSettle();
 
       for (final f in ['下载源', '图片格式', '并发数', '跳过已下载作品']) {
         expect(
-          inSection('section.douyin', f),
+          inCard('抖音', f),
           findsOneWidget,
-          reason: '「$f」应在展开后直接可见',
+          reason: '「$f」应当直接可见，不需要展开',
         );
       }
-      // 「自定义文本」特殊：分区内除了它自己的标题，两个模板字段各自的
+      // 「自定义文本」特殊：卡内除了它自己的标题，两个模板字段各自的
       // 「可用变量」表里也有一枚 %CUSTOM_TEXT% 芯片，描述文字同为
-      // 「自定义文本」。所以这里只要求「至少出现一次」—— 变量表本身就在
-      // 该选项内部，选项若被折叠，它和变量表会一起消失，断言依然成立。
+      // 「自定义文本」。所以这里只要求「至少出现一次」。
       expect(
-        inSection('section.douyin', '自定义文本'),
+        inCard('抖音', '自定义文本'),
         findsWidgets,
-        reason: '「自定义文本」应在展开后直接可见',
+        reason: '「自定义文本」应当直接可见',
       );
       expect(
         find.text('质量优先策略'),
@@ -429,26 +351,9 @@ void main() {
       );
     });
 
-    testWidgets('B 站页的分区默认收起（内容可见高度为 0）', (tester) async {
+    testWidgets('B 站设置页：各选项直接可见（没有第二层折叠）', (tester) async {
       await pumpPage(tester, scope: SettingsScope.bili);
 
-      for (final id in biliSectionIds) {
-        expect(contentHeight(tester, id), 0, reason: '$id 默认必须收起');
-      }
-      expect(find.text('展开设置'), findsOneWidget);
-    });
-
-    testWidgets('B 站设置页：分区展开后各选项直接可见（没有第二层折叠）', (tester) async {
-      await pumpPage(tester, scope: SettingsScope.bili);
-
-      await tester.tap(find.text('B 站'));
-      await tester.pumpAndSettle();
-
-      expect(
-        contentHeight(tester, 'section.bili'),
-        greaterThan(0),
-        reason: 'B 站分区展开后内容要真的露出来',
-      );
       for (final f in [
         '画质上限',
         '编码偏好',
@@ -461,17 +366,17 @@ void main() {
         '启用模版',
       ]) {
         expect(
-          inSection('section.bili', f),
+          inCard('B 站', f),
           findsOneWidget,
-          reason: '「$f」应在展开后直接可见',
+          reason: '「$f」应当直接可见，不需要展开',
         );
       }
       // 「自定义文本」和抖音那页同理：选项标题之外，两张变量表里还各有一枚
       // %CUSTOM_TEXT% 芯片，描述文字同为「自定义文本」，所以只要求至少一次。
       expect(
-        inSection('section.bili', '自定义文本'),
+        inCard('B 站', '自定义文本'),
         findsWidgets,
-        reason: '「自定义文本」应在展开后直接可见',
+        reason: '「自定义文本」应当直接可见',
       );
 
       // 三个模块各说各的话：抖音专有的说法不该出现在 B 站这一页
@@ -483,8 +388,6 @@ void main() {
     testWidgets('下载源切到「质量优先」后，质量优先策略下拉才出现', (tester) async {
       final settings = await pumpPage(tester, scope: SettingsScope.douyin);
 
-      await tester.tap(find.text('抖音'));
-      await tester.pumpAndSettle();
       expect(find.text('质量优先策略'), findsNothing);
 
       await settings.setDouyin((d) => d.source = DouyinSource.qualityFirst);
@@ -493,11 +396,11 @@ void main() {
     });
   });
 
-  group('不外漏', () {
-    testWidgets('收起态只给中性概要，不写任何当前值', (tester) async {
+  group('卡头灰字中性', () {
+    testWidgets('卡头灰字只给中性描述，不写任何当前值', (tester) async {
       final settings = await pumpPage(tester);
 
-      // 先塞入一批「一旦外漏就会被看到」的值：模板 / 保存路径 / 代理地址 / 自定义色调
+      // 先塞入一批「一旦写进卡头就会被看到」的值：模板 / 保存路径 / 代理地址 / 自定义色调
       await settings.setDownload((d) {
         d.dirTemplate = '%USER_SCREEN_NAME%';
         d.fileNameTemplate = '%POST_ID%%EXT%';
@@ -515,33 +418,28 @@ void main() {
       });
       await tester.pumpAndSettle();
 
-      // 概要必须与中性描述**逐字一致**，且不含任何一个 sentinel。
+      // 平铺后「露在屏幕上」的是卡头标题 + 卡头灰字 + 全部字段。
+      // 卡头灰字承接了原「收起态概要」的位置，所以**它**只许写中性描述。
       //
-      // 注意：折叠组的内容仍在元素树上（只裁剪不销毁），所以这里不能拿
-      // `find.text` 去全页扫 —— 变量表里的 `%USER_SCREEN_NAME%` 一直都在树上。
-      // 真正「露在屏幕上」的只有分区标题 + 这一行概要，所以直接审概要本身。
-      expectSummariesClean(globalSectionIds, tester);
-
-      // 三个模块的设置页同样不许外漏（用同一个 store，保证塞进去的值还在）
+      // 注意：不能拿 `find.text` 去全页扫 sentinel —— 平铺后那些当前值
+      // **本来就该显示在字段里**（这正是本次改造的目的）。要审的是卡头那一行。
+      //
+      // 全局页的「下载」卡没有灰字（它装的是分模块入口），所以这条用 X 页的
+      // 三张卡 + 另外两个模块的卡来审 —— 它们才是「一个模块的设置块」。
       await pumpPage(tester, scope: SettingsScope.xDownload, store: settings);
-      expectSummariesClean(xSectionIds, tester);
+      expectTrailingsClean(xCardTitles, tester);
 
       await pumpPage(tester, scope: SettingsScope.douyin, store: settings);
-      expectSummariesClean(douyinSectionIds, tester);
+      expectTrailingsClean(douyinCardTitles, tester);
 
       await pumpPage(tester, scope: SettingsScope.bili, store: settings);
-      expectSummariesClean(biliSectionIds, tester);
+      expectTrailingsClean(biliCardTitles, tester);
     });
   });
 
   group('必填项保护', () {
-    testWidgets('代理地址变成必填 → 代理分区自动展开', (tester) async {
+    testWidgets('代理地址变成必填 → 红框与错误文案常驻可见', (tester) async {
       final settings = await pumpPage(tester);
-      expect(
-        contentHeight(tester, 'section.proxy'),
-        0,
-        reason: '前置条件：代理分区默认收起',
-      );
 
       // 「启用代理 + 不使用系统代理 + 地址为空」→ 地址是必填项
       await settings.setProxy((p) {
@@ -551,17 +449,20 @@ void main() {
       });
       await tester.pumpAndSettle();
 
+      // 平铺后收起态不存在了，这条判据**换了表达方式但没放宽**：
+      // 原来靠 `forceExpand` 把分区自动展开（「必需项不能被藏在收起态里」），
+      // 现在改由 [ProxySection] 的红框 + 红字常驻表达 —— 错误状态永远在屏幕上，
+      // 比原来更直接（不用先展开才看得见）。
       expect(
-        contentHeight(tester, 'section.proxy'),
-        greaterThan(0),
-        reason: '必需项不能被藏在收起态里',
+        find.text('还没填代理地址'),
+        findsOneWidget,
+        reason: '必需项缺失必须在界面上直接可见',
       );
-      expect(find.text('收起'), findsOneWidget);
 
-      // 填上地址后条件消失，不再强制展开（但仍保持用户当前看到的展开态）
+      // 填上地址后错误消失
       await settings.setProxy((p) => p.url = 'http://127.0.0.1:7890');
       await tester.pumpAndSettle();
-      expect(contentHeight(tester, 'section.proxy'), greaterThan(0));
+      expect(find.text('还没填代理地址'), findsNothing, reason: '填上地址后不该还报错');
     });
   });
 }
