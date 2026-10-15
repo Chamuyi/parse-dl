@@ -65,10 +65,13 @@ class QuickGrid extends StatelessWidget {
             crossAxisCount: columns,
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
-            // 高度按**较高的一侧**取：图标块 34 与「标题 17 + 1 + 副题两行 28」
-            // 里的 46，加下上 padding 26 → 72。实测 74 仍溢出 2px（中文行高比
-            // 估算的略大），给到 78。
-            mainAxisExtent: 78,
+            // 高度按内容取：**标题两行 34** + 间距 1 + **副题两行 28** = 63，
+            // 加下上 padding 26 → 89；给 92 留 3px 余量。
+            //
+            // 2026-10-15 第二次调高：标题也改成允许两行后，78 会当场溢出
+            // （判据会红）。取值与 `OptGrid`（66）/ `StatGrid`（96）同一套口径：
+            // 按实测内容 + 2~3px 余量，不用宽高比。
+            mainAxisExtent: 92,
           ),
           children: [for (final cell in cells) _QuickTile(cell: cell)],
         );
@@ -127,13 +130,18 @@ class _QuickTile extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // 标题也**允许换行**（最多两行）—— 预览稿 `app.css:774` 的
+                // `.qc .tx b { display:block }` 同样没有 `nowrap`/`ellipsis`，
+                // 就是自然换行。原来写死 `maxLines: 1`，1600 窗口的三列布局下
+                // 「解析抖音作品」被截成「解析抖音...」（2026-10-15 真机对照）。
                 Text(
                   cell.title,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
+                    height: 1.3,
                     color: c.textStrong,
                   ),
                 ),
