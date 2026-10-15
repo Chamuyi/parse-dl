@@ -168,8 +168,9 @@ void main() {
         (tester) async {
       // 2026-10-16 真机实测到的缺陷：mica / mica-alt / acrylic / acrylic-thin
       // 四种材质渲染出来**逐像素完全相同**（平均差 0.00 × 4 组）。
-      // 现在材质通过两条路径落到窗口底上：`windowLift` 的加性亮度偏移，
-      // 以及画在 85% 调色层**之上**的分层 / 磨砂颗粒。
+      // 现在材质由 `_MaterialSheetPainter` 整片画在 85% 调色层**之上**：
+      // `previewFor` 的 WinUI 材质底（alpha 0.86）给亮度身份，`layered`
+      // 叠上半区分层与接缝，`grain` 撒磨砂颗粒。
       final luma = <WindowMaterial, List<double>>{};
       for (final m in WindowMaterial.values) {
         luma[m] = await renderLuma(tester, material: m);
