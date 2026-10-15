@@ -21,6 +21,21 @@ import 'app_style.dart';
 ///
 /// 层数是 S3 的验收判据：liquid = 3（三层 radial）+ 1（线性），frosted = 1，
 /// clay = 1（`style_backdrop_test.dart` 钉住）。
+///
+/// ### ⚠️ 2026-10-16 全部改成 35% 半透明（0x59）
+///
+/// 此前这里每个色停都是 **`0xFF` 完全不透明**，绘制器又铺满整个窗口 ——
+/// 于是**窗口材质被整片盖死**：实测 mica / 亚克力 / 纯色三种材质渲染出来
+/// 逐像素完全相同（平均差 **0.00**），「窗口材质」这个设置项等于没有效果。
+///
+/// 现在这一层只给 35%，上面再叠 `solidFor(style)@0.85` 的调色层，材质能透出
+/// 约 10%。**为什么不是全透明**：全透明会让风格自身的渐变（三套的窗口底色
+/// 差异）一起消失，而那是「换风格看得出来」的一部分；35% 是两者都留得住的值。
+///
+/// **为什么调色层不能一起调低**：它是文字对比度的地板。它的 alpha 一旦变小，
+/// 「壁纸透进来」的幅度就变大，凹面上的弱档文字会跌破 4.5
+/// （`theme_contrast_test` 的整张地板表就是按 0.85 算的）。所以材质可见度
+/// 只能从这一层让出来。
 @immutable
 class StyleBackdrop {
   /// radial 光晕层，**从上到下按 CSS 的书写顺序**（第一层最靠上）。
@@ -53,26 +68,26 @@ class StyleBackdrop {
   static const liquidLight = StyleBackdrop(
     glows: [
       StyleGlow(
-        color: Color(0xFFCFE0FF), // #cfe0ff
+        color: Color(0x59CFE0FF), // #cfe0ff
         center: Alignment(-0.76, -1.16), // at 12% -8%
         radiusFactor: 0.62, // 1100px 700px → 按窗口短边归一
       ),
       StyleGlow(
-        color: Color(0xFFFFD9EC), // #ffd9ec
+        color: Color(0x59FFD9EC), // #ffd9ec
         center: Alignment(0.92, -0.84), // at 96% 8%
         radiusFactor: 0.51, // 900px 640px
       ),
       StyleGlow(
-        color: Color(0xFFD6FFF0), // #d6fff0
+        color: Color(0x59D6FFF0), // #d6fff0
         center: Alignment(0.04, 1.16), // at 52% 108%
         radiusFactor: 0.44, // 760px 620px
       ),
     ],
     linear: StyleLinear(
       stops: [
-        Color(0xFFF7F8FE), // #f7f8fe 0%
-        Color(0xFFF2F0FB), // #f2f0fb 52%
-        Color(0xFFF6F4F2), // #f6f4f2 100%
+        Color(0x59F7F8FE), // #f7f8fe 0%
+        Color(0x59F2F0FB), // #f2f0fb 52%
+        Color(0x59F6F4F2), // #f6f4f2 100%
       ],
       begin: Alignment(-0.322, -0.946), // 150°
       end: Alignment(0.322, 0.946),
@@ -83,26 +98,26 @@ class StyleBackdrop {
   static const liquidDark = StyleBackdrop(
     glows: [
       StyleGlow(
-        color: Color(0xFF2A2545),
+        color: Color(0x592A2545),
         center: Alignment(-0.76, -1.16), // at 12% -8%
         radiusFactor: 0.62,
       ),
       StyleGlow(
-        color: Color(0xFF3A2438),
+        color: Color(0x593A2438),
         center: Alignment(0.92, -0.84), // at 96% 8%
         radiusFactor: 0.51,
       ),
       StyleGlow(
-        color: Color(0xFF1F3A38),
+        color: Color(0x591F3A38),
         center: Alignment(0.04, 1.16), // at 52% 108%
         radiusFactor: 0.44,
       ),
     ],
     linear: StyleLinear(
       stops: [
-        Color(0xFF14131C), // 0%
-        Color(0xFF181722), // 52%
-        Color(0xFF16151F), // 100%（任务书表格只列了前两停，按 CSS 原文补全）
+        Color(0x5914131C), // 0%
+        Color(0x59181722), // 52%
+        Color(0x5916151F), // 100%（任务书表格只列了前两停，按 CSS 原文补全）
       ],
       begin: Alignment(-0.322, -0.946), // 150°
       end: Alignment(0.322, 0.946),
@@ -116,9 +131,9 @@ class StyleBackdrop {
     glows: [],
     linear: StyleLinear(
       stops: [
-        Color(0xFFEEF1F6), // #eef1f6 0%
-        Color(0xFFE8ECF3), // #e8ecf3 48%
-        Color(0xFFF0EEF3), // #f0eef3 100%
+        Color(0x59EEF1F6), // #eef1f6 0%
+        Color(0x59E8ECF3), // #e8ecf3 48%
+        Color(0x59F0EEF3), // #f0eef3 100%
       ],
       begin: Alignment(-0.259, -0.966), // 165°
       end: Alignment(0.259, 0.966),
@@ -130,9 +145,9 @@ class StyleBackdrop {
     glows: [],
     linear: StyleLinear(
       stops: [
-        Color(0xFF17171A), // 0%
-        Color(0xFF1B1B1F), // 48%
-        Color(0xFF191820), // 100%
+        Color(0x5917171A), // 0%
+        Color(0x591B1B1F), // 48%
+        Color(0x59191820), // 100%
       ],
       begin: Alignment(-0.259, -0.966), // 165°
       end: Alignment(0.259, 0.966),
@@ -146,9 +161,9 @@ class StyleBackdrop {
     glows: [],
     linear: StyleLinear(
       stops: [
-        Color(0xFFFAF6F1), // #faf6f1 0%
-        Color(0xFFF5EFE8), // #f5efe8 50%
-        Color(0xFFF8F4EF), // #f8f4ef 100%
+        Color(0x59FAF6F1), // #faf6f1 0%
+        Color(0x59F5EFE8), // #f5efe8 50%
+        Color(0x59F8F4EF), // #f8f4ef 100%
       ],
       begin: Alignment(-0.208, -0.978), // 168°
       end: Alignment(0.208, 0.978),
@@ -160,9 +175,9 @@ class StyleBackdrop {
     glows: [],
     linear: StyleLinear(
       stops: [
-        Color(0xFF1F1A16), // 0%
-        Color(0xFF241E19), // 50%
-        Color(0xFF221D19), // 100%
+        Color(0x591F1A16), // 0%
+        Color(0x59241E19), // 50%
+        Color(0x59221D19), // 100%
       ],
       begin: Alignment(-0.208, -0.978), // 168°
       end: Alignment(0.208, 0.978),

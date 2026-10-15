@@ -65,40 +65,53 @@ void main() {
       );
     });
 
-    test('frosted 的取值就是 morrow 的默认值（blur 22 / opacity .76）', () {
-      // 这条是**出处判据**：`tools/ui/_redesign/morrow/lib/appearance.dart`
-      // 里 ComponentMaterial 的构造默认与 fromJson 兜底都是这两个数。
-      // 谁把默认值改成别的，这条立刻红。
-      expect(AppSurface.frosted.blur, 22);
-      expect(AppSurface.frosted.opacity, 0.76);
+    test('frosted 的三档数值（2026-10-16 新规范）', () {
+      // 2026-10-16 用户裁定「所有窗口材质都不满意」后重定：这一档从
+      // 「morrow 的默认值（blur 22 / opacity .76）」改为「中档磨砂」——
+      // 强模糊让给 liquid（28），它自己降到 18，并把阴影压轻到
+      // WinUI 卡片高程（8）的量级。
+      expect(AppSurface.frosted.blur, 18);
+      expect(AppSurface.frosted.opacity, 0.78);
       expect(AppSurface.frosted.radiusScale, 1.0);
       expect(AppSurface.frosted.gradient, isFalse);
       expect(AppSurface.frosted.rim, isFalse);
     });
 
-    test('三套取值逐字段照预览稿实测表', () {
-      // 照抄实施计划 P1-1 的那张表。任何一格被改，这里指名道姓地红。
-      expect(AppSurface.liquid.blur, 5);
-      expect(AppSurface.liquid.opacity, 0.62);
+    test('三套取值逐字段锚定（2026-10-16 新规范）', () {
+      // 关键变化：liquid 的 blur 从 5 提到 28 —— 5 在真机上几乎看不出模糊，
+      // 与 frosted 分不出「厚玻璃」与「薄磨砂」的差别。
+      expect(AppSurface.liquid.blur, 28);
+      expect(AppSurface.liquid.opacity, 0.60);
       expect(AppSurface.liquid.radiusScale, 1.25);
       expect(AppSurface.liquid.gradient, isTrue);
       expect(AppSurface.liquid.rim, isTrue);
-      expect(AppSurface.liquid.shadowY, 10);
-      expect(AppSurface.liquid.shadowBlur, 30);
-      expect(AppSurface.liquid.shadowOpacity, 0.20);
+      expect(AppSurface.liquid.shadowY, 12);
+      expect(AppSurface.liquid.shadowBlur, 34);
+      expect(AppSurface.liquid.shadowOpacity, 0.24);
 
-      expect(AppSurface.frosted.shadowY, 8);
-      expect(AppSurface.frosted.shadowBlur, 24);
-      expect(AppSurface.frosted.shadowOpacity, 0.22);
+      expect(AppSurface.frosted.shadowY, 6);
+      expect(AppSurface.frosted.shadowBlur, 18);
+      expect(AppSurface.frosted.shadowOpacity, 0.12);
 
       expect(AppSurface.clay.blur, 0);
       expect(AppSurface.clay.opacity, 1.0);
       expect(AppSurface.clay.radiusScale, 1.0);
       expect(AppSurface.clay.gradient, isFalse);
       expect(AppSurface.clay.rim, isFalse);
-      expect(AppSurface.clay.shadowY, 12);
-      expect(AppSurface.clay.shadowBlur, 28);
-      expect(AppSurface.clay.shadowOpacity, 0.35);
+      expect(AppSurface.clay.shadowY, 10);
+      expect(AppSurface.clay.shadowBlur, 26);
+      expect(AppSurface.clay.shadowOpacity, 0.20);
+    });
+
+    test('三档模糊必须拉得开（liquid 明显大于 frosted，clay 为 0）', () {
+      // 「三套材质」若只差一点点模糊，用户看到的就是同一套。
+      expect(AppSurface.liquid.blur, greaterThan(AppSurface.frosted.blur * 1.4),
+          reason: 'liquid 是「厚玻璃」，模糊必须明显强于 frosted，否则两档看着一样');
+      expect(AppSurface.frosted.blur, greaterThan(AppSurface.clay.blur),
+          reason: 'clay 是实心面（blur 0）');
+      // 透明度也要拉开：liquid 最透、clay 最实
+      expect(AppSurface.liquid.opacity, lessThan(AppSurface.frosted.opacity));
+      expect(AppSurface.frosted.opacity, lessThan(AppSurface.clay.opacity));
     });
 
     test('只有陶土的 blur 是 0（「实心面不套模糊」的前提）', () {
@@ -231,9 +244,12 @@ void main() {
       }
 
       expect(got.keys.toSet(), {AppStyle.liquid, AppStyle.frosted});
-      expect(got[AppStyle.liquid], 5);
-      expect(got[AppStyle.frosted], 22);
-      expect(got[AppStyle.liquid], isNot(got[AppStyle.frosted]));
+      // 渲染出来的 sigma 必须等于令牌值，且两档要拉得开（2026-10-16 起
+      // liquid 是「厚玻璃」28、frosted 是「中档磨砂」18）。
+      expect(got[AppStyle.liquid], AppSurface.liquid.blur);
+      expect(got[AppStyle.frosted], AppSurface.frosted.blur);
+      expect(got[AppStyle.liquid]!, greaterThan(got[AppStyle.frosted]! * 1.4),
+          reason: '两档模糊太接近，「三套材质」就只差在名字上');
     });
 
     testWidgets('显式传 blur 时覆盖风格（老调用点的语义没被夺走）', (tester) async {

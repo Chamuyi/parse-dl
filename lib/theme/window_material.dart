@@ -44,20 +44,35 @@ enum WindowMaterial {
         orElse: () => WindowMaterial.mica,
       );
 
-  /// 材质预览色板（浅色 / 深色）
+  /// 材质预览色板（浅色 / 深色）。
+  ///
+  /// ### 2026-10-16 改锚到 WinUI 官方资源值
+  ///
+  /// 这里是设置页「窗口材质」那张缩略图里材质薄片的底色 —— 用户挑材质时
+  /// 唯一看到的东西，所以它必须**如实代表**该材质在真机上的样子。
+  /// 取值来自 `microsoft-ui-xaml` 的 `Common_themeresources_any.xaml` 与
+  /// `AcrylicBrush_themeresources.xaml`（见下表注释），不再是凭感觉挑的灰。
   Color previewFor(Brightness brightness) {
     final dark = brightness == Brightness.dark;
     switch (this) {
       case WindowMaterial.mica:
+        // `SolidBackgroundFillColorBase`：浅 #F3F3F3 / 深 #202020
         return dark ? const Color(0xFF202020) : const Color(0xFFF3F3F3);
       case WindowMaterial.micaAlt:
-        return dark ? const Color(0xFF2B2B2B) : const Color(0xFFDADADA);
+        // `SolidBackgroundFillColorBaseAlt`：浅 #DADADA / 深 #0A0A0A
+        return dark ? const Color(0xFF0A0A0A) : const Color(0xFFDADADA);
       case WindowMaterial.acrylic:
-        return dark ? const Color(0xFF2A2A2A) : const Color(0xFFE8E8E8);
+        // `AcrylicBackgroundFillColorDefaultBrush` 的 TintColor（浅 #FCFCFC
+        // / 深 #2C2C2C）
+        return dark ? const Color(0xFF2C2C2C) : const Color(0xFFFCFCFC);
       case WindowMaterial.acrylicThin:
-        return dark ? const Color(0xFF242424) : const Color(0xFFF0F0F0);
+        // `AcrylicBackgroundFillColorBaseBrush` 的兜底色（浅 #EEEEEE /
+        // 深 #1C1C1C）—— 更薄那一档透光更多，预览取更接近系统底的色
+        return dark ? const Color(0xFF1C1C1C) : const Color(0xFFEEEEEE);
       case WindowMaterial.none:
-        return dark ? const Color(0xFF141414) : const Color(0xFFFBFBFB);
+        // 纯色：不透明主题底（WinUI 兜底 `SolidBackgroundFillColorBase` 的
+        // 更亮一档）
+        return dark ? const Color(0xFF171717) : const Color(0xFFFFFFFF);
     }
   }
 }

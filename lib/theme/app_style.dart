@@ -85,16 +85,21 @@ class AppSurface {
     required this.shadowOpacity,
   });
 
-  /// 液体玻璃：透光最强、半径最大，带渐变面与内缘亮环。
+  /// 液体玻璃：模糊最重、透光最强、半径最大，带渐变面与内缘亮环。
+  ///
+  /// 2026-10-16 把 `blur` 从 **5 提到 28**。5 在原稿里是「模糊最轻」的意思，
+  /// 但放进真机就是**几乎没模糊** —— 一块半透明的板子而已，既不像玻璃也
+  /// 和 frosted 分不出来（后者 blur 18）。玻璃感来自「背景被打散成色块」，
+  /// 那需要的正是强模糊；这一档现在是三套里唯一一眼可辨的「厚玻璃」。
   static const liquid = AppSurface(
-    blur: 5,
-    opacity: 0.62,
+    blur: 28,
+    opacity: 0.60,
     radiusScale: 1.25,
     gradient: true,
     rim: true,
-    shadowY: 10,
-    shadowBlur: 30,
-    shadowOpacity: 0.20,
+    shadowY: 12,
+    shadowBlur: 34,
+    shadowOpacity: 0.24,
   );
 
   /// 磨砂清晰（默认）。
@@ -105,14 +110,14 @@ class AppSurface {
   /// `fromJson` 也用同一对值兜底（第 96~97 行 `?? 22` / `?? .76`）。
   /// 这是本项目「预览稿实测值」的出处，改这两个数前先去核对那份源码。
   static const frosted = AppSurface(
-    blur: 22,
-    opacity: 0.76,
+    blur: 18,
+    opacity: 0.78,
     radiusScale: 1.0,
     gradient: false,
     rim: false,
-    shadowY: 8,
-    shadowBlur: 24,
-    shadowOpacity: 0.22,
+    shadowY: 6,
+    shadowBlur: 18,
+    shadowOpacity: 0.12,
   );
 
   /// 陶土柔和：实心面 + 最重的软阴影，完全不透明。
@@ -122,9 +127,9 @@ class AppSurface {
     radiusScale: 1.0,
     gradient: false,
     rim: false,
-    shadowY: 12,
-    shadowBlur: 28,
-    shadowOpacity: 0.35,
+    shadowY: 10,
+    shadowBlur: 26,
+    shadowOpacity: 0.20,
   );
 
   static AppSurface of(AppStyle s) => switch (s) {
@@ -646,7 +651,7 @@ class StyleButton {
     primaryGradient: LinearGradient(
       begin: Alignment(-0.707, -0.707),
       end: Alignment(0.707, 0.707),
-      colors: [Color(0xFF5B6CFF), Color(0xFF8B5CF6)],
+      colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
     ),
     borderColor: Color(0xD9FFFFFF), // rgba(255,255,255,.85)
     shadow: BoxShadow(
@@ -656,7 +661,7 @@ class StyleButton {
       spreadRadius: -6,
     ),
     primaryShadow: BoxShadow(
-      color: Color(0xFF5B6CFF), // 0 10px 26px -10px var(--ac)
+      color: Color(0xFF4F46E5),
       offset: Offset(0, 10),
       blurRadius: 26,
       spreadRadius: -10,
@@ -672,7 +677,7 @@ class StyleButton {
     primaryGradient: LinearGradient(
       begin: Alignment(-0.707, -0.707),
       end: Alignment(0.707, 0.707),
-      colors: [Color(0xFF7C8DFF), Color(0xFF9B7CFF)],
+      colors: [Color(0xFF818CF8), Color(0xFFA78BFA)],
     ),
     borderColor: Color(0x1FFFFFFF),
     shadow: BoxShadow(
@@ -682,27 +687,27 @@ class StyleButton {
       spreadRadius: -6,
     ),
     primaryShadow: BoxShadow(
-      color: Color(0xFF7C8DFF),
+      color: Color(0xFF818CF8),
       offset: Offset(0, 10),
       blurRadius: 26,
       spreadRadius: -10,
     ),
-    primaryTopHighlight: Color(0x35FFFFFF),
+    primaryTopHighlight: Color(0x26FFFFFF),
   );
 
   /// frosted · 浅色。CSS `:364-370`：白 .9 + `var(--ln)` 边 + 单条小影；
   /// 主按钮实色 `var(--ac)`。
   static const frostedLight = StyleButton(
-    color: Color(0xE6FFFFFF),
-    primaryColor: Color(0xFF1D9BF0),
-    borderColor: Color(0x1A101014),
+    color: Color(0xB3FFFFFF),
+    primaryColor: Color(0xFF0F6CBD),
+    borderColor: Color(0x0F0F172A),
     shadow: BoxShadow(
       color: Color(0x0D101014), // 0 1px 2px rgba(16,16,20,.05)
       offset: Offset(0, 1),
       blurRadius: 2,
     ),
     primaryShadow: BoxShadow(
-      color: Color(0xFF1D9BF0), // 0 6px 18px -8px var(--ac)
+      color: Color(0xFF0F6CBD),
       offset: Offset(0, 6),
       blurRadius: 18,
       spreadRadius: -8,
@@ -711,16 +716,16 @@ class StyleButton {
 
   /// frosted · 深色。CSS `:898`：白 .08 面、`--ln` 边（rgba(242,242,244,.12)）。
   static const frostedDark = StyleButton(
-    color: Color(0x14FFFFFF),
-    primaryColor: Color(0xFF1D9BF0),
-    borderColor: Color(0x1FF2F2F4),
+    color: Color(0x0FFFFFFF),
+    primaryColor: Color(0xFF38BDF8),
+    borderColor: Color(0x12FFFFFF),
     shadow: BoxShadow(
       color: Color(0x00000000), // 深色段未给 .btn 阴影
       offset: Offset(0, 1),
       blurRadius: 2,
     ),
     primaryShadow: BoxShadow(
-      color: Color(0xFF1D9BF0),
+      color: Color(0xFF38BDF8),
       offset: Offset(0, 6),
       blurRadius: 18,
       spreadRadius: -8,
@@ -736,7 +741,7 @@ class StyleButton {
       end: Alignment(0.707, 0.707),
       colors: [Color(0xFFC2410C), Color(0xFFEA580C)],
     ),
-    borderColor: Color(0x172B2622),
+    borderColor: Color(0x141C1917),
     shadow: BoxShadow(
       color: Color(0x0F574E46), // 0 1px 2px rgba(87,78,70,.06)
       offset: Offset(0, 1),
@@ -752,13 +757,13 @@ class StyleButton {
 
   /// clay · 深色。CSS `:945` `#2F2720` 面 + `--ln` 边。
   static const clayDark = StyleButton(
-    color: Color(0xFF2F2720),
+    color: Color(0xFF2B251E),
     primaryGradient: LinearGradient(
       begin: Alignment(-0.707, -0.707),
       end: Alignment(0.707, 0.707),
-      colors: [Color(0xFFEA580C), Color(0xFFF97316)],
+      colors: [Color(0xFFFB923C), Color(0xFFFDBA74)],
     ),
-    borderColor: Color(0x1FF5F0EB),
+    borderColor: Color(0x12FFFDFB),
     shadow: BoxShadow(
       color: Color(0x00000000), // 深色段未给 .btn 阴影
       offset: Offset(0, 1),

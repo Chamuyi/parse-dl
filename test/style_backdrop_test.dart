@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:parse_dl/theme/app_style.dart';
 import 'package:parse_dl/theme/app_theme.dart';
 import 'package:parse_dl/theme/style_backdrop.dart';
+import 'package:parse_dl/theme/style_colors.dart';
 import 'package:parse_dl/models/settings.dart';
 import 'package:parse_dl/theme/window_material.dart';
 import 'package:parse_dl/widgets/background_layer.dart';
@@ -24,22 +25,22 @@ void main() {
       expect(b.glowCount, 3, reason: '液体玻璃浅色要有三层 radial 光晕');
       expect(b.linear.stops.length, 1 + 2, reason: '线性渐变至少两停');
       // 三层光晕的颜色 = CSS 原文 #cfe0ff / #ffd9ec / #d6fff0
-      expect(b.glows[0].color, const Color(0xFFCFE0FF));
-      expect(b.glows[1].color, const Color(0xFFFFD9EC));
-      expect(b.glows[2].color, const Color(0xFFD6FFF0));
-      expect(b.linear.stops[0], const Color(0xFFF7F8FE));
-      expect(b.linear.stops.last, const Color(0xFFF6F4F2));
+      expect(b.glows[0].color, const Color(0x59CFE0FF));
+      expect(b.glows[1].color, const Color(0x59FFD9EC));
+      expect(b.glows[2].color, const Color(0x59D6FFF0));
+      expect(b.linear.stops[0], const Color(0x59F7F8FE));
+      expect(b.linear.stops.last, const Color(0x59F6F4F2));
     });
 
     test('liquid 深色 = 3 层 radial + 1 层线性（CSS :834-838）', () {
       final b = StyleBackdrop.of(AppStyle.liquid, Brightness.dark);
       expect(b.glowCount, 3);
-      expect(b.glows[0].color, const Color(0xFF2A2545));
-      expect(b.glows[1].color, const Color(0xFF3A2438));
-      expect(b.glows[2].color, const Color(0xFF1F3A38));
-      expect(b.linear.stops[0], const Color(0xFF14131C));
-      expect(b.linear.stops[1], const Color(0xFF181722));
-      expect(b.linear.stops.last, const Color(0xFF16151F));
+      expect(b.glows[0].color, const Color(0x592A2545));
+      expect(b.glows[1].color, const Color(0x593A2438));
+      expect(b.glows[2].color, const Color(0x591F3A38));
+      expect(b.linear.stops[0], const Color(0x5914131C));
+      expect(b.linear.stops[1], const Color(0x59181722));
+      expect(b.linear.stops.last, const Color(0x5916151F));
     });
 
     test('frosted = 1 层（单层线性，无光晕）（CSS :332 / :885）', () {
@@ -49,9 +50,9 @@ void main() {
         expect(b.linear.stops, hasLength(3));
       }
       expect(StyleBackdrop.frostedLight.linear.stops,
-          const [Color(0xFFEEF1F6), Color(0xFFE8ECF3), Color(0xFFF0EEF3)]);
+          const [Color(0x59EEF1F6), Color(0x59E8ECF3), Color(0x59F0EEF3)]);
       expect(StyleBackdrop.frostedDark.linear.stops,
-          const [Color(0xFF17171A), Color(0xFF1B1B1F), Color(0xFF191820)]);
+          const [Color(0x5917171A), Color(0x591B1B1F), Color(0x59191820)]);
     });
 
     test('clay = 1 层（单层线性，无光晕）（CSS :399 / :932）', () {
@@ -61,9 +62,9 @@ void main() {
         expect(b.linear.stops, hasLength(3));
       }
       expect(StyleBackdrop.clayLight.linear.stops,
-          const [Color(0xFFFAF6F1), Color(0xFFF5EFE8), Color(0xFFF8F4EF)]);
+          const [Color(0x59FAF6F1), Color(0x59F5EFE8), Color(0x59F8F4EF)]);
       expect(StyleBackdrop.clayDark.linear.stops,
-          const [Color(0xFF1F1A16), Color(0xFF241E19), Color(0xFF221D19)]);
+          const [Color(0x591F1A16), Color(0x59241E19), Color(0x59221D19)]);
     });
 
     test('六套背景两两不同（同亮度下三风格不同；同风格下两亮度不同）', () {
@@ -83,6 +84,37 @@ void main() {
         }
         seen.add(entry.value);
       }
+    });
+
+    test('六套背景都必须**半透明** —— 否则窗口材质被整片盖死', () {
+      // 2026-10-16 真机实测到的缺陷：这一层原本每个色停都是 `0xFF`，
+      // 绘制器又铺满整窗，于是 mica / 亚克力 / 纯色三种材质渲染出来
+      // 逐像素完全相同（平均差 0.00）——「窗口材质」这个设置项等于没有效果。
+      //
+      // 判据：任何一个色停都不能是 alpha=255；且整体要留出足够透光率
+      // （<0.5），否则材质只剩几个亮度级、肉眼看不出来。
+      for (final s in AppStyle.values) {
+        for (final b in Brightness.values) {
+          final bd = StyleBackdrop.of(s, b);
+          final all = <Color>[
+            for (final g in bd.glows) g.color,
+            ...bd.linear.stops,
+          ];
+          expect(all, isNotEmpty);
+          for (final c in all) {
+            expect(c.a, lessThan(0.5),
+                reason: '${s.id}/${b.name} 有不透明色停（alpha=${c.a}）—— '
+                    '窗口材质会被它盖住，三种材质渲染结果将完全相同');
+          }
+        }
+      }
+    });
+
+    test('负控制：把色停改成不透明会被上面那条判据抓住', () {
+      // 复现改造前的写法（0xFF），证明上一条不是恒真。
+      const opaqueStop = Color(0xFFF7F8FE);
+      expect(opaqueStop.a, greaterThanOrEqualTo(0.5),
+          reason: '不透明的色停必须被判为不合规');
     });
   });
 
@@ -159,11 +191,14 @@ void main() {
         ),
       ),
     );
-    // 底色 = solidFor(light) 现值 #F3F3F3（solidFor 带默认 style=frosted，
-    // 返回的是改造前常量 —— 这是刻意保留的既有行为），且无风格绘制器
+    // 底色 = 该风格色板的 surfaceSolid（2026-10-16 起 solidFor 不再分叉，
+    // 按风格取 —— liquid 浅色是 #FAFAFF 的冷紫调，不是旧的通用灰 #F3F3F3），
+    // 且无风格绘制器
     expect(
       find.byWidgetPredicate(
-        (w) => w is ColoredBox && w.color == const Color(0xFFF3F3F3),
+        (w) =>
+            w is ColoredBox &&
+            w.color == StyleColors.liquidLight.colors.surfaceSolid,
       ),
       findsOneWidget,
     );
@@ -189,7 +224,7 @@ void main() {
         ),
       ),
     );
-    final expected = AppColors.tintFor(const Color(0xFFFF0000), Brightness.light);
+    final expected = AppColors.tintFor(const Color(0x59FF0000), Brightness.light);
     expect(
       find.byWidgetPredicate((w) => w is ColoredBox && w.color == expected),
       findsOneWidget,
@@ -211,10 +246,15 @@ void main() {
         ),
       ),
     );
-    // 85% 调色层 = solidFor(dark) #202020 at 85%
+    // 85% 调色层 = 该风格色板的 surfaceSolid at 85%（2026-10-16 起按风格取，
+    // 不再恒用 frosted 的 #202020）
     expect(
       find.byWidgetPredicate(
-        (w) => w is ColoredBox && w.color == const Color(0xFF202020).withValues(alpha: 0.85),
+        (w) =>
+            w is ColoredBox &&
+            w.color ==
+                StyleColors.frostedDark.colors.surfaceSolid
+                    .withValues(alpha: 0.85),
       ),
       findsOneWidget,
       reason: 'Mica 没生效时这层保证界面可见（黑窗 bug 的守门判据）',
