@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/l10n.dart';
+import '../theme/app_scroll_behavior.dart';
 import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 import 'app_card.dart';
@@ -94,8 +95,19 @@ class SidebarNav extends StatelessWidget {
 
             // 导航区。展开后条目可能超出高度，所以这里可滚动。
             Expanded(
+              // **滚动条隐藏**（预览稿 `app.css:59`
+              // `.side::-webkit-scrollbar { width: 0; }`）。
+              //
+              // 全局的 `AppScrollBehavior` 会给桌面端每个滚动容器挂一条
+              // `Scrollbar`；侧边栏这一档预览稿明确要求宽度 0，所以就地覆盖
+              // `buildScrollbar` 返回原 child。比 `Scrollbar(thickness: 0)`
+              // 可靠 —— 后者仍插入一层 `RawScrollbar`，需要 controller
+              // （本组件是 StatelessWidget），且厚度 0 未必真的不画。
+              //
               // 左侧留 12px：容纳浮在行外左侧的激活指示点
-              child: SingleChildScrollView(
+              child: ScrollConfiguration(
+                behavior: const NoScrollbarBehavior(),
+                child: SingleChildScrollView(
                 child: Padding(
                   padding: const EdgeInsets.only(left: 12),
                   child: Column(
@@ -148,6 +160,7 @@ class SidebarNav extends StatelessWidget {
                     ],
                   ),
                 ),
+              ),
               ),
             ),
           ],

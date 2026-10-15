@@ -29,6 +29,7 @@ import 'services/douyin_store.dart';
 import 'services/homepage_store.dart';
 import 'services/settings_store.dart';
 import 'services/window_effect.dart';
+import 'theme/app_scroll_behavior.dart';
 import 'theme/app_style.dart';
 import 'theme/app_theme.dart';
 import 'theme/window_material.dart';
@@ -180,19 +181,31 @@ class XDownloaderApp extends StatelessWidget {
             // 界面风格：与 navLayout / locale 同一套做法 —— 从设置读，
             // 切换后整个子树重建，卡片材质立刻跟着变。
             style: appearance.visualStyle,
-            child: MaterialApp(
-              title: t('解析下载器'),
-              debugShowCheckedModeBanner: false,
-              locale: locale,
-              // 只声明这两档：系统语言是第三种时，Flutter 落到列表第一项（中文）。
-              supportedLocales: const [Locale('zh'), Locale('en')],
-              localizationsDelegates: const [
-                GlobalMaterialLocalizations.delegate,
-                GlobalWidgetsLocalizations.delegate,
-                GlobalCupertinoLocalizations.delegate,
-              ],
-              theme: _buildMaterialTheme(brightness, appearance.visualStyle),
-              home: _AppShell(brightness: brightness),
+            // 滚动条视觉参数挂在 `MaterialApp` **外层**：`ScrollbarTheme` 是
+            // InheritedWidget，要包住整棵树才生效（放里面的话，它自己的
+            // MaterialApp 内层还会再插一层默认值）。
+            child: AppScrollbarTheme(
+              child: MaterialApp(
+                title: t('解析下载器'),
+                debugShowCheckedModeBanner: false,
+                // 滚动条「挂不挂」由 behavior 决定，「长什么样」由上面那层
+                // `ScrollbarTheme` 决定（`MaterialScrollBehavior` 没有
+                // `scrollbarTheme` 可覆写，SDK 只给到 `buildScrollbar`）。
+                //
+                // 不挂的话桌面端每个滚动容器都带一条系统默认样式的竖线 ——
+                // 2026-10-15 真机上被指出「怎么有一个滑动的东西」。
+                scrollBehavior: const AppScrollBehavior(),
+                locale: locale,
+                // 只声明这两档：系统语言是第三种时，Flutter 落到列表第一项（中文）。
+                supportedLocales: const [Locale('zh'), Locale('en')],
+                localizationsDelegates: const [
+                  GlobalMaterialLocalizations.delegate,
+                  GlobalWidgetsLocalizations.delegate,
+                  GlobalCupertinoLocalizations.delegate,
+                ],
+                theme: _buildMaterialTheme(brightness, appearance.visualStyle),
+                home: _AppShell(brightness: brightness),
+              ),
             ),
           );
         },
