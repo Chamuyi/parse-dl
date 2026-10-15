@@ -5,6 +5,25 @@ import 'package:flutter_acrylic/flutter_acrylic.dart' as acrylic;
 
 import '../theme/window_material.dart';
 
+/// 材质 → 原生窗口效果的映射。
+///
+/// **抽成公开纯函数是为了能测**：`applyWindowMaterial` 要走原生通道，
+/// widget 测试里跑不了；而「哪种材质落到哪个效果」是纯查表，单独测它
+/// 就能把映射钉住（`test/window_effect_test.dart`）。
+///
+/// 2026-10-15 加这条判据的原因：`dark` 参数曾被写成按材质猜
+/// （`material == mica || material == micaAlt`），浅色+Mica 与深色+亚克力
+/// 两种组合都传反 —— 而这件事**零测试覆盖**，所以错了很久没人发现。
+acrylic.WindowEffect windowEffectOf(WindowMaterial material) =>
+    switch (material) {
+      WindowMaterial.mica => acrylic.WindowEffect.mica,
+      WindowMaterial.micaAlt => acrylic.WindowEffect.tabbed,
+      WindowMaterial.acrylic => acrylic.WindowEffect.acrylic,
+      // 见类文档：库没有独立的「细亚克力」效果，只能落到 acrylic。
+      WindowMaterial.acrylicThin => acrylic.WindowEffect.acrylic,
+      WindowMaterial.none => acrylic.WindowEffect.disabled,
+    };
+
 /// 把设置里的材质应用到原生窗口。
 ///
 /// 说明：Windows 有一个**全局**的「透明效果」开关
@@ -43,14 +62,7 @@ Future<MaterialApplyResult> applyWindowMaterial(
     );
   }
 
-  final effect = switch (material) {
-    WindowMaterial.mica => acrylic.WindowEffect.mica,
-    WindowMaterial.micaAlt => acrylic.WindowEffect.tabbed,
-    WindowMaterial.acrylic => acrylic.WindowEffect.acrylic,
-    // 见类文档：库没有独立的「细亚克力」效果，只能落到 acrylic。
-    WindowMaterial.acrylicThin => acrylic.WindowEffect.acrylic,
-    WindowMaterial.none => acrylic.WindowEffect.disabled,
-  };
+  final effect = windowEffectOf(material);
 
   try {
     await acrylic.Window.setEffect(effect: effect, dark: dark);
