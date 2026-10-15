@@ -37,6 +37,17 @@ class AriaTask {
   final String dir;
   final String error;
 
+  /// aria2 实测的当前下载速度，**字节/秒**（不是 KB/s）。
+  ///
+  /// `tellStatus` 的响应里本来带这个字段（2026-10-15 用真机 RPC 取样确认：
+  /// `"downloadSpeed":"384410"`，与 `max-download-limit=400K` 对得上），
+  /// 本项目此前没有解析它。与 [DownloadTask.speedLimitKbps] **不是一回事**：
+  /// 那个是「用户设的上限」，这个是「此刻实际跑多少」。
+  ///
+  /// 型是可空的：`aria2.pause` 之后仍然回 `"0"`，而某些 RPC 实现（以及
+  /// 单元测试里的假传输层）压根不带这个字段。
+  final int? speedBytesPerSec;
+
   AriaTask({
     required this.gid,
     required this.status,
@@ -45,6 +56,7 @@ class AriaTask {
     required this.fileName,
     required this.dir,
     required this.error,
+    this.speedBytesPerSec,
   });
 
   factory AriaTask.fromJson(Map<String, dynamic> j) {
@@ -60,6 +72,9 @@ class AriaTask {
       fileName: firstPath.split(RegExp(r'[\\/]')).last,
       dir: j['dir'] as String? ?? '',
       error: j['errorMessage'] as String? ?? '',
+      // 字段缺失时 tryParse('null') 回 null —— 正好表达「这个源不给速度」，
+      // 与「aria2 说现在就是 0」区分开。
+      speedBytesPerSec: int.tryParse('${j['downloadSpeed']}'),
     );
   }
 }

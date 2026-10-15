@@ -1854,6 +1854,10 @@ class Aria2Coordinator {
             : 0;
         store.updateProgress(gid, progress.clamp(0, 1000), task.totalSize,
             downloaded: task.completeSize);
+        // 实时速度走 aria2 的 `downloadSpeed`（字节/秒），**不在这里用两次
+        // 进度采样现场估算**：估算值在切源重投、暂停恢复、连接刚建立时都会
+        // 给出没有意义的数，而引擎本来就是逐帧算好这个值的。
+        store.updateSpeed(gid, task.speedBytesPerSec);
       });
     } catch (e) {
       // 单次失败忽略，下次再试

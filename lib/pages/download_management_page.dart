@@ -559,47 +559,57 @@ class _TabBody extends StatelessWidget {
       separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, i) {
         final t = tasks[i];
-        return DownloadListItem(
-          task: t,
-          onPause: () async {
-            final why = await coordinator.pause(t.localId);
-            if (why == null || !context.mounted) return;
-            AppToast.show(context, why, kind: AppToastKind.error);
-          },
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DownloadListItem(
+              task: t,
+              onPause: () async {
+                final why = await coordinator.pause(t.localId);
+                if (why == null || !context.mounted) return;
+                AppToast.show(context, why, kind: AppToastKind.error);
+              },
           onResume: () => coordinator.resume(t.localId),
-          onRetry: () async {
-            // 以前整个 EnqueueResult 被丢掉：aria2 未就绪时 retryTask 返回
-            // notReady，什么都不发生，任务原地不动 —— 看起来就是按钮坏了。
-            //
-            // 旧任务没能从引擎里移掉时（removeFailed）引擎原文在 `message` 里，
-            // 优先按它提示：只给一句「重试失败」等于没说。
-            final r = await coordinator.retryTask(t.localId);
-            if (!context.mounted) return;
-            if (r.outcome == EnqueueOutcome.queued) return;
-            AppToast.show(
-              context,
-              r.message ?? _retryOutcomeText(r.outcome),
-              kind: r.outcome == EnqueueOutcome.skippedExisting
-                  ? AppToastKind.info
-                  : AppToastKind.error,
-            );
-          },
-          onRemove: () async {
-            final r = await coordinator.remove(t.localId);
-            if (!context.mounted) return;
-            switch (r.outcome) {
-              case RemoveOutcome.failed:
-                // 引擎那边没谈拢：行留在列表里，让用户看得见、重试得到
-                AppToast.show(context, r.message!, kind: AppToastKind.error);
-              case RemoveOutcome.alreadyGone:
-                // 引擎里本来就没有它了 —— 行已删，说一句就够，不该是红色错误
-                AppToast.show(context, _alreadyGoneText(),
-                    kind: AppToastKind.info);
-              case RemoveOutcome.removed:
-                break;
-            }
-          },
-          onOpenFolder: () => _openFolder(context, t.saveDir),
+              onRetry: () async {
+                // 以前整个 EnqueueResult 被丢掉：aria2 未就绪时 retryTask 返回
+                // notReady，什么都不发生，任务原地不动 —— 看起来就是按钮坏了。
+                //
+                // 旧任务没能从引擎里移掉时（removeFailed）引擎原文在 `message` 里，
+                // 优先按它提示：只给一句「重试失败」等于没说。
+                final r = await coordinator.retryTask(t.localId);
+                if (!context.mounted) return;
+                if (r.outcome == EnqueueOutcome.queued) return;
+                AppToast.show(
+                  context,
+                  r.message ?? _retryOutcomeText(r.outcome),
+                  kind: r.outcome == EnqueueOutcome.skippedExisting
+                      ? AppToastKind.info
+                      : AppToastKind.error,
+                );
+              },
+              onRemove: () async {
+                final r = await coordinator.remove(t.localId);
+                if (!context.mounted) return;
+                switch (r.outcome) {
+                  case RemoveOutcome.failed:
+                    // 引擎那边没谈拢：行留在列表里，让用户看得见、重试得到
+                    AppToast.show(context, r.message!,
+                        kind: AppToastKind.error);
+                  case RemoveOutcome.alreadyGone:
+                    // 引擎里本来就没有它了 —— 行已删，说一句就够，不该是红色错误
+                    AppToast.show(context, _alreadyGoneText(),
+                        kind: AppToastKind.info);
+                  case RemoveOutcome.removed:
+                    break;
+                }
+              },
+              onOpenFolder: () => _openFolder(context, t.saveDir),
+            ),
+            // 实时速度贴在列表行下方（**不在 DownloadListItem 里面**：
+            // 那个组件在 lib/widgets/ 下，是这批改动之外的文件）。
+            DownloadSpeedRow(task: t),
+          ],
         );
       },
     );
@@ -1012,3 +1022,62 @@ class _DouyinHistoryBody extends StatelessWidget {
 
 // 「列表为空」的提示类视图已经搬到 `widgets/download_history_section.dart`
 // （`DownloadEmptyHint`）：B 站的历史分区要用同一份视觉规格，而私有类跨不了库。
+
+/// 列表行下方的**实时速度**那一小条（用户 2026-10-15 反馈：
+/// 「在下载管理里面加实时下载速度」）。
+///
+/// ## 为什么不写在 `DownloadListItem` 里面
+///
+/// 那个组件在 `lib/widgets/` 下、被别处复用；这一条是**下载管理页**独有的
+/// 呈现。两者边界不同，不该为了少一层 widget 混在一起。
+///
+/// ## 为什么只有 aria2 正在跑时才画
+///
+/// [DownloadTask.speedReadable] 在「没有速度」时返回**空串**，这里据此整条
+/// 不渲染。这不只是省一行文案：速度是「这一秒实际跑了多少」的一帧快照，
+/// 不是这一行的属性。暂停 / 已完成 / 失败的行上，任何数字都是**过期假数据**
+/// —— 用户会在「已完成 5 分钟」的行上看到一个上周的 `1.2 MB/s`。
+/// 数据侧还有两道保险：终态入口清空该字段、且它不写进任务表（见
+/// `download_store.dart` 的 `_clearSpeed` 与 `_taskToJson`）。
+///
+/// ## 文案不过 `t()`
+///
+/// 它是测量值（数字 + `B/KB/MB/GB` + `/s` 单位），本来就是中英通用的写法；
+/// 可译的句子都在调用方那一层（项目约定：组件内部不翻译）。
+///
+/// **单独成公开部件**而不是页面内的私有闭包：整页 `pumpWidget` 会牵进
+/// `Aria2Coordinator.instance` 的 `Timer.periodic` 与 `AppState.restore()` 的
+/// 真实 I/O，在 widget 测试的假时钟下**永不落地**（实测挂死 10 分钟）。
+/// 抽出来之后，速度这条判据可以单独渲染它来钉，不必把整页拖进测试。
+class DownloadSpeedRow extends StatelessWidget {
+  final DownloadTask task;
+
+  const DownloadSpeedRow({super.key, required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = task.speedReadable;
+    // 空串 = 此刻没有速度 = 整条不画。
+    if (s.isEmpty) return const SizedBox.shrink();
+
+    final c = AppTheme.colorsOf(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, left: 12, right: 4),
+      child: Row(
+        children: [
+          Icon(Icons.speed_rounded, size: 13, color: c.textMuted),
+          const SizedBox(width: 5),
+          Text(
+            s,
+            style: TextStyle(
+              fontSize: 12,
+              color: c.textMuted,
+              // 等宽数字：速度每秒都在变，不定宽会让整行左右抖动。
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

@@ -74,6 +74,18 @@ class DownloadTask {
   /// 没法归因的现象。
   final int? speedLimitKbps;
 
+  /// aria2 实测的**当前下载速度**（字节/秒），null = 此刻没有在跑。
+  ///
+  /// 与 [speedLimitKbps] 刻意分成两个字段，语义不同、不能混用：
+  ///   - `speedLimitKbps` 是**用户设的上限**（KB/s，`null` = 不限速），
+  ///     是配置，持久化到任务表，换源重投时还要带回去；
+  ///   - 本字段是**这一秒实际跑了多少**，只由 `Aria2Coordinator._pollActive`
+  ///     每轮轮询写入，**不进 [DownloadTask.toJson]**（见那里的说明）。
+  ///
+  /// 界面只对 `active` / `waiting` 渲染它；终态（已完成 / 失败 / 暂停）的
+  /// 行上它必须是 `null`，否则用户会看到一个「挂着上次会话旧速度」的假数字。
+  int? speedBytesPerSec;
+
   /// 完成之后要补给用户看的一句说明（**不是错误**，状态仍是已完成）。
   ///
   /// 这一期唯一的使用者是 B 站的附加文件：主产物完好、但用户勾的某样没拿到。
@@ -95,6 +107,7 @@ class DownloadTask {
     this.retryRemains = 0,
     this.attempt = 0,
     this.speedLimitKbps,
+    this.speedBytesPerSec,
     this.note,
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
@@ -112,6 +125,16 @@ class DownloadTask {
 
   /// 总字节数。
   String get totalReadable => _humanBytes(totalBytes ?? 0);
+
+  /// 实时速度（人类可读，如 `1.2 MB/s`）；**不在下载时返回空串**。
+  ///
+  /// 界面据此决定要不要画这一格 —— 空串即「这一行不该出现速度」。
+  /// 人类可读化沿用 [_humanBytes] 的分档与舍入，只是单位换成 `/s`。
+  String get speedReadable {
+    final b = speedBytesPerSec;
+    if (b == null || b <= 0) return '';
+    return '${_humanBytes(b)}/s';
+  }
 
   /// 下载进度（百分比，0~100）。
   double get progressPercent => progress / 10.0;
@@ -254,6 +277,13 @@ class DownloadStore extends ChangeNotifier {
         if (t.errorMessage != null) 'errorMessage': t.errorMessage,
         'retryRemains': t.retryRemains,
         'attempt': t.attempt,
+        // 实时速度**刻意不写进任务表**。理由有两条：
+        //   1. 它是「这一秒实际跑了多少」的一帧快照，写进去等于把一个随时
+        //      失效的数字固化下来 —— 重启后一条「已完成」任务上会挂着上次
+        //      会话最后那一轮的速度，用户看到的就是假数据；
+        //   2. `updateSpeed` 每秒被轮询调一次，跟着 `_changed()` 落盘会让
+        //      下载期间白白写盘（[updateProgress] 同理，也不落盘）。
+        // 语义上它由「当前是否在下载」决定，而那个状态已经由 'status' 承载。
         if (t.speedLimitKbps != null) 'speedLimitKbps': t.speedLimitKbps,
         if (t.note != null) 'note': t.note,
         'createdAt': t.createdAt.toIso8601String(),
@@ -379,6 +409,10 @@ class DownloadStore extends ChangeNotifier {
       retryRemains: t.retryRemains,
       attempt: t.attempt,
       speedLimitKbps: t.speedLimitKbps,
+      // **必须带上实时速度**：本方法整体重建 DownloadTask，漏掉它会让
+      // 「改个备注 → 速度显示消失」这种静默抖动。本类重建共两处
+      // （`markNote` / `markActive`），加新可变字段时两处都要带。
+      speedBytesPerSec: t.speedBytesPerSec,
       note: note,
       createdAt: t.createdAt,
     );
@@ -401,6 +435,8 @@ class DownloadStore extends ChangeNotifier {
       retryRemains: t.retryRemains,
       attempt: t.attempt,
       speedLimitKbps: t.speedLimitKbps,
+      // 同上：整体重建时不能丢实时速度（换源重投、恢复下载都走这里）。
+      speedBytesPerSec: t.speedBytesPerSec,
       note: t.note,
       createdAt: t.createdAt,
     );
@@ -422,12 +458,39 @@ class DownloadStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 写入 aria2 实测的当前速度（字节/秒）—— 只由进度轮询调用。
+  ///
+  /// 与 [updateProgress] 分开而不是塞进它的参数：`reconcile()` 那种只补进度
+  /// 的场景不该顺手动速度（那一轮拿到的是对账快照，不是实时速率）。
+  /// [speedBytesPerSec] 传 `null` 即清空（aria2 说「现在没有速率」时）。
+  void updateSpeed(String gid, int? bytesPerSec) {
+    final t = _findByGid(gid);
+    if (t == null) return;
+    if (t.speedBytesPerSec == bytesPerSec) return;
+    t.speedBytesPerSec = bytesPerSec;
+    notifyListeners();
+  }
+
+  /// 离开下载态时清掉实时速度。
+  ///
+  /// 速度是「此刻实际跑多少」的一帧快照，不是这一行的属性。完成 / 失败 /
+  /// 暂停之后它就不再描述任何正在发生的事，留着就是一个**过期假数据**：
+  /// 用户会在「已完成 5 分钟」的行上看到一个上周的 `1.2 MB/s`。
+  ///
+  /// 因此每个「翻出下载态」的入口都调它一遍（幂等，null 就不动）。
+  /// 与本字段不进 `toJson` 的双保险见 [_taskToJson]。
+  void _clearSpeed(DownloadTask t) {
+    if (t.speedBytesPerSec == null) return;
+    t.speedBytesPerSec = null;
+  }
+
   /// 标记完成。
   void markComplete(String gid) {
     final t = _findByGid(gid);
     if (t == null) return;
     t.status = DownloadStatus.complete;
     t.progress = 1000;
+    _clearSpeed(t);
     _changed();
   }
 
@@ -442,6 +505,7 @@ class DownloadStore extends ChangeNotifier {
     if (t == null) return;
     t.status = DownloadStatus.error;
     t.errorMessage = message;
+    _clearSpeed(t);
     _changed();
   }
 
@@ -454,6 +518,7 @@ class DownloadStore extends ChangeNotifier {
     if (t == null) return;
     t.status = DownloadStatus.error;
     t.errorMessage = message;
+    _clearSpeed(t);
     _changed();
   }
 
@@ -469,6 +534,7 @@ class DownloadStore extends ChangeNotifier {
     t.progress = 1000;
     t.errorMessage = null;
     if (totalBytes != null) t.totalBytes = totalBytes;
+    _clearSpeed(t);
     _changed();
   }
 
@@ -477,6 +543,7 @@ class DownloadStore extends ChangeNotifier {
     final t = _tasks[localId];
     if (t == null) return;
     t.status = DownloadStatus.paused;
+    _clearSpeed(t);
     _changed();
   }
 
@@ -517,6 +584,8 @@ class DownloadStore extends ChangeNotifier {
       retryRemains: t.retryRemains,
       attempt: t.attempt,
       speedLimitKbps: t.speedLimitKbps,
+      // 同上：整体重建时不能丢实时速度（下载中改文件名也会走到这里）。
+      speedBytesPerSec: t.speedBytesPerSec,
       note: t.note,
       createdAt: t.createdAt,
     );
@@ -589,6 +658,7 @@ class DownloadStore extends ChangeNotifier {
     final t = _tasks[localId];
     if (t == null) return;
     t.status = DownloadStatus.paused;
+    _clearSpeed(t);
     _changed();
   }
 
