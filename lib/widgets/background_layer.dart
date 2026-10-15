@@ -51,7 +51,10 @@ class BackgroundLayer extends StatelessWidget {
         //    纯色材质 / 自定义色调是实色 ColoredBox；Mica 路径是
         //    风格背景（光晕 + 线性渐变）+ 半透明调色层。
         if (tint == null)
-          _StyleBackdropWash(backdrop: StyleBackdrop.of(_styleOf(context), brightness))
+          _StyleBackdropWash(
+            backdrop: StyleBackdrop.of(_styleOf(context), brightness),
+            material: appearance.windowMaterial,
+          )
         else
           ColoredBox(color: tint),
 
@@ -96,15 +99,23 @@ class BackgroundLayer extends StatelessWidget {
   }
 }
 
-/// 按风格令牌绘制窗口底：风格渐变打底 + 85% 主题调色层（保 Mica 语义）。
+/// 按风格令牌绘制窗口底：风格渐变打底 + 85% 主题调色层（保 Mica 语义）
+/// + 材质特征层。
 ///
-/// 调色层沿用改造前同一条取值：`solidFor(brightness).withValues(alpha: 0.85)`
-/// —— Mica 生效时透出 15% 窗口材质，Mica 没生效时这层保证界面可见、
-/// 风格渐变仍隐约透出（三套渐变端点差都在 #10 以上，15% 透光率下可辨）。
+/// 调色层沿用改造前同一条取值：`solidFor(brightness, style).withValues(alpha: 0.85)`
+/// —— 它是**文字对比度的地板**（页面标题直接压在窗口背景上，没有卡片托底），
+/// alpha 一松弱档文字就跌破 4.5，所以材质只能往它**上面**叠，不能往下调。
 class _StyleBackdropWash extends StatelessWidget {
   final StyleBackdrop backdrop;
 
-  const _StyleBackdropWash({required this.backdrop});
+  /// 用户选的窗口材质。**2026-10-16 起真正参与绘制**。
+  ///
+  /// 此前它只影响设置页那张缩略图，实际渲染完全不看它 —— 于是 mica /
+  /// mica-alt / acrylic / acrylic-thin 四种材质渲染出来**逐像素完全相同**
+  /// （实测平均差 0.00 × 4 组），「窗口材质」这个设置项等于摆设。
+  final WindowMaterial material;
+
+  const _StyleBackdropWash({required this.backdrop, required this.material});
 
   @override
   Widget build(BuildContext context) {
@@ -116,27 +127,67 @@ class _StyleBackdropWash extends StatelessWidget {
     final wash = AppColors.solidFor(brightness, style: theme.style)
         .withValues(alpha: 0.85);
 
+    // 材质越"透"，风格背景画得越淡 —— [WindowMaterial.seeThrough] 的语义
+    // 就是「薄片透出多少桌面壁纸」，把它接进来才让材质选择有实际后果。
+    final veil = (1 - material.seeThrough).clamp(0.0, 1.0);
+
     return Stack(
       fit: StackFit.expand,
       children: [
         // 风格背景：线性渐变打底 + 光晕（永远有这一层）
-        CustomPaint(painter: _BackdropPainter(backdrop: backdrop)),
+        CustomPaint(
+          painter: _BackdropPainter(backdrop: backdrop, veil: veil),
+        ),
 
-        // 半透明主题调色层（85%，与改造前 Mica 路径同色同 alpha）
+        // 半透明主题调色层（85%）
         ColoredBox(color: wash),
+
+        // 材质底（+ Mica Alt 分层 + 亚克力磨砂颗粒）—— 必须画在调色层之
+        // 上，否则整片被 85% 的调色层盖掉（实测差 0.037，肉眼不可见）。
+        CustomPaint(
+          painter: _MaterialSheetPainter(
+            material: material,
+            brightness: brightness,
+          ),
+        ),
       ],
     );
   }
+}
+
+/// 背景底绘制器的公开标记 —— 让测试用公开类型定位图层，不必依赖私有类名
+/// 或 `toString()` 覆写。
+///
+/// **2026-10-16 的教训**：此前 `style_backdrop_test.dart` 靠
+/// `painter.toString()` 拼出的 widget 树描述串做「五种材质渲染出不同结果」的
+/// 判据，而 `_BackdropPainter.toString()` 恰好把材质参数写进了串里 ——
+/// 于是「材质参数不同 ⇒ 字符串不同 ⇒ 判据必绿」，与真实渲染无关。同一条
+/// 判据在真机实测四档材质**逐像素平均差 0.000** 时照样全绿。
+/// 现在判据改成直接量渲染像素，这里只留一个稳定的定位锚。
+abstract class BackdropPainter extends CustomPainter {
+  const BackdropPainter(this.kind);
+
+  /// `'style'` = 风格渐变打底；`'material'` = 材质特征（分层 / 磨砂颗粒）。
+  final String kind;
 }
 
 /// 按 [StyleBackdrop] 画线性渐变 + radial 光晕。
 ///
 /// CSS 多重背景**第一层画在最上面**：`glows[0]` 是 CSS 第一条 radial，
 /// 所以光晕按列表**倒序**画（最后画 glows[0]，让它盖在其它光晕上面）。
-class _BackdropPainter extends CustomPainter {
+class _BackdropPainter extends BackdropPainter {
   final StyleBackdrop backdrop;
 
-  _BackdropPainter({required this.backdrop});
+  /// 整体不透明度（由窗口材质决定，见 `_StyleBackdropWash`）。
+  final double veil;
+
+  _BackdropPainter({
+    required this.backdrop,
+    this.veil = 1.0,
+  }) : super('style');
+
+  /// 按 [veil] 缩放一个颜色的 alpha。
+  Color _v(Color c) => c.withValues(alpha: c.a * veil);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -150,7 +201,7 @@ class _BackdropPainter extends CustomPainter {
         ..shader = LinearGradient(
           begin: linear.begin,
           end: linear.end,
-          colors: linear.stops,
+          colors: [for (final s in linear.stops) _v(s)],
           stops: linear.evenlySpaced,
         ).createShader(rect),
     );
@@ -169,7 +220,10 @@ class _BackdropPainter extends CustomPainter {
         radius,
         Paint()
           ..shader = RadialGradient(
-            colors: [glow.color, glow.color.withValues(alpha: 0.0)],
+            colors: [
+              _v(glow.color),
+              _v(glow.color).withValues(alpha: 0.0),
+            ],
           ).createShader(Rect.fromCircle(center: center, radius: radius)),
       );
     }
@@ -177,15 +231,109 @@ class _BackdropPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_BackdropPainter oldDelegate) =>
-      oldDelegate.backdrop != backdrop;
-
-  // 测试的负控制用「painter 的确定性指纹」判断背景是否真的随风格变化：
-  // 不覆写的话 Object.toString 带 identityHash，三套永远不同，那条判据会恒真。
-  @override
-  String toString() =>
-      '_BackdropPainter(glowCount: ${backdrop.glowCount}, '
-      'linear: ${backdrop.linear.stops}, begin: ${backdrop.linear.begin})';
+      oldDelegate.backdrop != backdrop || oldDelegate.veil != veil;
 }
+
+/// 材质底（+ Mica Alt 分层 + 亚克力磨砂颗粒）—— 五种窗口材质在真机上
+/// **唯一看得见身份的地方**。
+///
+/// ### 为什么必须画在调色层之上，且必须够实
+///
+/// 层序是「风格渐变 → 85% 主题调色层 → **本层**」。调色层那 0.85 是
+/// **文字对比度的地板**（页面标题直接压在窗口底上、没有卡片托底），
+/// 不许下调、也不许移除，所以材质只能往它**上面**叠。
+///
+/// alpha 取 [_kSheetAlpha] 而不是「极低」是有实测依据的：WinUI 官方材质底
+/// 五档只差 4~5 个灰阶（深色 `#0A0A0A`(10) ↔ `#202020`(32)），任何低 alpha
+/// 的叠加都会把四档压回同一片像素（0.000 那次实测就是这么来的）。
+/// 「材质身份要体现在窗口底色上」这个要求，和「叠一层极淡的特征」是互斥的。
+///
+/// 代价：窗口底的风格渐变只剩 `1 - _kSheetAlpha`；三套风格的区分主要落在
+/// 卡片与控件上（`AppSurface` / `StyleColors`），窗口底只保住底色差。
+class _MaterialSheetPainter extends BackdropPainter {
+  final WindowMaterial material;
+  final Brightness brightness;
+
+  const _MaterialSheetPainter({
+    required this.material,
+    required this.brightness,
+  }) : super('material');
+
+  /// 分层接缝的位置（命令区与内容区的分界，窗口高度的 42%）。
+  static const double _seamAt = 0.42;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final dark = brightness == Brightness.dark;
+    final sheet = material.previewFor(brightness);
+
+    // ① 材质底：整窗一层 [WindowMaterial.previewFor] 的 WinUI 材质底色。
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..color = sheet.withValues(alpha: _kSheetAlpha),
+    );
+
+    if (material.layered) {
+      // ② Mica Alt 的上下分层：上半区（命令区）比下半区更暗 —— 这是它相对
+      //    Mica 的身份特征，也是五种材质里唯一「一眼可辨」的一个。
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, size.width, size.height * _seamAt),
+        Paint()..color = Colors.black.withValues(alpha: dark ? 0.20 : 0.10),
+      );
+      // 分界处一道 2px 的缝，让分层有个明确的边。
+      canvas.drawRect(
+        Rect.fromLTWH(0, size.height * _seamAt, size.width, 2),
+        Paint()
+          ..color =
+              (dark ? Colors.white : Colors.black).withValues(alpha: 0.22),
+      );
+    }
+
+    if (material.grain > 0) _paintGrain(canvas, size, dark);
+  }
+
+  /// 磨砂颗粒。固定伪随机数，保证同尺寸下点阵每次完全一样。
+  ///
+  /// 颗粒色必须与窗口底**对立**才看得见：深色主题撒亮颗粒、浅色主题撒暗颗粒。
+  /// 浓淡用 `0.30 × grain` 而不是「越薄越淡」的线性关系 —— 亚克力那一档的
+  /// 颗粒在真机上是它区别于 Mica 的主要证据，实测证明淡了就不够。
+  void _paintGrain(Canvas canvas, Size size, bool dark) {
+    final grain = material.grain;
+    final paint = Paint()
+      ..color = (dark ? Colors.white : Colors.black)
+          .withValues(alpha: 0.30 * grain);
+    var seed = 20261016;
+    int next() {
+      seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
+      return seed;
+    }
+
+    // 与设置页缩略图的 `_FrostPainter` 同一套密度 / 半径公式，
+    // 让「缩略图里看到的颗粒」和「真机上看到的颗粒」是同一件事。
+    final count = (size.width * size.height / 11 * grain).round();
+    for (var i = 0; i < count; i++) {
+      canvas.drawCircle(
+        Offset(
+          (next() % 1000) / 1000 * size.width,
+          (next() % 1000) / 1000 * size.height,
+        ),
+        0.6,
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_MaterialSheetPainter oldDelegate) =>
+      oldDelegate.material != material || oldDelegate.brightness != brightness;
+}
+
+/// 材质底压在窗口底上的不透明度。
+///
+/// 定标（`style_backdrop_test.dart` 的「五种窗口材质的窗口底两两可测地不同」
+/// 把 10 对差都钉在 ≥ `_kMinDelta`）：0.86 时最小一对（纯色↔细亚克力）
+/// 落 10.4 分；再低到 0.7 就掉到 8 分以下守不住真机阈值。
+const double _kSheetAlpha = 0.86;
 
 /// 背景图。用 Image.file 直接读本地文件。
 class _BackgroundImage extends StatelessWidget {
