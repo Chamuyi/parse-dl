@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parse_dl/theme/app_scroll_behavior.dart';
-import 'package:parse_dl/theme/app_theme.dart';
 
 /// 滚动条外观的判据（2026-10-15）。
 ///
@@ -101,46 +100,159 @@ void main() {
       );
     });
 
-    testWidgets('AppScrollbarTheme 下发的样式是预览稿那一档（8px / 圆角 / 不常驻）',
+    testWidgets('AppScrollBehavior 不创建任何 Scrollbar（用户裁定彻底隐藏）',
         (tester) async {
+      // **不能用 `find.byType(Scrollbar)` 测**：`MaterialScrollBehavior` 是否
+      // 挂滚动条取决于 `Theme.of(context).platform`，而 widget 测试的默认
+      // 平台不是 Windows —— 实测「正控制」也找不到 Scrollbar，那条路是死的。
+      // 所以直接调 `buildScrollbar` 看它返回什么（这才是真正的被测逻辑）。
+      //
+      // 2026-10-15 用户裁定「彻底隐藏」后，这条判据从「样式是预览稿那一档」
+      // 反转为「根本不创建 Scrollbar」：`2fae366` 那版只把系统默认样式换成
+      // 8px/圆角 + 空闲隐藏，但滚动时淡入的那条仍会被截图留下，用户原话
+      // 「右边滚动条还在，并且三个模块的设置还有全局设置都是在」。
+      late final Widget result;
       await tester.pumpWidget(
-        AppTheme(
-          colors: AppColors.dark,
-          brightness: Brightness.dark,
-          child: AppScrollbarTheme(
-            child: MaterialApp(
-              home: Scaffold(
-                body: Builder(
-                  builder: (context) {
-                    final t = ScrollbarTheme.of(context);
-                    // 逐项点名（不写 `isNotNull` 这种恒真断言）
-                    expect(t.thickness?.resolve({}), 8,
-                        reason: '预览稿 `.card > .cb` 的 width 是 8px');
-                    expect(t.radius, const Radius.circular(4),
-                        reason: '8px 宽配 4 圆角 = CSS 的 999px 全圆');
-                    expect(t.thumbVisibility?.resolve({}), isFalse,
-                        reason: '平时不常驻，滚动/悬停才淡入');
-                    expect(t.trackVisibility?.resolve({}), isFalse,
-                        reason: '预览稿只定义了 thumb，没给 track 背景');
-                    return const SizedBox.shrink();
-                  },
-                ),
-              ),
+        MaterialApp(
+          theme: ThemeData(platform: TargetPlatform.windows),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) {
+                final scrollable = ScrollableDetails.vertical(
+                  controller: ScrollController(),
+                );
+                result = const AppScrollBehavior()
+                    .buildScrollbar(context, const Text('内容'), scrollable);
+                return result;
+              },
             ),
           ),
         ),
       );
       await tester.pump();
+
+      expect(
+        result,
+        isNot(isA<Scrollbar>()),
+        reason: '任何轴向/平台下都不该创建滚动条（用户要求彻底隐藏）',
+      );
+      expect(result, isA<Text>(), reason: '应当原样返回 child');
+
+      // 横向也不能漏：原来只对纵向挂 Scrollbar、横向直接返回 child，
+      // 反转后两条路都必须是「原样返回」。
+      late final Widget hResult;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(platform: TargetPlatform.windows),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) {
+                final scrollable = ScrollableDetails.horizontal(
+                  controller: ScrollController(),
+                );
+                hResult = const AppScrollBehavior()
+                    .buildScrollbar(context, const Text('内容'), scrollable);
+                return hResult;
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(
+        hResult,
+        isNot(isA<Scrollbar>()),
+        reason: '横向同样不该创建滚动条',
+      );
+      expect(hResult, isA<Text>(), reason: '横向也应原样返回 child');
+
+      // 正控制：**默认 behavior 在 Windows 下确实会返回 Scrollbar** ——
+      // 否则上面两条「不是 Scrollbar」可能只是平台分支没走到（假绿）。
+      late final Widget def;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(platform: TargetPlatform.windows),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) {
+                final scrollable = ScrollableDetails.vertical(
+                  controller: ScrollController(),
+                );
+                def = const MaterialScrollBehavior()
+                    .buildScrollbar(context, const Text('内容'), scrollable);
+                return def;
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(
+        def,
+        isA<Scrollbar>(),
+        reason: '正控制失败：Windows 平台下默认 behavior 应当挂 Scrollbar，'
+            '否则上面的负判据是假绿',
+      );
     });
   });
 
-  group('源码守卫：接线没被摘掉', () {
-    test('app.dart 挂了 scrollBehavior 与 AppScrollbarTheme', () {
+  /// 剥掉 Dart 源码里的注释，只留**真代码**。
+///
+/// 为什么必须有这一步（2026-10-15 踩到）：源码守卫若直接扫全文，那么
+/// 「曾在这里挂过一层 `AppScrollbarTheme`」「`Scrollbar(thickness: 0)` 不可靠」
+/// 这类**说明性注释**会让判据永久假红 —— 守卫的本意是「代码里没再引用」，
+/// 不是「任何字符都不许出现」。与 `l10n_test.dart` 剥注释取字面量是同一类
+/// 防护（见该文件 `_stripComments`），这里只做本测试需要的两种行注释。
+String _stripComments(String src) => src
+    .replaceAll(RegExp(r'///[^\n]*'), '')
+    .replaceAll(RegExp(r'//[^\n]*'), '');
+
+/// 只保留代码中的标识符形态，避免 'dart:math' 之类的串内命中。
+///
+/// `isNot(contains('Scrollbar('))` 若匹配到 `// Scrollbar(...) 说明` 之外，
+/// 还可能命中**字符串字面量**里的同名单词。上面那个 `_stripComments` 已排掉
+/// 注释，剩下的风险面很窄；这里再收一道：把单/双引号串整体替换成等长空格，
+/// 保持行号结构不变，便于对不上时肉眼比对。
+String _codeOnly(String src) => _stripComments(src)
+    .replaceAll(RegExp(r"'[^']*'"), '')
+    .replaceAll(RegExp(r'"[^"]*"'), '');
+
+group('源码守卫：接线没被摘掉', () {
+    test('app.dart 挂了 scrollBehavior（不挂则桌面端每个滚动容器都带默认滚动条）', () {
       final src = File('lib/app.dart').readAsStringSync();
       expect(src, contains('scrollBehavior: const AppScrollBehavior()'),
           reason: '不挂 behavior 的话桌面端每个滚动容器都会退回系统默认样式');
-      expect(src, contains('AppScrollbarTheme('),
-          reason: '不挂主题的话滚动条厚度/颜色不是预览稿那一档');
+      // 2026-10-15 用户裁定「彻底隐藏」后，`AppScrollbarTheme`（8px/圆角/
+      // thumbVisibility 那套样式参数）随 `Scrollbar` 一起被删掉：没有滚动条
+      // 被创建，就没有样式可下发。这里反向钉住它**没有**被引回来 ——
+      // 否则将来有人「顺手恢复」一层空壳主题，后人会以为还在给滚动条配色。
+      //
+      // 剥注释后比对：否则说明这段理由的注释自己就会让判据假红。
+      expect(_codeOnly(src), isNot(contains('AppScrollbarTheme')),
+          reason: '滚动条已彻底不创建，不应再引用样式主题');
+    });
+
+    test('behavior 本体不再构造 Scrollbar（源码级，防将来被加回来）', () {
+      final src = File('lib/theme/app_scroll_behavior.dart').readAsStringSync();
+      final code = _codeOnly(src);
+      // 先把 `buildScrollbar` 这个方法名本身摘掉 —— 否则它就是 `Scrollbar(`
+      // 的子串，判据会永远假红（同 `visual_tokens_test` 正则要加词边界的教训）。
+      final stripped = code.replaceAll('buildScrollbar', '');
+      expect(stripped, isNot(contains('Scrollbar(')),
+          reason: '用户裁定任何时刻都不显示滚动条：behavior 内不应再创建它');
+      expect(stripped, isNot(contains('ScrollbarThemeData')),
+          reason: '没有 Scrollbar 就没有样式参数，别留下看起来还在配色的死代码');
+    });
+
+    test('抖音解析页不再显式包裹 Scrollbar（2fae366 漏掉的那一处）', () {
+      final src = File('lib/pages/douyin_page.dart').readAsStringSync();
+      expect(_codeOnly(src), isNot(contains('Scrollbar(')),
+          reason: '显式写出来的 Scrollbar 不受全局 behavior 管辖，'
+              '是「滚动条还在」最可能的漏网点');
+      expect(src, contains('NoScrollbarBehavior'),
+          reason: '这一层改由 NoScrollbarBehavior 接管');
     });
 
     test('侧边栏用了 NoScrollbarBehavior', () {

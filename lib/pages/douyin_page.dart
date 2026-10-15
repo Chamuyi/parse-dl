@@ -16,6 +16,7 @@ import '../services/douyin_parser.dart';
 import '../services/douyin_scroll.dart';
 import '../services/douyin_store.dart';
 import '../services/settings_store.dart';
+import '../theme/app_scroll_behavior.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_toast.dart';
@@ -1207,8 +1208,13 @@ class _DouyinPageState extends State<DouyinPage> {
     DouyinStore store,
     List<DouyinAwemeGroup> groups,
   ) {
-    return Scrollbar(
-      controller: _gridScroll,
+    // 滚动条一律不显示（用户 2026-10-15 裁定「彻底隐藏」，见
+    // `app_scroll_behavior.dart`）。原来这里显式包了一个 `Scrollbar` 去跟
+    // `_gridScroll`，是 `2fae366`（全局 behavior 那一版）改样式时漏掉的一处
+    // —— 全局 behavior 只接管**默认**会挂滚动条的地方，显式写出来的不受影响。
+    // GridView 自己照旧滚，`_gridScroll` 仍归 buildTiles 的滚动定位用。
+    return ScrollConfiguration(
+      behavior: const NoScrollbarBehavior(),
       child: GridView.builder(
         controller: _gridScroll,
         padding: const EdgeInsets.only(right: 4),
