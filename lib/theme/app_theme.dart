@@ -55,6 +55,21 @@ class AppColors {
   // ── 主色 ────────────────────────────────────────────────
   final Color accent;
   final Color accentText;
+
+  /// 压在 [accent] **整块填充**上面的文字/图标色（主按钮、徽标底）。
+  ///
+  /// 2026-10-16 新增。此前全应用一律用白字压 accent，**从来没有判据覆盖**，
+  /// 实测是坏的：旧 `frosted` 的 `#1D9BF0` 上白字只有 3.00，深色主题那几个
+  /// 亮 accent（`#38BDF8` 之类）更是只有 2.14。
+  ///
+  /// 不能沿用 [textStrong] 或 `onSuccess`：这条取决于 accent 的明度方向。
+  /// 浅色主题的 accent 取深一档（要让白字过 4.5），深色主题的 accent 取亮一档
+  /// （要让深字过 4.5）—— 六套各自的取值见 [StyleColors]。
+  ///
+  /// **同一条规律也适用于 [accentText]**：它是「accent 的可读文字版」，
+  /// 压在卡片上用的，与 [onAccent] 不是一回事（一个压 accent，一个压卡片）。
+  final Color onAccent;
+
   final Color accentSoft;
   final Color accentLine;
   final Color accentGlow;
@@ -95,6 +110,7 @@ class AppColors {
     required this.lineStrong,
     required this.accent,
     required this.accentText,
+    required this.onAccent,
     required this.accentSoft,
     required this.accentLine,
     required this.accentGlow,
@@ -105,70 +121,83 @@ class AppColors {
     required this.onSuccess,
   });
 
-  /// 浅色：卡片用半透明白，压在材质/背景图上有通透感
+  /// 浅色（默认 `frosted` 那一套的中性版；风格化的取值见 [StyleColors]）。
+  ///
+  /// ### 2026-10-16 全量重做（用户裁定「所有材质与风格都不满意」）
+  ///
+  /// 与旧值的差别不是"调了几个数"，是换了三条原则：
+  ///
+  /// 1. **面要够不透明**。旧卡片是 62% 白，压在窗口底上时，纯黑壁纸给出
+  ///    #EDEDED、纯白壁纸给出 #FBFBFB —— 同一份色板，读得清读不清取决于
+  ///    用户桌面。现在卡片 91%、凹面 95%：底层的漂移被按比例压掉一个数量级，
+  ///    两种壁纸下卡片只差 3/255，文字对比度因此**可计算、可保证**。
+  /// 2. **中性色带色相**。旧值是纯灰（#F3F3F3 / #1A1A1A），看着就是"没设计过"。
+  ///    现在浅色偏冷蓝、深色偏深蓝黑，与 accent 同族。
+  /// 3. **四档文字按对比度排布，而不是按"看着差不多"**。压在最暗的面（凹面，
+  ///    纯黑壁纸下 #F0F2F5）上时四档仍分别是 15.9 / 9.2 / 6.8 / 4.8、
+  ///    相邻档 ≥1.34。旧值在同一位置是 11.8 / 7.7 / 6.4 / 3.4——`faint` 破 4.5。
   static const light = AppColors(
     surfaceBase: Colors.transparent,
-    surfaceCard: Color(0x9EFFFFFF), // 62%
-    surfaceCardHover: Color(0xC7FFFFFF), // 78%
-    surfaceSunken: Color(0x09000000),
-    surfaceFloat: Color(0xD1FAFAFA),
-    surfaceSolid: Color(0xFFF3F3F3),
+    surfaceCard: Color(0xE8F8FAFC), // 91%
+    surfaceCardHover: Color(0xF5FBFCFE), // 96%
+    surfaceSunken: Color(0xF2F2F4F7), // 95%，刻意保留「凹下去」的那半档
+    surfaceFloat: Color(0xFAFFFFFF), // 98%
+    surfaceSolid: Color(0xFFF8FAFC),
     scrim: Color(0x8A000000), // 54% 近黑
-    textStrong: Color(0xFF1A1A1A),
-    textNormal: Color(0xFF2F2F2F),
-    textMuted: Color(0xFF5A5A5A),
-    // 这两档要在「浅色壁纸」和「深色壁纸」两端都读得清、还分得出层次。
-    // 窗口底色 = 壁纸×0.15 + #F3F3F3×0.85，卡片再叠 62% 白 —— 纯黑壁纸时卡片只有
-    // #EDEDED（不是 #FBFBFB），而 #EDEDED 正是短板：旧值 #737373 对它只有 4.03，
-    // 压到 #696969 才过 4.5；但只动 faint 会让 muted/faint 并成一种灰（1.16），
-    // 所以 muted 同步压到 #5A5A5A，把相邻档的间距拉回 1.2 以上。
-    textFaint: Color(0xFF696969),
-    line: Color(0x1A000000),
-    lineSoft: Color(0x0E000000),
-    lineStrong: Color(0x29000000),
-    accent: Color(0xFF1D9BF0),
-    accentText: Color(0xFF0F6FA8),
-    // 20% 而不是 12%：浅色主题下「选中」要一眼看出是蓝的。12% 时选中底与
-    // 悬停底（78% 白）的 sRGB 距离只有 0.076，两种状态看着一样（真机复核 2026-09-30）。
-    accentSoft: Color(0x331D9BF0),
-    accentLine: Color(0x731D9BF0),
-    accentGlow: Color(0x2E1D9BF0),
-    danger: Color(0xFFD93B3B),
-    dangerSoft: Color(0x14D93B3B),
-    // 浅色这两档不能沿用暗色值：#34C759 对浅色卡片只有 1.89、#E0A040 只有 1.93，
-    // 压到 #0F7A38 / #9A5B00 才到 4.6 一线。
-    success: Color(0xFF0F7A38),
-    warning: Color(0xFF9A5B00),
+    textStrong: Color(0xFF0F172A),
+    textNormal: Color(0xFF334155),
+    textMuted: Color(0xFF475569),
+    textFaint: Color(0xFF5B6C82),
+    line: Color(0x1A0F172A),
+    lineSoft: Color(0x0E0F172A),
+    lineStrong: Color(0x290F172A),
+    // Windows 11 Fluent 自己的标准强调色。选它不只是"抄系统"：它在白字下
+    // 5.40，而旧值 #1D9BF0 只有 3.00 —— 主按钮一直是不可读的。
+    accent: Color(0xFF0F6CBD),
+    accentText: Color(0xFF0F6CBD),
+    onAccent: Color(0xFFFFFFFF),
+    accentSoft: Color(0x330F6CBD),
+    accentLine: Color(0x730F6CBD),
+    accentGlow: Color(0x2E0F6CBD),
+    danger: Color(0xFFB91C1C),
+    dangerSoft: Color(0x14B91C1C),
+    success: Color(0xFF166534),
+    warning: Color(0xFF92400E),
     onSuccess: Color(0xFFFFFFFF),
   );
 
-  /// 深色：卡片用极低不透明度的白，靠材质提供底色
+  /// 深色。
+  ///
+  /// 与旧值的两条关键差别：**面比以前暗得多**（旧卡片 ≈ #2A2A2A，新卡片
+  /// 在黑壁纸下 #1A1E26、白壁纸下 #1E2229），**四档文字比以前亮得多**
+  /// （旧的 faint 在 hover 面只有 3.04）。暗底 + 亮字才能同时拿到层次与对比度：
+  /// 面越暗，最弱那档文字允许越暗，四档才有排布空间。
   static const dark = AppColors(
     surfaceBase: Colors.transparent,
-    surfaceCard: Color(0x0EFFFFFF), // 5.5%
-    surfaceCardHover: Color(0x16FFFFFF), // 8.5%
-    surfaceSunken: Color(0x09FFFFFF),
-    surfaceFloat: Color(0xE0262626),
-    surfaceSolid: Color(0xFF202020),
-    scrim: Color(0x99000000), // 60% 近黑（深色底子更暗，要多压一点才分得出层）
-    textStrong: Color(0xFFF2F2F2),
-    textNormal: Color(0xFFDCDCDC),
-    // 这两档要扛住「浅色壁纸透进来」：窗口底色 = 壁纸×(1-0.85) + #202020×0.85，
-    // 纯白壁纸时卡片底约 #4C4C4C，再暗就掉到 3:1 以下读不清了。
-    textMuted: Color(0xFFBCBCBC),
-    textFaint: Color(0xFFA0A0A0),
+    surfaceCard: Color(0xE61B1F27), // 90%
+    surfaceCardHover: Color(0xEE232833), // 93%
+    surfaceSunken: Color(0xF0151820), // 94%
+    surfaceFloat: Color(0xFF252A38), // 实心
+    surfaceSolid: Color(0xFF14171E),
+    scrim: Color(0x99000000), // 60%
+    textStrong: Color(0xFFFFFFFF),
+    textNormal: Color(0xFFDFE6EE),
+    textMuted: Color(0xFFB9C6D6),
+    textFaint: Color(0xFF93A3B8),
     line: Color(0x1AFFFFFF),
     lineSoft: Color(0x0FFFFFFF),
     lineStrong: Color(0x29FFFFFF),
-    accent: Color(0xFF1D9BF0),
-    accentText: Color(0xFF57B9FF),
-    accentSoft: Color(0x2E1D9BF0),
-    accentLine: Color(0x801D9BF0),
-    accentGlow: Color(0x4D1D9BF0),
-    danger: Color(0xFFFF6B6B),
-    dangerSoft: Color(0x29FF6B6B),
-    success: Color(0xFF34C759),
-    warning: Color(0xFFE0A040),
+    accent: Color(0xFF38BDF8),
+    accentText: Color(0xFF7DD3FC),
+    // 深色主题的 accent 是**亮**色，所以它上面要压深字（白字只有 2.14）。
+    onAccent: Color(0xFF0B1220),
+    accentSoft: Color(0x2E38BDF8),
+    accentLine: Color(0x8038BDF8),
+    accentGlow: Color(0x4D38BDF8),
+    danger: Color(0xFFFCA5A5),
+    dangerSoft: Color(0x29FCA5A5),
+    success: Color(0xFF86EFAC),
+    warning: Color(0xFFFCD34D),
     onSuccess: Color(0xFF0A2E16),
   );
 
@@ -212,24 +241,22 @@ class AppColors {
     );
   }
 
-  /// 纯色材质时用的不透明底色。
+  /// 纯色材质时用的不透明底色，也用作「窗口底压在壁纸上」的那一层。
   ///
-  /// [style] 有默认值 [AppStyle.frosted]。**这个默认值返回的是
-  /// [#F3F3F3] / [#202020]（改造前的常量），不是 frosted 的 `--panel-solid`**
-  /// —— 既有 6 个调用点（`background_layer.dart` 两处、`theme_contrast_test.dart`
-  /// 两处、`nav_keyboard_test.dart`）依赖这组值，而 `theme_contrast_test` 的地板
-  /// 就是按它算出来的。按风格取底色是 S3 的接线范围，届时需要连同
-  /// `clayDark` 的实心卡片底一起处理（见 [StyleColors.clayDark] 的已知遗留）。
+  /// ### 2026-10-16 收掉旧分叉
+  ///
+  /// 这里此前是「frosted 返回硬编码 #F3F3F3 / #202020，其余风格走色板」——
+  /// 一个概念两处出处，于是 frosted 的卡片底（`StyleColors.frostedLight` 的
+  /// `#F7F9FC`）与窗口底（`#F3F3F3`）**根本不是同一个色**，两套值各自演化。
+  /// 现在统一取色板：改风格只改一处。
+  ///
+  /// [style] 有默认值 [AppStyle.frosted]，既有调用点（`background_layer.dart`、
+  /// `theme_contrast_test.dart`、`nav_keyboard_test.dart`）零改动。
   static Color solidFor(
     Brightness brightness, {
     AppStyle style = AppStyle.frosted,
   }) =>
-      switch (style) {
-        AppStyle.frosted => brightness == Brightness.dark
-            ? const Color(0xFF202020)
-            : const Color(0xFFF3F3F3),
-        _ => of(style, brightness).surfaceSolid,
-      };
+      of(style, brightness).surfaceSolid;
 }
 
 /// 「选中 / 激活」的统一画法：低饱和主色底 + 主色描边 + 柔光。
@@ -358,9 +385,15 @@ ThemeData buildAppTheme(
           primary: c.accent,
           surface: c.surfaceSolid,
           onSurface: c.textStrong,
-          // FilledButton（非 tonal）= 主按钮：--ac 实色底（见上方渐变能力边界）、
-          // 白字。fromSeed 的 primary 原本带 tone 偏移且未覆盖 onError。
-          onPrimary: Colors.white,
+          // FilledButton（非 tonal）= 主按钮：--ac 实色底（见上方渐变能力边界）。
+          //
+          // 2026-10-16 修：这里此前硬编码 `Colors.white`，而它**从来没有判据覆盖**。
+          // 实测旧 `#1D9BF0` 上白字只有 3.00，深色主题的亮 accent（`#38BDF8`）
+          // 上更只有 2.14 —— 主按钮一直是不可读的。现在取色板的 [AppColors.onAccent]：
+          // 浅色主题的 accent 是深色（配白字），深色主题的 accent 是亮色（配深字）。
+          // 这也与 WinUI 官方的 `TextOnAccentFillColorPrimary` 同向
+          // （浅色 `#FFFFFF` / 深色 `#000000`）。
+          onPrimary: c.onAccent,
           onError: Colors.white,
           // FilledButton.tonal* = 普通按钮（见上方 tonalSurface 的说明）。
           secondaryContainer: tonalSurface,

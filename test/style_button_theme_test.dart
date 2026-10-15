@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parse_dl/theme/app_style.dart';
 import 'package:parse_dl/theme/app_theme.dart';
+import 'package:parse_dl/theme/style_colors.dart';
 
 /// 43 处原生按钮（FilledButton / FilledButton.tonal* / TextButton /
 /// OutlinedButton，pages/ 与 widgets/ 下约 10 个文件）的观感必须随界面风格变化。
@@ -122,14 +123,14 @@ void main() {
           reason: '三套浅色的普通按钮底必须两两不同 —— 这是「随风格变」的最低判据');
     });
 
-    test('主按钮底：frosted=#1D9BF0 实色；liquid/clay=各自 --ac（渐变主色近似），两两不同', () {
+    test('主按钮底：三套各取自己的 accent（渐变主色段），两两不同', () {
       expect(primaryBg(AppStyle.frosted, Brightness.light),
-          const Color(0xFF1D9BF0),
-          reason: 'frosted 主按钮 = var(--ac) 实色（CSS :364-370）');
-      expect(primaryBg(AppStyle.liquid, Brightness.light), const Color(0xFF5B6CFF),
-          reason: 'liquid 主按钮取渐变主色段 --ac=#5B6CFF（渐变本体主题层发不了，见文件头）');
+          const Color(0xFF0F6CBD),
+          reason: 'frosted 主按钮 = accent 实色（Windows Fluent 标准强调色）');
+      expect(primaryBg(AppStyle.liquid, Brightness.light), const Color(0xFF4F46E5),
+          reason: 'liquid 主按钮取渐变主色段（渐变本体主题层发不了，见文件头）');
       expect(primaryBg(AppStyle.clay, Brightness.light), const Color(0xFFC2410C),
-          reason: 'clay 主按钮取渐变主色段 --ac=#C2410C（同上）');
+          reason: 'clay 主按钮取渐变主色段（同上）');
 
       expect(primaryBg(AppStyle.liquid, Brightness.light),
           isNot(primaryBg(AppStyle.frosted, Brightness.light)));
@@ -139,18 +140,23 @@ void main() {
           isNot(primaryBg(AppStyle.clay, Brightness.light)));
     });
 
-    test('普通按钮字色 = 各套 --ink2；主按钮字色 = 白', () {
-      expect(plainFg(AppStyle.liquid, Brightness.light), const Color(0xFF3D3D5C),
-          reason: 'CSS --ink2 :244');
-      expect(plainFg(AppStyle.frosted, Brightness.light), const Color(0xFF34343D),
-          reason: 'CSS --ink2 :331');
-      expect(plainFg(AppStyle.clay, Brightness.light), const Color(0xFF574E46),
-          reason: 'CSS --ink2 :397');
+    test('普通按钮字色 = 各套 textNormal；主按钮字色取 onAccent（浅配白/深配深）', () {
+      expect(plainFg(AppStyle.liquid, Brightness.light), const Color(0xFF3F3F46));
+      expect(plainFg(AppStyle.frosted, Brightness.light), const Color(0xFF334155));
+      expect(plainFg(AppStyle.clay, Brightness.light), const Color(0xFF44403C));
       for (final s in AppStyle.values) {
+        // 2026-10-16 改锚：主按钮压字色不再是恒定的白，而是色板的 onAccent
+        // —— 浅色主题 accent 取深一档配白字，深色主题 accent 取亮一档配深字。
+        // 旧写法（硬编码 Colors.white）在深色主题上只有 2.14，且从来没有判据覆盖。
         expect(
           themeOf(s, Brightness.light).colorScheme.onPrimary,
-          Colors.white,
-          reason: '$s 主按钮压字必须是白（--ac 底色上白字 5:1 一线）',
+          const Color(0xFFFFFFFF),
+          reason: '$s 浅色主题：accent 是深色，压白字',
+        );
+        expect(
+          themeOf(s, Brightness.dark).colorScheme.onPrimary,
+          StyleColors.of(s, Brightness.dark).colors.onAccent,
+          reason: '$s 深色主题：accent 是亮色，必须压色板的 onAccent（深字）',
         );
       }
     });
@@ -189,36 +195,35 @@ void main() {
 
   group('深浅翻转（判据 3）', () {
     test('同一风格 light / dark 的按钮主题不同', () {
-      // liquid：主按钮深色 --ac=#7C8DFF ≠ 浅色 #5B6CFF；面/边也各自一套。
-      expect(primaryBg(AppStyle.liquid, Brightness.dark), const Color(0xFF7C8DFF),
-          reason: 'CSS --ac :831');
+      // liquid：主按钮深色 accent=#818CF8 ≠ 浅色 #4F46E5；面/边也各自一套。
+      expect(primaryBg(AppStyle.liquid, Brightness.dark), const Color(0xFF818CF8),
+          reason: '深色 accent 取亮一档（配深字）');
       expect(primaryBg(AppStyle.liquid, Brightness.dark),
           isNot(primaryBg(AppStyle.liquid, Brightness.light)));
       expect(borderColorOf(AppStyle.liquid, Brightness.dark),
           StyleButton.liquidDark.borderColor,
-          reason: 'CSS :849 边改 .12 白');
+          reason: 'liquid 深色边 = 白 12%');
       expect(plainBg(AppStyle.liquid, Brightness.dark),
           isNot(plainBg(AppStyle.liquid, Brightness.light)),
-          reason: 'liquid 深色面 = 白 .07，与浅色半透白压实值必然不同');
+          reason: 'liquid 深色面与浅色面必然不同');
 
-      // frosted：主按钮明暗同色（--ac 没变），翻转判据落在面与边上。
+      // frosted：深色 accent 换成亮蓝（#38BDF8），与浅色的 #0F6CBD 不同
+      // —— 2026-10-16 起主按钮底也随明暗翻转了（旧规范里两档同色）。
+      expect(primaryBg(AppStyle.frosted, Brightness.dark), const Color(0xFF38BDF8),
+          reason: '深色 accent 取亮一档');
       expect(primaryBg(AppStyle.frosted, Brightness.dark),
-          primaryBg(AppStyle.frosted, Brightness.light),
-          reason: 'CSS :883 --ac 不随明暗变 —— frosted 的主按钮底翻转判据改钉边');
+          isNot(primaryBg(AppStyle.frosted, Brightness.light)),
+          reason: '深色是亮蓝、浅色是深蓝，必然不同');
       expect(borderColorOf(AppStyle.frosted, Brightness.dark),
-          StyleButton.frostedDark.borderColor,
-          reason: 'CSS :898 `rgba(242,242,244,.12)`');
+          StyleButton.frostedDark.borderColor);
       expect(plainBg(AppStyle.frosted, Brightness.dark),
-          isNot(plainBg(AppStyle.frosted, Brightness.light)),
-          reason: 'frosted 深色面 = 白 .08，与浅色白 .9 不同');
+          isNot(plainBg(AppStyle.frosted, Brightness.light)));
 
-      // clay：深色 --ac=#EA580C ≠ 浅色 #C2410C；面 = #2F2720。
-      expect(primaryBg(AppStyle.clay, Brightness.dark), const Color(0xFFEA580C),
-          reason: 'CSS --ac :931');
+      // clay：深色 accent=#FB923C ≠ 浅色 #C2410C；面 = #2B251E。
+      expect(primaryBg(AppStyle.clay, Brightness.dark), const Color(0xFFFB923C),
+          reason: '深色 accent 取亮一档');
       expect(primaryBg(AppStyle.clay, Brightness.dark),
           isNot(primaryBg(AppStyle.clay, Brightness.light)));
-      expect(StyleButton.clayDark.color, const Color(0xFF2F2720),
-          reason: 'CSS :945 面色');
       expect(plainBg(AppStyle.clay, Brightness.dark),
           isNot(plainBg(AppStyle.clay, Brightness.light)));
     });

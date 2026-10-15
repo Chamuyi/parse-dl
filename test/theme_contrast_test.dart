@@ -38,9 +38,12 @@ void main() {
   List<Color> backingFor(
     Brightness brightness,
     AppColors palette,
-    Color Function(AppColors) surface,
-  ) {
-    final solid = AppColors.solidFor(brightness);
+    Color Function(AppColors) surface, {
+    required AppStyle style,
+  }) {
+    // **必须传风格**：`solidFor` 现在按风格取底色（2026-10-16 起），
+    // 不传就退回 frosted —— 那样另外两套的底会被算错，判据与生产脱节。
+    final solid = AppColors.solidFor(brightness, style: style);
     return [Color(0xFF000000), Color(0xFFFFFFFF)]
         .map((wallpaper) =>
             over(surface(palette), over(solid.withValues(alpha: 0.85), wallpaper)))
@@ -51,10 +54,11 @@ void main() {
     Brightness brightness,
     AppColors palette,
     Color ink,
-    Color Function(AppColors) surface,
-  ) {
+    Color Function(AppColors) surface, {
+    required AppStyle style,
+  }) {
     var min = double.infinity;
-    for (final bg in backingFor(brightness, palette, surface)) {
+    for (final bg in backingFor(brightness, palette, surface, style: style)) {
       final r = ratio(ink, bg);
       if (r < min) min = r;
     }
@@ -140,7 +144,7 @@ void main() {
       for (final ink in inks.entries) {
         final key = '${s.key}.${ink.key}';
         test('$theme：${ink.key} 压在${s.key}上，最坏壁纸下也够对比度', () {
-          final got = worst(brightness, c, ink.value, s.value);
+          final got = worst(brightness, c, ink.value, s.value, style: style);
           final need = floors[floorKey(brightness)]![key];
           expect(
             need,

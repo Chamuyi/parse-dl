@@ -42,7 +42,7 @@ class BackgroundLayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tint = _resolveTint();
+    final tint = _resolveTint(context);
 
     return Stack(
       fit: StackFit.expand,
@@ -72,14 +72,15 @@ class BackgroundLayer extends StatelessWidget {
   /// 计算底色。返回 null = 用风格背景绘制（Mica / 亚克力路径 —— 绘制器
   /// 永不空画，[StyleBackdrop.linear] 恒有值，「永远铺一层底」在绘制器内兑现）；
   /// 非 null = 铺这个实色：
-  /// - 纯色材质 → 不透明主题实色
+  /// - 纯色材质 → 不透明主题实色（**按风格**取，见 [AppColors.solidFor]）
   /// - 自定义色调 → 强调色与主题底色混合后的色调
   ///
   /// 浅色模式不要用 alpha=0.25（实测几乎透明 → 看到 Win 默认黑底）。
-  Color? _resolveTint() {
+  Color? _resolveTint(BuildContext context) {
     if (appearance.windowMaterial == WindowMaterial.none) {
-      // 纯色：完全不透明
-      return AppColors.solidFor(brightness);
+      // 纯色：完全不透明。**传风格** —— 三套风格连窗口底都不同，
+      // 否则「换风格」在整窗最大的一块面上看不出任何变化。
+      return AppColors.solidFor(brightness, style: _styleOf(context));
     }
     if (appearance.customTint) {
       final hex = appearance.tintColor.replaceFirst('#', '');
@@ -107,8 +108,13 @@ class _StyleBackdropWash extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final brightness = AppTheme.of(context).brightness;
-    final wash = AppColors.solidFor(brightness).withValues(alpha: 0.85);
+    final theme = AppTheme.of(context);
+    final brightness = theme.brightness;
+    // **按风格取底色**（2026-10-16）。此前这里不传 style，于是三套风格的
+    // 窗口底走的是同一个 frosted 值 —— 「三套风格」在最大的一块面（整个窗口
+    // 背景）上根本没有区别，用户看到的就是「换风格没感觉」。
+    final wash = AppColors.solidFor(brightness, style: theme.style)
+        .withValues(alpha: 0.85);
 
     return Stack(
       fit: StackFit.expand,

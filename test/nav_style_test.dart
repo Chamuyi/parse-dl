@@ -206,16 +206,19 @@ void main() {
       }
     });
 
-    test('取值 = CSS 原文锚点（面/主按钮/主按钮影）', () {
-      // frosted 主按钮 = var(--ac) 实色（:369）
-      expect(StyleButton.frostedLight.primaryColor, const Color(0xFF1D9BF0));
+    test('取值锚点（面 / 主按钮 / 主按钮影）—— 2026-10-16 新规范', () {
+      // frosted 主按钮 = 实色 accent（Windows Fluent 强调色），无渐变
+      expect(StyleButton.frostedLight.primaryColor, const Color(0xFF0F6CBD));
       expect(StyleButton.frostedLight.primaryGradient, isNull);
-      // liquid / clay 主按钮 = 渐变 --ac→--ac2（:300 / :433）
+      // liquid / clay 主按钮 = 渐变 accent→accent2
       expect(StyleButton.liquidLight.primaryGradient, isNotNull);
       expect(StyleButton.clayLight.primaryGradient, isNotNull);
-      // clay 普通面 #fffdfa（:428）
+      // 三套普通按钮面：liquid/frosted 取 WinUI `ControlFillColorDefault`
+      // 的 70.2% 白，clay 是暖白实色
+      expect(StyleButton.liquidLight.color, const Color(0xB3FFFFFF));
+      expect(StyleButton.frostedLight.color, const Color(0xB3FFFFFF));
       expect(StyleButton.clayLight.color, const Color(0xFFFFFDFA));
-      // liquid 主按钮影 0 10px 26px -10px（:301）
+      // liquid 主按钮影几何（沿用原稿的柔和大影）
       final ps = StyleButton.liquidLight.primaryShadow;
       expect(ps.offset, const Offset(0, 10));
       expect(ps.blurRadius, 26);
