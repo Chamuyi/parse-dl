@@ -417,64 +417,98 @@ Future<T?> showOptPicker<T>(
               maxWidth: 460,
               maxHeight: placement.availableHeight,
             ),
-            child: Material(
-              color: c.surfaceFloat,
-              clipBehavior: Clip.antiAlias,
-              borderRadius: const BorderRadius.all(Radius.circular(14)),
-              child: SafeArea(
-                top: false,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: c.textStrong,
+            // 面板外圈：阴影 + 描边 —— 与 `AppFloat`（本应用给「弹出面板 /
+            // 对话框」定的那档）逐字对齐：`c.line` 1px 描边、阴影
+            // `black@0.5 / blur 50 / offset (0,18)`。
+            //
+            // 2026-10-15 真机补的：原来只有一层裸 `Material`，没有描边也没有
+            // 阴影 —— 全应用的浮层（Dock / Toast / 抖音结果面板）都有这两样，
+            // 只有它没有，压在深色遮罩上就成了一块"贴"在底上的色块，
+            // 而不是浮起来的面板。用户一眼就看出「这 UI 不对」。
+            //
+            // 阴影画在**外层**的 `DecoratedBox` 上而不是靠 `Material.elevation`：
+            // Material 自带的阴影分级与本应用那一条规格对不上。
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    blurRadius: 50,
+                    offset: const Offset(0, 18),
+                  ),
+                ],
+              ),
+              // 内层仍是 `Material`：`ListTile` 在 debug 下会向上找最近的
+              // 有底色祖先（`list_tile.dart` 的 `_debugCheckBackgroundIsHidden`），
+              // 换成纯 `Container` 就报「水波纹可能不可见」（S9b 为这个栽过）。
+              // `shape` 一并承担圆角、描边与裁切，不再用 `borderRadius` 参数
+              // （那两者在 `Material` 上互斥）。
+              child: Material(
+                color: c.surfaceFloat,
+                clipBehavior: Clip.antiAlias,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: BorderSide(color: c.line),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: c.textStrong,
+                          ),
                         ),
                       ),
-                    ),
-                    Divider(height: 1, thickness: 0.5, color: c.line),
-                    Flexible(
-                      child: ListView(
-                        key: const ValueKey('_optPickerBody'),
-                        shrinkWrap: true,
-                        padding: EdgeInsets.zero,
-                        children: [
-                          for (final opt in list)
-                            ListTile(
-                              dense: true,
-                              title: Text(
-                                label(opt),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  color: opt == current || _same(opt, current)
-                                      ? c.accentText
-                                      : c.textNormal,
-                                  fontWeight:
-                                      opt == current || _same(opt, current)
-                                          ? FontWeight.w600
-                                          : FontWeight.w400,
+                      Divider(height: 1, thickness: 0.5, color: c.line),
+                      Flexible(
+                        child: ListView(
+                          key: const ValueKey('_optPickerBody'),
+                          shrinkWrap: true,
+                          padding: EdgeInsets.zero,
+                          children: [
+                            for (final opt in list)
+                              ListTile(
+                                dense: true,
+                                title: Text(
+                                  label(opt),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color:
+                                        opt == current || _same(opt, current)
+                                            ? c.accentText
+                                            : c.textNormal,
+                                    fontWeight:
+                                        opt == current || _same(opt, current)
+                                            ? FontWeight.w600
+                                            : FontWeight.w400,
+                                  ),
                                 ),
+                                trailing:
+                                    opt == current || _same(opt, current)
+                                        ? Icon(Icons.check,
+                                            size: 16, color: c.accentText)
+                                        : null,
+                                onTap: () => Navigator.pop(ctx, opt),
                               ),
-                              trailing: opt == current || _same(opt, current)
-                                  ? Icon(Icons.check, size: 16, color: c.accentText)
-                                  : null,
-                              onTap: () => Navigator.pop(ctx, opt),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                  ],
+                      const SizedBox(height: 6),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -483,15 +517,20 @@ Future<T?> showOptPicker<T>(
       );
     },
     transitionBuilder: (ctx, animation, _, child) {
-      final eased = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+      // **只淡入，不做缩放。**
+      //
+      // 这里收到的 `child` 是**整屏**的 page（面板只是它内部一个被 Padding
+      // 定位的子节点），所以任何 `ScaleTransition` 的 `alignment` 都是
+      // **屏幕**的锚点而不是面板的锚点：原先写 `alignment: topLeft` 会让面板
+      // 在那 120ms 里朝屏幕左上角"缩进来"，方向与「从被点那格长出来」正好
+      // 相反（2026-10-15 复查发现）。
+      //
+      // 要做对就得把缩放挪进面板自身——但那个动画对象在 `pageBuilder` 里拿不到
+      // （`transitionBuilder` 才收得到）。相比之下纯淡入没有任何方向歧义，
+      // 120ms 也不会拖慢手感，所以取淡入。
       return FadeTransition(
-        opacity: eased,
-        child: ScaleTransition(
-          // 缩放支点固定左上：与浮层「从被点那格长出来」的方向一致。
-          scale: Tween<double>(begin: 0.96, end: 1.0).animate(eased),
-          alignment: Alignment.topLeft,
-          child: child,
-        ),
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+        child: child,
       );
     },
   );
