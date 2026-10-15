@@ -375,10 +375,16 @@ Future<T?> showOptPicker<T>(
     context: context,
     barrierDismissible: true,
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-    // 遮罩色从既有色板槽位派生（`c.textMuted` 压暗），不引入写死的十六进制
-    // 色值：`visual_tokens_test` 的棘轮只登记 lib/theme/ 内的硬编码色，组件里
-    // 新增一处就当场红 —— 本文件 S9b 阶段为同一个原因栽过一次。
-    barrierColor: c.textMuted.withValues(alpha: 0.55),
+    // 遮罩取色板的 `scrim` 槽位：**它必须压暗背景**。
+    //
+    // 2026-10-15 真机撞过反例：这里原先写的是 `c.textMuted.withValues(alpha: .55)`，
+    // 而深色主题的 `textMuted` 是 #BCBCBC 的浅灰 —— 55% 浅灰盖上去，整个界面
+    // 罩成一层发白的雾。实测同一块侧栏平均亮度 44.4 → 126.8（2.86 倍），
+    // 与「把背景退下去」正好相反，用户一眼就看出不对。
+    //
+    // 也不能写 `Colors.black`：`visual_tokens_test` 的棘轮只豁免 `lib/theme/`
+    // 内的写死色值（本文件 S9b 阶段为同一个原因栽过一次）。所以取槽位。
+    barrierColor: c.scrim,
     transitionDuration: const Duration(milliseconds: 120),
     pageBuilder: (ctx, _, _) {
       final screen = MediaQuery.sizeOf(ctx);

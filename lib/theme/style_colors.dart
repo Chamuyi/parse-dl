@@ -66,6 +66,7 @@ class StyleColors {
       surfaceSunken: Color(0x09000000),
       surfaceFloat: Color(0xD1FAFAFA),
       surfaceSolid: Color(0xFFFBFBFF), // CSS --panel-solid :243
+      scrim: Color(0x8A000000), // 模态遮罩：恒为近黑，见 AppColors.scrim
       textStrong: Color(0xFF16162A), // CSS --ink :244
       textNormal: Color(0xFF3D3D5C), // CSS --ink2 :244
       textMuted: Color(0xFF494968), // 派生：--ink2 压深至与 normal 拉开 1.21
@@ -103,6 +104,7 @@ class StyleColors {
       surfaceSunken: Color(0x11FFFFFF), // §3b.5：白 6.5%
       surfaceFloat: Color(0xE0262626), // §3b.5：#262626 88%
       surfaceSolid: Color(0xFF1F1E2B), // CSS --panel-solid :829
+      scrim: Color(0x99000000), // 模态遮罩：恒为近黑，见 AppColors.scrim
       textStrong: Color(0xFFF0EFFA), // §3b.3
       textNormal: Color(0xFFDAD8EA), // §3b.3
       textMuted: Color(0xFFC1BED5), // §3b.3 原值提亮 5/通道（原值在悬停面 4.29 < 4.5）
@@ -143,6 +145,7 @@ class StyleColors {
       surfaceSunken: Color(0x09000000),
       surfaceFloat: Color(0xD1FAFAFA),
       surfaceSolid: Color(0xFFF7F9FC), // CSS --panel-solid :329
+      scrim: Color(0x8A000000), // 模态遮罩：恒为近黑，见 AppColors.scrim
       textStrong: Color(0xFF101014), // CSS --ink :331
       textNormal: Color(0xFF34343D), // CSS --ink2 :331
       textMuted: Color(0xFF404049), // 派生（层次 1.201）
@@ -173,6 +176,7 @@ class StyleColors {
       surfaceSunken: Color(0x11FFFFFF), // §3b.5
       surfaceFloat: Color(0xE0262626), // §3b.5
       surfaceSolid: Color(0xFF202024), // CSS --panel-solid :882
+      scrim: Color(0x99000000), // 模态遮罩：恒为近黑，见 AppColors.scrim
       textStrong: Color(0xFFF2F2F4), // §3b.3
       textNormal: Color(0xFFDCDCE0), // §3b.3
       textMuted: Color(0xFFC0C0C6), // §3b.3 原值提亮 4/通道（原值在悬停面 4.33 < 4.5）
@@ -207,6 +211,7 @@ class StyleColors {
       surfaceSunken: Color(0x09000000),
       surfaceFloat: Color(0xD1FAFAFA),
       surfaceSolid: Color(0xFFFFFDFA), // CSS --panel-solid :396
+      scrim: Color(0x8A000000), // 模态遮罩：恒为近黑，见 AppColors.scrim
       textStrong: Color(0xFF2B2622), // CSS --ink :397
       textNormal: Color(0xFF574E46), // CSS --ink2 :397
       textMuted: Color(0xFF635A52), // 派生（层次 1.206）
@@ -246,6 +251,7 @@ class StyleColors {
       surfaceSunken: Color(0x11FFFFFF), // §3b.5
       surfaceFloat: Color(0xE0262626), // §3b.5
       surfaceSolid: Color(0xFF2A231D), // CSS --panel-solid :929
+      scrim: Color(0x99000000), // 模态遮罩：恒为近黑，见 AppColors.scrim
       textStrong: Color(0xFFF5F0EB), // §3b.3
       textNormal: Color(0xFFE2DAD2), // §3b.3
       textMuted: Color(0xFFCCC1B6), // §3b.3

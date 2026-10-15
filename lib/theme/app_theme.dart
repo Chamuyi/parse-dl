@@ -28,6 +28,19 @@ class AppColors {
   final Color surfaceFloat;
   final Color surfaceSolid;
 
+  /// 模态遮罩：弹层背后压暗整屏的那一层。
+  ///
+  /// **必须比它盖住的表面更暗**——这条不是审美偏好，是遮罩存在的意义：
+  /// 它要「把背景退下去、把弹层推上来」。2026-10-15 真机撞过一次反例：
+  /// 选择器浮层原先拿 `textMuted`（深色主题下是 #BCBCBC 的**浅灰**）当遮罩，
+  /// 55% 不透明度压上去，整个界面被罩成一层发白的雾 —— 实测同一块侧栏的
+  /// 平均亮度从 44.4 涨到 126.8（2.86 倍），与「压暗」正好相反。
+  ///
+  /// 所以它不能从 `text*` 或 `surface*` 反推，必须是一个独立的、恒为暗色的
+  /// 槽位。两套主题都取近黑，只差不透明度：浅色底子亮，54% 就够；
+  /// 深色底子本来就暗，要 60% 才拉得开层次。
+  final Color scrim;
+
   // ── 文字 ────────────────────────────────────────────────
   final Color textStrong;
   final Color textNormal;
@@ -72,6 +85,7 @@ class AppColors {
     required this.surfaceSunken,
     required this.surfaceFloat,
     required this.surfaceSolid,
+    required this.scrim,
     required this.textStrong,
     required this.textNormal,
     required this.textMuted,
@@ -99,6 +113,7 @@ class AppColors {
     surfaceSunken: Color(0x09000000),
     surfaceFloat: Color(0xD1FAFAFA),
     surfaceSolid: Color(0xFFF3F3F3),
+    scrim: Color(0x8A000000), // 54% 近黑
     textStrong: Color(0xFF1A1A1A),
     textNormal: Color(0xFF2F2F2F),
     textMuted: Color(0xFF5A5A5A),
@@ -135,6 +150,7 @@ class AppColors {
     surfaceSunken: Color(0x09FFFFFF),
     surfaceFloat: Color(0xE0262626),
     surfaceSolid: Color(0xFF202020),
+    scrim: Color(0x99000000), // 60% 近黑（深色底子更暗，要多压一点才分得出层）
     textStrong: Color(0xFFF2F2F2),
     textNormal: Color(0xFFDCDCDC),
     // 这两档要扛住「浅色壁纸透进来」：窗口底色 = 壁纸×(1-0.85) + #202020×0.85，
