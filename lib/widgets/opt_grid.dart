@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
@@ -38,6 +40,17 @@ import '../theme/app_theme.dart';
 ///
 /// **泛型 `T`**：选项不限于字符串。S9b 的「画质 / 编码 / 主题模式」都是
 /// 枚举，所以这里按 [OptItem] 的类型参数走，选中后回传强类型的值。
+///
+/// ### 2026-10-15：选择器改成**贴着那一格**弹（S9c 真机缺陷修复）
+///
+/// 真机反馈：「第三张图点击后，为什么内容是在最下面弹出来的」。
+/// 原来的实现是 [showModalBottomSheet] —— 浮层从屏幕最底部滑上来，与被点
+/// 的那一格隔着半个屏幕，视觉上断成两截。
+///
+/// 现在改用 [showGeneralDialog] + 按锚点 rect 定位的浮层：`OptGrid.build`
+/// 把**被点那一格自己的 context** 传进来（经 `_rectOf` 取 rect），所以同屏
+/// 有多个 OptGrid 时每一格都知道自己该贴谁。锚点缺省（外部调用方没传）时
+/// 按屏幕中心落位，不会崩、也没有行为退化。
 class OptGrid<T> extends StatelessWidget {
   /// 每一项的（键名, 当前值, 候选值）。键名已由调用方 `t()` 过。
   final List<OptItem<T>> items;
@@ -114,6 +127,10 @@ class OptGrid<T> extends StatelessWidget {
                       options: item.options,
                       current: item.value,
                       labelOf: labelOf,
+                      // **被点那一格自己的 context** —— 同屏多个 OptGrid
+                      // （B 站页三个、抖音页两个）时，锚点必须由它提供，
+                      // 不能取页面上随便一格。
+                      anchorRect: _rectOf(context),
                     );
                     if (picked != null) onChanged!(item, picked);
                   },
@@ -224,16 +241,112 @@ typedef OptLabelOf<T> = String Function(T value);
 
 String _labelOf<T>(T v) => v.toString();
 
+/// 某一格在**屏幕坐标**里的矩形（宽高都返回 0 表示「取不到」）。
+///
+/// 只在手势回调里调用（此时 layout 已完成）。`_OptCell` 自己那层 context
+/// 指向 `Container`，拿到的是格子的 rect；取不到（元素已卸载 / 刚重建）
+/// 就返回 0×0，调用方据此退回屏幕中心，绝不抛。
+Rect _rectOf(BuildContext context) {
+  final ro = context.findRenderObject();
+  if (ro is! RenderBox) return Rect.zero;
+  final size = ro.size;
+  final topLeft = ro.localToGlobal(Offset.zero);
+  return Rect.fromLTWH(topLeft.dx, topLeft.dy, size.width, size.height);
+}
+
+/// 浮层相对锚点的落位结果（私有小工具，见 [showOptPicker]）。
+class _AnchorPlacement {
+  const _AnchorPlacement({required this.left, required this.top, required this.availableHeight});
+
+  final double left;
+  final double top;
+  final double availableHeight;
+}
+
+/// 贴格浮层的定位：优先落在锚点**下方**，下方不够且上方更宽裕时翻到上方，
+/// 两边都不够时退回贴着锚点（面板自身可滚 + 高度受限，永不溢出屏幕）。
+///
+/// [screen] 是 `MediaQuery.sizeOf(context)`，[anchor] 是被点格子的屏幕 rect。
+_AnchorPlacement _placeAnchored({
+  required Size screen,
+  required Rect anchor,
+  required double panelWidth,
+  required double sheetMaxHeight,
+  required double gap,
+  required double bottomMargin,
+}) {
+  final hasAnchor = anchor.width > 0 && anchor.height > 0;
+  // 缺省锚点（外部调用方没传，或 context 已失效）：退到屏幕中心，
+  // 行为等价于「一个居中的浮层」，不崩也不算视觉退化。
+  final cx = hasAnchor ? anchor.center.dx : screen.width / 2;
+  final cy = hasAnchor ? anchor.center.dy : screen.height / 2;
+
+  double clampLeft() =>
+      cx.clamp(panelWidth / 2, math.max(screen.width - panelWidth / 2, panelWidth / 2)) -
+      panelWidth / 2;
+
+  final below = screen.height - (cy + anchor.height / 2) - gap - bottomMargin;
+  // 高度必须 ≤ sheetMaxHeight，用完整判定而不是简单截断，否则当
+  // below < sheetMaxHeight 但按 anchor 高度算出来的值 > sheetMaxHeight 时
+  // 面板会顶破屏幕底部（2026-10-15 撞过：面板超出 viewport 后 tester 取不到
+  // 自己的面板 rect，判据跟着 flake）。
+  final belowH = math.min(below, sheetMaxHeight);
+  if (belowH >= _kOptPickerMinHeight) {
+    return _AnchorPlacement(left: clampLeft(), top: cy + anchor.height / 2 + gap, availableHeight: belowH);
+  }
+
+  final above = (cy - anchor.height / 2) - gap - bottomMargin;
+  final aboveH = math.min(above, sheetMaxHeight);
+  if (aboveH >= _kOptPickerMinHeight) {
+    // 面板底边贴在锚点上方 gap 处 → top = 锚点顶边 - gap - 面板高。
+    return _AnchorPlacement(
+      left: clampLeft(),
+      top: (cy - anchor.height / 2) - gap - aboveH,
+      availableHeight: aboveH,
+    );
+  }
+
+  // 上下都放不下：贴着锚点下方、只给一屏内剩下那么多高度，面板内部滚动。
+  final fallbackH = math.max(_kOptPickerMinHeight, screen.height - bottomMargin - gap);
+  return _AnchorPlacement(
+    left: clampLeft(),
+    top: math.min(cy + anchor.height / 2 + gap, math.max(bottomMargin, screen.height - fallbackH - bottomMargin)),
+    availableHeight: fallbackH,
+  );
+}
+
+/// 面板高度下限：低于它就不值得翻到锚点上/下方之外的位置（候选值大多是
+/// 四五个短词，十几个就够放下）。
+const double _kOptPickerMinHeight = 56;
+
+/// 浮层与屏幕底部的安全边距。
+const double _kOptPickerBottomMargin = 12;
+
+/// 浮层与被点格子之间的间隙。
+const double _kOptPickerGap = 6;
+
 /// 「当前值 + 候选列表」—— [OptGrid] 点值后弹出的选择器。
 ///
 /// 返回选中的值；取消 / 点遮罩返回 null（调用方据此不改任何东西）。
 ///
-/// **为什么是 bottom sheet 而不是 dropdown**：应用的 dropdown 展开层取色是
-/// `Theme.of(context).canvasColor`（SDK `dropdown.dart:341`），而这个项目的
-/// 窗口是透出身材质 + `scaffoldBackgroundColor: transparent` 的 ——
+/// **为什么是自绘浮层而不是 dropdown / bottom sheet**：应用的 dropdown 展开层
+/// 取色是 `Theme.of(context).canvasColor`（SDK `dropdown.dart:341`），而这个
+/// 项目的窗口是透出身材质 + `scaffoldBackgroundColor: transparent` 的 ——
 /// dropdown 的菜单会变成一块与卡片无关的实色面板，在毛玻璃上很突兀
-/// （2026-10-11 真机撞过同一个毛病，`app_theme.dart:330` 记着）。
-/// bottom sheet 自己管底色，与其余浮层一致。
+/// （2026-10-11 真机撞过同一个毛病，`app_theme.dart:330` 记着）。自绘浮层
+/// 自己管底色，与其余浮层一致。
+///
+/// ### 2026-10-15 从 bottom sheet 改为贴格浮层（真机反馈）
+///
+/// 原来用 [showModalBottomSheet]：浮层从屏幕最底部滑上来，与被点的那一格
+/// 隔着半个屏幕。现在 [showGeneralDialog]（`barrierDismissible: true` +
+/// 半透明遮罩 + 淡入轻缩放过渡），内容用 [Align] 按 [anchorRect] 定位 ——
+/// 见 [_placeAnchored]。
+///
+/// 观察到的现状：面板观感（`Material(color: c.surfaceFloat)` + 圆角 +
+/// [ListTile] + `c.accentText` 选型高亮与末尾对勾）、导航语义（点候选
+/// `Navigator.pop(ctx, opt)` 带回值、点遮罩/返回键返回 null）、
+/// `BoxConstraints(maxWidth: 460)` 的宽度上限全部保留。
 ///
 /// ### 容器是 `Material` 而不是 `DecoratedBox`（S9b 修）
 ///
@@ -252,73 +365,129 @@ Future<T?> showOptPicker<T>(
   required T current,
   List<T> options = const [],
   OptLabelOf<T>? labelOf,
+  Rect? anchorRect,
 }) async {
   final c = AppTheme.colorsOf(context);
   final list = options.isEmpty ? <T>[current] : options;
   String label(T v) => labelOf == null ? v.toString() : labelOf(v);
 
-  final picked = await showModalBottomSheet<T>(
+  final picked = await showGeneralDialog<T>(
     context: context,
-    backgroundColor: Colors.transparent,
-    // 内容短，别让 sheet 拖到半屏 —— 候选值大多是四五个短词。
-    constraints: const BoxConstraints(maxWidth: 460),
-    builder: (ctx) => Material(
-      color: c.surfaceFloat,
-      clipBehavior: Clip.antiAlias,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-              child: Row(
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: c.textStrong,
-                    ),
-                  ),
-                ],
-              ),
+    barrierDismissible: true,
+    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    // 遮罩色从既有色板槽位派生（`c.textMuted` 压暗），不引入写死的十六进制
+    // 色值：`visual_tokens_test` 的棘轮只登记 lib/theme/ 内的硬编码色，组件里
+    // 新增一处就当场红 —— 本文件 S9b 阶段为同一个原因栽过一次。
+    barrierColor: c.textMuted.withValues(alpha: 0.55),
+    transitionDuration: const Duration(milliseconds: 120),
+    pageBuilder: (ctx, _, _) {
+      final screen = MediaQuery.sizeOf(ctx);
+      final media = MediaQuery.of(ctx);
+      // 面板自身可滚、且不溢出屏幕：高度受「锚点邻域」和整屏各夹一次，
+      // 取更紧的那个，底部再留安全边距。
+      final sheetMaxHeight = math.max(
+        _kOptPickerMinHeight,
+        math.min(media.size.height / 2 + 80, media.size.height - _kOptPickerBottomMargin),
+      );
+      final placement = _placeAnchored(
+        screen: screen,
+        anchor: anchorRect ?? Rect.zero,
+        panelWidth: math.min(460.0, screen.width),
+        sheetMaxHeight: sheetMaxHeight,
+        gap: _kOptPickerGap,
+        bottomMargin: _kOptPickerBottomMargin,
+      );
+
+      return Align(
+        alignment: Alignment.topLeft,
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: placement.left,
+            top: placement.top,
+            right: math.max(0.0, screen.width - placement.left - math.min(460.0, screen.width)),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 460,
+              maxHeight: placement.availableHeight,
             ),
-            Divider(height: 1, thickness: 0.5, color: c.line),
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final opt in list)
-                    ListTile(
-                      dense: true,
-                      title: Text(
-                        label(opt),
+            child: Material(
+              color: c.surfaceFloat,
+              clipBehavior: Clip.antiAlias,
+              borderRadius: const BorderRadius.all(Radius.circular(14)),
+              child: SafeArea(
+                top: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 12.5,
-                          color: opt == current || _same(opt, current)
-                              ? c.accentText
-                              : c.textNormal,
-                          fontWeight:
-                              opt == current || _same(opt, current)
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
+                          fontWeight: FontWeight.w600,
+                          color: c.textStrong,
                         ),
                       ),
-                      trailing: opt == current || _same(opt, current)
-                          ? Icon(Icons.check, size: 16, color: c.accentText)
-                          : null,
-                      onTap: () => Navigator.pop(ctx, opt),
                     ),
-                ],
+                    Divider(height: 1, thickness: 0.5, color: c.line),
+                    Flexible(
+                      child: ListView(
+                        key: const ValueKey('_optPickerBody'),
+                        shrinkWrap: true,
+                        padding: EdgeInsets.zero,
+                        children: [
+                          for (final opt in list)
+                            ListTile(
+                              dense: true,
+                              title: Text(
+                                label(opt),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: opt == current || _same(opt, current)
+                                      ? c.accentText
+                                      : c.textNormal,
+                                  fontWeight:
+                                      opt == current || _same(opt, current)
+                                          ? FontWeight.w600
+                                          : FontWeight.w400,
+                                ),
+                              ),
+                              trailing: opt == current || _same(opt, current)
+                                  ? Icon(Icons.check, size: 16, color: c.accentText)
+                                  : null,
+                              onTap: () => Navigator.pop(ctx, opt),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 6),
-          ],
+          ),
         ),
-      ),
-    ),
+      );
+    },
+    transitionBuilder: (ctx, animation, _, child) {
+      final eased = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+      return FadeTransition(
+        opacity: eased,
+        child: ScaleTransition(
+          // 缩放支点固定左上：与浮层「从被点那格长出来」的方向一致。
+          scale: Tween<double>(begin: 0.96, end: 1.0).animate(eased),
+          alignment: Alignment.topLeft,
+          child: child,
+        ),
+      );
+    },
   );
   return picked;
 }
