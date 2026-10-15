@@ -270,6 +270,45 @@ void main() {
     expect(crossAxisCountOf(tester), 3);
   });
 
+  testWidgets('QuickGrid 在窄栏下降为 2 列（否则文字退化成竖排）', (tester) async {
+    // 2026-10-15 真机缺陷：预览稿是固定三列，但那是按 1440 宽的设计稿画的。
+    // 真机上窗口可以小到 880，总览页左栏（flex 135/235）再一分，每列只剩
+    // 约 160px —— 卡片 147 − padding 28 − 图标 34 − 间距 11 − 间距 8 − 箭头 16
+    // = **文字只有 50px**，中文一行放不下 5 个字，真机表现是「输 入…」
+    // 「左 边…」这种两字一行。所以组件按可用宽度自适应列数。
+    tester.view.physicalSize = const Size(440, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      AppTheme(
+        colors: AppColors.dark,
+        brightness: Brightness.dark,
+        child: MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 420, // < 3*150 + 2*10 = 470 → 降两列
+              child: QuickGrid(
+                cells: [
+                  for (var i = 0; i < 6; i++)
+                    QuickCell(
+                      icon: Icons.play_arrow,
+                      title: '入口 $i',
+                      sub: '副题 $i',
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(crossAxisCountOf(tester), 2,
+        reason: '窄栏必须降列，否则标题会被压成两字一行（真机缺陷，2026-10-15）');
+  });
+
   // ── HeroBanner ──────────────────────────────────────────────────────────
 
   testWidgets('HeroBanner 渲染 badge / title / subtitle / pills', (tester) async {

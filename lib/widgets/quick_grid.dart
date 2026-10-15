@@ -33,26 +33,46 @@ class QuickGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView(
-      // 嵌在页面滚动容器里：快捷卡是「两行三列」的固定网格，外层滚动。
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      // **高度固定，不按宽高比**（2026-10-15 修，与 [OptGrid] 同一处问题）。
-      //
-      // 原来用 `childAspectRatio: 1.6` —— 按栏宽算高度：格子宽 180 时高 112，
-      // 比内容（图标块 34 + 上下 padding 26 = 60）高出一大截，真机上表现为
-      // 卡片里大片留白、副题被挤成省略号。改成固定 `mainAxisExtent` 后，
-      // 高度与栏宽解耦。
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
-        // 高度按**较高的一侧**取：图标块 34 与「标题 17 + 1 + 副题两行 28」
-        // 里的 46，加下上 padding 26 → 72。实测 74 仍溢出 2px（中文行高比
-        // 估算的略大），给到 78。
-        mainAxisExtent: 78,
-      ),
-      children: [for (final cell in cells) _QuickTile(cell: cell)],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // **按可用宽度决定列数**（2026-10-15 修一个真机缺陷）。
+        //
+        // 预览稿是固定三列，但那是按 1440 宽的设计稿画的。真机上窗口可以小到
+        // 880 —— 总览页左栏（flex 135/235）再一分，每列只剩约 160px：
+        //
+        //   卡片 147 − 卡内 padding 28 − 图标 34 − 间距 11 − 间距 8 − 箭头 16
+        //   = **文字只有 50px** → 中文 10.5px 一行放不下 5 个字，
+        //   真机表现是「输 入…」「左 边…」这种两字一行（1280 窗口实测）。
+        //
+        // 所以按宽度自适应：够宽走预览稿的三列，窄了降两列。
+        // 阈值 150：每列 ≥150 时，文字列 ≥ (150-28-34-11-8-16) = 53px，
+        // 加上标题字号更小（13px，一行 4 字），两行能放下「输入用户 ID 批量下载」
+        // 这类 10 字标题；低于它就必须降列，否则文字退化成竖排。
+        final width = constraints.maxWidth;
+        final columns = width >= 3 * 150 + 2 * 10 ? 3 : 2;
+
+        return GridView(
+          // 嵌在页面滚动容器里：快捷卡是固定网格，外层滚动。
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          // **高度固定，不按宽高比**（与 [OptGrid] 同一处问题）。
+          //
+          // 原来用 `childAspectRatio: 1.6` —— 按栏宽算高度：格子宽 180 时高 112，
+          // 比内容（图标块 34 + 上下 padding 26 = 60）高出一大截，真机上表现为
+          // 卡片里大片留白、副题被挤成省略号。改成固定 `mainAxisExtent` 后，
+          // 高度与栏宽解耦。
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            // 高度按**较高的一侧**取：图标块 34 与「标题 17 + 1 + 副题两行 28」
+            // 里的 46，加下上 padding 26 → 72。实测 74 仍溢出 2px（中文行高比
+            // 估算的略大），给到 78。
+            mainAxisExtent: 78,
+          ),
+          children: [for (final cell in cells) _QuickTile(cell: cell)],
+        );
+      },
     );
   }
 }
