@@ -204,18 +204,18 @@ void main() {
 /// 「曾在这里挂过一层 `AppScrollbarTheme`」「`Scrollbar(thickness: 0)` 不可靠」
 /// 这类**说明性注释**会让判据永久假红 —— 守卫的本意是「代码里没再引用」，
 /// 不是「任何字符都不许出现」。与 `l10n_test.dart` 剥注释取字面量是同一类
-/// 防护（见该文件 `_stripComments`），这里只做本测试需要的两种行注释。
-String _stripComments(String src) => src
+/// 防护（见该文件同名的剥注释函数），这里只做本测试需要的两种行注释。
+String stripCommentsForGuard(String src) => src
     .replaceAll(RegExp(r'///[^\n]*'), '')
     .replaceAll(RegExp(r'//[^\n]*'), '');
 
 /// 只保留代码中的标识符形态，避免 'dart:math' 之类的串内命中。
 ///
 /// `isNot(contains('Scrollbar('))` 若匹配到 `// Scrollbar(...) 说明` 之外，
-/// 还可能命中**字符串字面量**里的同名单词。上面那个 `_stripComments` 已排掉
-/// 注释，剩下的风险面很窄；这里再收一道：把单/双引号串整体替换成等长空格，
-/// 保持行号结构不变，便于对不上时肉眼比对。
-String _codeOnly(String src) => _stripComments(src)
+/// 还可能命中**字符串字面量**里的同名单词。上面那个剥注释函数已排掉注释，
+/// 剩下的风险面很窄；这里再收一道：把单/双引号串整体替换掉，避免把说明
+/// 文字里的同名单词当成代码引用。
+String codeOnlyForGuard(String src) => stripCommentsForGuard(src)
     .replaceAll(RegExp(r"'[^']*'"), '')
     .replaceAll(RegExp(r'"[^"]*"'), '');
 
@@ -230,13 +230,13 @@ group('源码守卫：接线没被摘掉', () {
       // 否则将来有人「顺手恢复」一层空壳主题，后人会以为还在给滚动条配色。
       //
       // 剥注释后比对：否则说明这段理由的注释自己就会让判据假红。
-      expect(_codeOnly(src), isNot(contains('AppScrollbarTheme')),
+      expect(codeOnlyForGuard(src), isNot(contains('AppScrollbarTheme')),
           reason: '滚动条已彻底不创建，不应再引用样式主题');
     });
 
     test('behavior 本体不再构造 Scrollbar（源码级，防将来被加回来）', () {
       final src = File('lib/theme/app_scroll_behavior.dart').readAsStringSync();
-      final code = _codeOnly(src);
+      final code = codeOnlyForGuard(src);
       // 先把 `buildScrollbar` 这个方法名本身摘掉 —— 否则它就是 `Scrollbar(`
       // 的子串，判据会永远假红（同 `visual_tokens_test` 正则要加词边界的教训）。
       final stripped = code.replaceAll('buildScrollbar', '');
@@ -248,7 +248,7 @@ group('源码守卫：接线没被摘掉', () {
 
     test('抖音解析页不再显式包裹 Scrollbar（2fae366 漏掉的那一处）', () {
       final src = File('lib/pages/douyin_page.dart').readAsStringSync();
-      expect(_codeOnly(src), isNot(contains('Scrollbar(')),
+      expect(codeOnlyForGuard(src), isNot(contains('Scrollbar(')),
           reason: '显式写出来的 Scrollbar 不受全局 behavior 管辖，'
               '是「滚动条还在」最可能的漏网点');
       expect(src, contains('NoScrollbarBehavior'),
