@@ -888,7 +888,6 @@ const Map<String, String> kStringsEn = {
   '这四项在 B 站解析页的「下载选项」里改 —— 那里能即时看到排版效果。':
       'These four are changed under Download options on the Bilibili page — the '
       'layout updates there live.',
-  '默认（exe 同级）': 'Default (next to the exe)',
   '命名模板': 'Naming templates',
   '是': 'Yes',
   '否': 'No',

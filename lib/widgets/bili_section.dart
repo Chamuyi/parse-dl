@@ -273,7 +273,8 @@ class _BiliSectionState extends State<BiliSection> {
               options: const [0, 256, 512, 1024, 2048, 4096, 8192],
             ),
           ],
-          labelOf: _optLabel,
+          // 这一格的 int 是**限速**，用专门的 label（见 `_containerOptLabel`）。
+          labelOf: _containerOptLabel,
           onChanged: (item, v) => _applyContainerOpt(item, v),
         ),
         const SizedBox(height: 8),
@@ -412,7 +413,7 @@ class _BiliSectionState extends State<BiliSection> {
         // ⑧ 保存与命名 —— 三个模块各自独立，不能因为预览稿没画这一段就删
         SubSection(t('保存与命名')),
         FieldRow(
-          value: _saveDir.text.isEmpty ? t('默认（exe 同级）') : _saveDir.text,
+          value: _saveDir.text.isEmpty ? defaultDownloadDir() : _saveDir.text,
           mono: true,
           buttons: [FieldButton(t('选择'), onPressed: _pickSaveDir)],
         ),
@@ -514,12 +515,28 @@ class _BiliSectionState extends State<BiliSection> {
   }
 
   /// 枚举格子的显示文本（走各枚举自己的 `label`，与旧下拉里的文案逐字相同）。
+  ///
+  /// **`int` 分两种含义，必须按网格分开处理**（2026-10-15 修一个真机缺陷）：
+  /// 「画质与编码」网格里的 int 是**并发数**（`b.concurrency`，值 4 = 同时下 4 个），
+  /// 「容器与合并」网格里的 int 是**限速**（`b.speedLimitKbps`，0 = 不限速）。
+  ///
+  /// 原来只有一个 `_optLabel`，`int n => n == 0 ? '不限' : '$n KB/s'` 一刀切 ——
+  /// 于是并发数 4 被显示成 **「4 KB/s」**（真机截图里就是这么错的），
+  /// 而且并发数 0 与限速 0 都显示「不限」，用户分不清哪个是哪个。
   String _optLabel(Object v) => switch (v) {
     BiliQuality q => t(q.label),
     BiliCodec e => t(e.label),
     BiliContainer k => t(k.label),
-    int n => n == 0 ? t('不限') : '$n KB/s',
+    // 「画质与编码」网格里的 int = 并发数，就是个数字，不带单位。
+    int n => '$n',
     bool on => t(on ? '是' : '否'),
+    _ => '$v',
+  };
+
+  /// 「容器与合并」网格的显示文本 —— 这里的 int 是**限速**。
+  String _containerOptLabel(Object v) => switch (v) {
+    BiliContainer k => t(k.label),
+    int n => n == 0 ? t('不限') : '$n KB/s',
     _ => '$v',
   };
 

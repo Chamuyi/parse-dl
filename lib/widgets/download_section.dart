@@ -8,6 +8,7 @@ import '../models/media.dart';
 import '../services/download_store.dart';
 import '../services/file_name_template.dart';
 import '../services/settings_store.dart';
+import '../services/template_source.dart';
 import '../theme/app_theme.dart';
 import 'app_toast.dart';
 import 'field_row.dart';
@@ -177,9 +178,14 @@ class _DownloadSectionState extends State<DownloadSection> {
       mainAxisSize: MainAxisSize.min,
       children: [
         // ① 保存路径（预览稿 `:461` 的 `.opt` 之一，这里用 `.row .field .btn`）
+        //
+        // 留空时显示**实际会落到的那个目录**（`defaultDownloadDir()`），不是
+        // 一句「默认」描述 —— 2026-10-15 用户拿资源管理器核对，发现原来写的
+        // 「默认（exe 同级）」与实际落点对不上。显示端与协调器共用同一个函数，
+        // 路径以后再改也不会重新漂移。
         FieldRow(
           value: _saveDir.text.isEmpty
-              ? t('默认（exe 同级）')
+              ? defaultDownloadDir()
               : _saveDir.text,
           mono: true,
           buttons: [

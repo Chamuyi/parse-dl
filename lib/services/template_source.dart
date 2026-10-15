@@ -1,8 +1,40 @@
+import 'dart:io';
+
 import '../models/douyin_config.dart';
 import '../models/settings.dart';
 
 /// 一次下载要用的两个模板（文件夹 / 文件名）。
 typedef TemplatePair = ({String dirTemplate, String fileNameTemplate});
+
+String? _cachedDefaultDir;
+
+/// 「三个模块都没设过保存目录」时，下载落到哪。
+///
+/// 这是 [resolveSaveBase] 的最后一层回退，也是设置页里「没填」时要显示的
+/// **同一个值** —— 两者共用一个函数，而不是各写一遍。
+///
+/// ## 为什么必须共用（2026-10-15 真机）
+///
+/// 设置页此前把这一格显示成「默认（exe 同级）」，而实际落点是
+/// `%USERPROFILE%\Downloads\解析下载器`。用户拿资源管理器一核对就发现对不上。
+/// 把文案换成另一句描述只是把同一次漂移推后：下次改回退路径，文案还会错。
+/// 显示端直接取本函数的返回值，这类不一致才不可能再发生。
+///
+/// 无副作用：只拼路径，不建目录（目录由 aria2 自己创建）。
+String defaultDownloadDir() {
+  final hit = _cachedDefaultDir;
+  if (hit != null) return hit;
+  String path;
+  try {
+    // path_provider 在 Windows 上返回 Roaming AppData；下载目录更友好。
+    final home = Platform.environment['USERPROFILE'] ?? '.';
+    path = Directory('$home\\Downloads\\解析下载器').path;
+  } catch (_) {
+    path = '.';
+  }
+  _cachedDefaultDir = path;
+  return path;
+}
 
 /// 按**下载来源**挑出这次要用的模板。
 ///

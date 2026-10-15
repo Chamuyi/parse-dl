@@ -278,7 +278,7 @@ class _DouyinSectionState extends State<DouyinSection> {
         //    本应用里抖音有自己的保存根目录与两个模板，不能因为预览稿没画就删。
         SubSection(t('保存与命名')),
         FieldRow(
-          value: _saveDir.text.isEmpty ? t('默认（exe 同级）') : _saveDir.text,
+          value: _saveDir.text.isEmpty ? defaultDownloadDir() : _saveDir.text,
           mono: true,
           buttons: [FieldButton(t('选择'), onPressed: _pickSaveDir)],
         ),

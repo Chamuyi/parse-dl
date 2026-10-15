@@ -1000,7 +1000,7 @@ class Aria2Coordinator {
     return resolveSaveBase(
       sessionSaveDir: store.defaultSaveDir,
       xSaveDirBase: settings.settings.download.saveDirBase,
-      fallback: _defaultDownloadDir(),
+      fallback: defaultDownloadDir(),
     );
   }
 
@@ -1477,7 +1477,7 @@ class Aria2Coordinator {
     douyin: douyin,
     sessionSaveDir: store.defaultSaveDir,
     xSaveDirBase: settings.settings.download.saveDirBase,
-    fallback: _defaultDownloadDir(),
+    fallback: defaultDownloadDir(),
   );
 
   /// 把文件夹模板的解析结果拼到保存根目录下。
@@ -1539,24 +1539,6 @@ class Aria2Coordinator {
   static String biliOutBase(String template, Media media, BiliConfig cfg) {
     final full = _renderFileName(template, media, douyin: null, bili: cfg);
     return biliBaseNameFromFileName(full);
-  }
-
-  static String? _cached;
-  String _defaultDownloadDir() {
-    if (_cached != null) return _cached!;
-    String path;
-    try {
-      // path_provider 在 Windows 上返回 Roaming AppData；下载目录更友好
-      // 用 Platform.environment 拿 USERPROFILE/Pictures 或 Downloads
-      final home = Platform.environment['USERPROFILE'] ?? '.';
-      // 优先选 Downloads；不存在就让 aria2 自己创建
-      final dl = Directory('$home\\Downloads\\解析下载器');
-      path = dl.path;
-    } catch (_) {
-      path = '.';
-    }
-    _cached = path;
-    return path;
   }
 
   /// 暂停一条任务。
