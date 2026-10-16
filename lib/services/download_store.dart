@@ -86,6 +86,16 @@ class DownloadTask {
   /// 行上它必须是 `null`，否则用户会看到一个「挂着上次会话旧速度」的假数字。
   int? speedBytesPerSec;
 
+  /// 排队位次：队列里排在它前面、还没轮到它的任务数（0 = 下一个就是它）。
+  ///
+  /// 只有 `waiting` 时才由 `DownloadStore.markWaiting` 写入 —— 界面据此把
+  /// 「队列中」写具体（「前面还有 N 条」，见 `download_list_item.dart`）。
+  ///
+  /// 与 [speedBytesPerSec] 同一类：**这是此刻的一帧快照，不是这一行的属性**，
+  /// 所以同样不进 `_taskToJson`。重启后由 `Aria2Coordinator._pollActive` /
+  /// `reconcile` 重新问一遍引擎，写进任务表只会变成一个过期假数字。
+  int? queueAhead;
+
   /// 完成之后要补给用户看的一句说明（**不是错误**，状态仍是已完成）。
   ///
   /// 这一期唯一的使用者是 B 站的附加文件：主产物完好、但用户勾的某样没拿到。
@@ -108,6 +118,7 @@ class DownloadTask {
     this.attempt = 0,
     this.speedLimitKbps,
     this.speedBytesPerSec,
+    this.queueAhead,
     this.note,
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
@@ -409,10 +420,11 @@ class DownloadStore extends ChangeNotifier {
       retryRemains: t.retryRemains,
       attempt: t.attempt,
       speedLimitKbps: t.speedLimitKbps,
-      // **必须带上实时速度**：本方法整体重建 DownloadTask，漏掉它会让
-      // 「改个备注 → 速度显示消失」这种静默抖动。本类重建共两处
-      // （`markNote` / `markActive`），加新可变字段时两处都要带。
+      // **必须带上实时速度与排队位次**：本方法整体重建 DownloadTask，
+      // 漏掉就是「改个备注 → 速度显示消失」这种静默抖动。本类重建共三处
+      // （`markNote` / `markActive` / `renameTaskFile`），加新可变字段时三处都要带。
       speedBytesPerSec: t.speedBytesPerSec,
+      queueAhead: t.queueAhead,
       note: note,
       createdAt: t.createdAt,
     );
@@ -435,11 +447,50 @@ class DownloadStore extends ChangeNotifier {
       retryRemains: t.retryRemains,
       attempt: t.attempt,
       speedLimitKbps: t.speedLimitKbps,
-      // 同上：整体重建时不能丢实时速度（换源重投、恢复下载都走这里）。
+      // 同上：整体重建时不能丢实时速度与排队位次（换源重投、恢复下载都走这里）。
       speedBytesPerSec: t.speedBytesPerSec,
+      queueAhead: t.queueAhead,
       note: t.note,
       createdAt: t.createdAt,
     );
+    _changed();
+  }
+
+  /// 引擎说这条任务还在**排队**（aria2 的 `waiting`），不是「正在下载」。
+  ///
+  /// 为什么需要（2026-10-16）：`DownloadStatus.waiting` 此前在全 `lib/` 里
+  /// **没有任何赋值点** —— 它只被读取。引擎那边 200 条 `waiting` 全被
+  /// `aria2_coordinator.dart` 的 `case AriaStatus.active: case AriaStatus.waiting:`
+  /// 走成 `active`，于是界面上只有「下载中 0%」一种样子：用户看不出队列是在
+  /// 往前挪还是整个卡死了。
+  ///
+  /// [aheadCount] 是队列里排在它前面的任务数（0 = 下一个就轮到它）。
+  /// 幂等：状态与位次都没变就**不落盘也不通知** —— 这个方法是每秒轮询调的。
+  void markWaiting(String gid, {int? aheadCount}) {
+    final t = _findByGid(gid);
+    if (t == null) return;
+    if (t.status == DownloadStatus.waiting && t.queueAhead == aheadCount) {
+      return;
+    }
+    t.status = DownloadStatus.waiting;
+    t.queueAhead = aheadCount;
+    _changed();
+  }
+
+  /// 引擎开始下载这条任务了 —— 把「排队中 / 已暂停」翻回「下载中」。
+  ///
+  /// [markResumed] 只管「已暂停 → 下载中」（它是为「点了继续没反应」修的），
+  /// 而 `waiting` 的任务被引擎取出开始下时同样要翻回 `active`：只认 `paused`
+  /// 的话，界面会**永远停在「队列中」**，比不显示排队更糟。
+  void markDownloading(String localId) {
+    final t = _tasks[localId];
+    if (t == null) return;
+    if (t.status != DownloadStatus.paused &&
+        t.status != DownloadStatus.waiting) {
+      return;
+    }
+    t.status = DownloadStatus.active;
+    _clearQueueAhead(t);
     _changed();
   }
 
@@ -484,6 +535,15 @@ class DownloadStore extends ChangeNotifier {
     t.speedBytesPerSec = null;
   }
 
+  /// 离开排队态时清掉位次 —— 与 [_clearSpeed] 同一个理由：它是「此刻」的快照。
+  ///
+  /// 不清的话，一条「已完成」或「已暂停」的行上会继续写着「前面还有 3 条」，
+  /// 而它早就不在队列里了。
+  void _clearQueueAhead(DownloadTask t) {
+    if (t.queueAhead == null) return;
+    t.queueAhead = null;
+  }
+
   /// 标记完成。
   void markComplete(String gid) {
     final t = _findByGid(gid);
@@ -491,6 +551,7 @@ class DownloadStore extends ChangeNotifier {
     t.status = DownloadStatus.complete;
     t.progress = 1000;
     _clearSpeed(t);
+    _clearQueueAhead(t);
     _changed();
   }
 
@@ -506,6 +567,7 @@ class DownloadStore extends ChangeNotifier {
     t.status = DownloadStatus.error;
     t.errorMessage = message;
     _clearSpeed(t);
+    _clearQueueAhead(t);
     _changed();
   }
 
@@ -519,6 +581,7 @@ class DownloadStore extends ChangeNotifier {
     t.status = DownloadStatus.error;
     t.errorMessage = message;
     _clearSpeed(t);
+    _clearQueueAhead(t);
     _changed();
   }
 
@@ -535,6 +598,7 @@ class DownloadStore extends ChangeNotifier {
     t.errorMessage = null;
     if (totalBytes != null) t.totalBytes = totalBytes;
     _clearSpeed(t);
+    _clearQueueAhead(t);
     _changed();
   }
 
@@ -544,6 +608,7 @@ class DownloadStore extends ChangeNotifier {
     if (t == null) return;
     t.status = DownloadStatus.paused;
     _clearSpeed(t);
+    _clearQueueAhead(t);
     _changed();
   }
 
@@ -584,8 +649,9 @@ class DownloadStore extends ChangeNotifier {
       retryRemains: t.retryRemains,
       attempt: t.attempt,
       speedLimitKbps: t.speedLimitKbps,
-      // 同上：整体重建时不能丢实时速度（下载中改文件名也会走到这里）。
+      // 同上：整体重建时不能丢实时速度与排队位次（下载中改文件名也会走到这里）。
       speedBytesPerSec: t.speedBytesPerSec,
+      queueAhead: t.queueAhead,
       note: t.note,
       createdAt: t.createdAt,
     );
@@ -659,6 +725,7 @@ class DownloadStore extends ChangeNotifier {
     if (t == null) return;
     t.status = DownloadStatus.paused;
     _clearSpeed(t);
+    _clearQueueAhead(t);
     _changed();
   }
 

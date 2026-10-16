@@ -97,7 +97,11 @@ class DownloadListItem extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    _StatusBadge(status: task.status, colors: c),
+                    _StatusBadge(
+                      status: task.status,
+                      colors: c,
+                      queueAhead: task.queueAhead,
+                    ),
                   ],
                 ),
                 const SizedBox(height: 6),
@@ -156,7 +160,10 @@ class DownloadListItem extends StatelessWidget {
       case DownloadStatus.pending:
         return '等待入队…';
       case DownloadStatus.waiting:
-        return 'aria2 队列中…';
+        // 「排队中」必须说清排在哪 —— 只写「队列中」时，一条前面还有 180 条
+        // 的任务与一条下一个就轮到它的任务长得一模一样（2026-10-16）。
+        final ahead = t.queueAhead;
+        return ahead == null ? 'aria2 队列中…' : 'aria2 队列中，前面还有 $ahead 条…';
       case DownloadStatus.active:
         return '${t.progressPercent.toStringAsFixed(1)}% · ${t.saveDir}';
       case DownloadStatus.paused:
@@ -228,7 +235,14 @@ class _ProgressLine extends StatelessWidget {
 class _StatusBadge extends StatelessWidget {
   final DownloadStatus status;
   final AppColors colors;
-  const _StatusBadge({required this.status, required this.colors});
+
+  /// 排队位次（`DownloadStatus.waiting` 时才有意义，见 [DownloadTask.queueAhead]）。
+  final int? queueAhead;
+  const _StatusBadge({
+    required this.status,
+    required this.colors,
+    this.queueAhead,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -239,7 +253,7 @@ class _StatusBadge extends StatelessWidget {
           Icons.schedule,
         ),
       DownloadStatus.waiting => (
-          '队列中',
+          queueAhead == null ? '队列中' : '队列中 · 前面还有 $queueAhead 条',
           colors.textMuted,
           Icons.schedule,
         ),

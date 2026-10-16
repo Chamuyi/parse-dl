@@ -579,6 +579,54 @@ class Aria2Coordinator {
     // 并发数（参照实现的 `limit`，默认 4）是全局选项，启动时先落一次，
     // 免得用户上次改过的值在重启后失效。
     await applyConcurrency(settings.settings.douyin.concurrency);
+
+    // 会话文件里读回来的**排队中**死任务也要摘（见 [_purgeOrphanSessionTasks]）：
+    // 只靠 error 事件的话，它们会一直卡在队列里占着并发槽 —— 界面看不到它
+    // （本地早就没有那一行），要等 `--lowest-speed-limit` 把它判成 Too slow
+    // 才轮到 error，一个僵尸白占一到两分钟。
+    await _purgeOrphanSessionTasks();
+  }
+
+  /// 开机扫一遍：把「aria2 会话里有、本地任务表里没有」的任务摘掉。
+  ///
+  /// 为什么要主动扫（2026-10-16）：`_handleFailure` 只在引擎**报 error** 时摘
+  /// 僵尸，而 `--input-file` 读回的死任务先落在 `waiting`（引擎要去重试它才会
+  /// 失败），那批 waiting 的僵尸永远走不到 error 那条路。另外从会话读回来就已经
+  /// 是 `complete` / `error` 的那些不会再发任何事件，也只能在开机时扫一遍。
+  ///
+  /// 代价是两次 RPC（`tellWaiting` / `tellStopped`，都只取 gid 列表），只在开机
+  /// 跑一次；**任何一步失败都只记日志** —— 它是一次尽力而为的清理，不能拖住启动。
+  Future<void> _purgeOrphanSessionTasks() async {
+    final store = _store;
+    if (store == null || !_booted) return;
+    final scanned = <String>[];
+    for (final (label, fetch) in <(String, Future<List<String>> Function())>[
+      ('aria2 等待队列', _aria.tellWaitingGids),
+      ('aria2 已停任务', _aria.tellStoppedGids),
+    ]) {
+      List<String> gids;
+      try {
+        gids = await fetch();
+      } catch (e) {
+        AppLogger.log('ARIA2', '开机清理：读 $label 失败（跳过这一批）：$e');
+        continue;
+      }
+      scanned.addAll(gids);
+      var dropped = 0;
+      for (final gid in gids) {
+        // 本地表里有它 → 是用户看得见的任务，一律不动。
+        if (store.taskByGid(gid) != null) continue;
+        await _dropOrphanGid(gid, '开机清理：$label 里读回的会话残留');
+        dropped++;
+      }
+      if (dropped > 0) {
+        AppLogger.log('ARIA2', '开机清理：$label 里摘掉 $dropped 条会话残留'
+            '（共扫到 ${gids.length} 条）');
+      }
+    }
+    if (scanned.isNotEmpty) {
+      AppLogger.log('ARIA2', '开机清理完成：扫到 ${scanned.length} 条引擎侧任务');
+    }
   }
 
   /// 重启对账：把**从任务表恢复出来的任务**与 aria2 的实际状态对齐。
@@ -643,12 +691,15 @@ class Aria2Coordinator {
         case AriaStatus.removed:
           store.markErrorByGid(gid, '任务已从 aria2 中移除');
         case AriaStatus.active:
-        case AriaStatus.waiting:
-          final progress = remote.totalSize > 0
-              ? (remote.completeSize * 1000 ~/ remote.totalSize)
-              : 0;
-          store.updateProgress(gid, progress.clamp(0, 1000), remote.totalSize,
+          store.updateProgress(gid, _progressOf(remote), remote.totalSize,
               downloaded: remote.completeSize);
+        case AriaStatus.waiting:
+          // **排队中不是「下载中」**（2026-10-16 修）：此前两者共用一条分支，
+          // 于是引擎里几百条 waiting 全被显示成「下载中 0%」。位次这一轮不查
+          // （对账只跑一次，`_pollActive` 接手后会把「前面还有 N 条」补上）。
+          store.updateProgress(gid, _progressOf(remote), remote.totalSize,
+              downloaded: remote.completeSize);
+          store.markWaiting(gid);
       }
     }
 
@@ -1840,6 +1891,24 @@ class Aria2Coordinator {
     }
   }
 
+  /// 千分比的进度（aria2 的精度），没有总长时是 0。
+  static int _progressOf(AriaTask t) =>
+      t.totalSize > 0 ? (t.completeSize * 1000 ~/ t.totalSize).clamp(0, 1000) : 0;
+
+  /// 问一次 aria2 的等待队列，返回 gid → 排在它前面还有几条（0 = 下一个轮到它）。
+  ///
+  /// 失败返回空表：位次只是给界面看的补充信息，拿不到就只显示「队列中」，
+  /// 不能因为这一次 RPC 把整轮进度轮询判失败。
+  Future<Map<String, int>> _queuedPositions() async {
+    try {
+      final gids = await _aria.tellWaitingGids();
+      return {for (var i = 0; i < gids.length; i++) gids[i]: i};
+    } catch (e) {
+      debugPrint('[Aria2Coordinator] tellWaiting: $e');
+      return const {};
+    }
+  }
+
   /// 拉一次所有活跃任务的进度。
   Future<void> _pollActive() async {
     final store = _store;
@@ -1848,16 +1917,31 @@ class Aria2Coordinator {
     if (gids.isEmpty) return;
     try {
       final results = await _aria.tellStatusBatch(gids);
+      // 「排队中」与「下载中」按引擎的**真实状态**分开写回（2026-10-16 修）：
+      // 此前两者一起走 active 分支，界面只剩「下载中 0%」一种样子，用户看不出
+      // 队列是在往前挪还是整个卡死。位次只在真有排队任务时才去问（队列空时白问）。
+      final queued = results.values.any((t) => t.status == AriaStatus.waiting)
+          ? await _queuedPositions()
+          : const <String, int>{};
       results.forEach((gid, task) {
-        final progress = task.totalSize > 0
-            ? (task.completeSize * 1000 ~/ task.totalSize)
-            : 0;
-        store.updateProgress(gid, progress.clamp(0, 1000), task.totalSize,
+        store.updateProgress(gid, _progressOf(task), task.totalSize,
             downloaded: task.completeSize);
         // 实时速度走 aria2 的 `downloadSpeed`（字节/秒），**不在这里用两次
         // 进度采样现场估算**：估算值在切源重投、暂停恢复、连接刚建立时都会
         // 给出没有意义的数，而引擎本来就是逐帧算好这个值的。
         store.updateSpeed(gid, task.speedBytesPerSec);
+        switch (task.status) {
+          case AriaStatus.waiting:
+            store.markWaiting(gid, aheadCount: queued[gid]);
+          case AriaStatus.active:
+            // 引擎已经开始下了 —— 把「排队中」翻回「下载中」。只认 paused 的
+            // `markResumed` 管不到这一档，漏了它就永远停在「队列中」。
+            final localId = store.localIdForGid(gid);
+            if (localId != null) store.markDownloading(localId);
+          case _:
+            // 暂停 / 完成 / 失败由事件回写，这一轮不动它们。
+            break;
+        }
       });
     } catch (e) {
       // 单次失败忽略，下次再试
@@ -1868,9 +1952,10 @@ class Aria2Coordinator {
   void _onStart(String gid) {
     // 启动事件本身就是「已被 aria2 接受」；首次入队时的 markActive 已在
     // enqueueMedia 里做了。但**从暂停里恢复**没有别的地方会翻状态，
-    // 界面会一直停在「已暂停」，所以这里按 gid 纠正一次。
+    // 界面会一直停在「已暂停」——「从队列里被取出来开始下」也是同一回事，
+    // 所以这里按 gid 纠正一次（两种来源都由 `markDownloading` 收口）。
     final localId = _store?.localIdForGid(gid);
-    if (localId != null) _store?.markResumed(localId);
+    if (localId != null) _store?.markDownloading(localId);
     AppLogger.log('ARIA2', '开始下载 gid=$gid');
   }
 
@@ -2060,9 +2145,25 @@ class Aria2Coordinator {
       AppLogger.log('ARIA2', '退避等待期间任务已不在，取消重新提交：${t.fileName}');
       return;
     }
-    try {
-      await _aria.remove(gid);
-    } catch (_) {}
+    // 先把旧 gid 从引擎里清掉。这里**不能**再写成 `catch (_) {}`：重投的场景
+    // 就是「这条任务刚失败」，它此刻多半已经停下，而 `aria2.remove` 对已停下的
+    // gid 必然回 `Active Download not found`（真机原文，2026-10-16）。异常被吞
+    // 掉 → 失败无日志、无补救 → 旧 gid 留在 aria2 会话里，是「33 个文件放大成
+    // 261 个任务」的放大器。现在按 ① 同一套语义分两手：remove → 失败记日志 →
+    // forceRemove → 仍不行再清一次结果条目。
+    final removeError = await _tryRemove(gid);
+    if (removeError != null) {
+      AppLogger.log('ARIA2', '重投前移除旧任务失败 gid=$gid（${t.fileName}）：'
+          '$removeError —— 旧 gid 若留在引擎里会重复下载，继续兜底清理');
+      final forceError = await _tryForceRemove(gid);
+      if (forceError != null) {
+        AppLogger.log('ARIA2', 'forceRemove 旧任务也失败 gid=$gid：$forceError');
+      }
+      final resultError = await _tryRemoveDownloadResult(gid);
+      if (resultError != null) {
+        AppLogger.log('ARIA2', '清理旧任务结果条目也失败 gid=$gid：$resultError');
+      }
+    }
     store.remove(t.localId);
     await _submit(t.media, t.saveDir, t.fileName,
         retryRemains: retryRemains,
@@ -2076,14 +2177,56 @@ class Aria2Coordinator {
   /// 不摘的话它会永远留在 `aria2.session` 里：每次 `--input-file` 读回 →
   /// 立刻失败 → 再被 `--save-session` 写回去。界面上看不到它（本地行早没了），
   /// 用户没有任何办法处置它。
+  ///
+  /// **必须按状态分两手摘**（2026-10-16 修）。死任务此刻多半已经停下
+  /// （`error` / `complete` / `removed`），而 `aria2.remove` **只作用于还在
+  /// 队列里**的 gid，对它一律回 `Active Download not found for GID#…` ——
+  /// 旧实现因此是「检测到了、永远摘不掉」，同一个 gid 在日志里被反复刷
+  /// （真机 05:33:17 / 05:33:37 / 05:33:57 三次）。
+  /// 已停下的任务只能靠 `aria2.removeDownloadResult` 清掉结果条目；
+  /// 反过来它也只认已停下的 gid，对还在排队的那批无效（回
+  /// `Could not remove download result`）。所以**先 remove、失败再
+  /// removeDownloadResult**，两条都失败才记一行日志。
   Future<void> _dropOrphanGid(String gid, String msg) async {
     AppLogger.log('ARIA2', '本地任务表里没有 gid=$gid，按死任务从 aria2 摘掉'
         '（不留在会话里等下次开机重跑）：$msg');
+    final firstError = await _tryRemove(gid);
+    if (firstError == null) return;
+    // 走到这里说明它已经不在队列里了（stopped）—— 摘结果条目的那一手才对得上。
+    final secondError = await _tryRemoveDownloadResult(gid);
+    if (secondError == null) return;
+    AppLogger.log('ARIA2', '死任务 gid=$gid 没能摘掉：'
+        'remove=$firstError；removeDownloadResult=$secondError');
+  }
+
+  /// 摘僵尸第一手：`aria2.remove`（只对**还在队列里**的 gid 有效）。
+  /// 成功返回 null，失败把异常原样交回给调用方决定下一步。
+  Future<Object?> _tryRemove(String gid) async {
     try {
       await _aria.remove(gid);
+      return null;
     } catch (e) {
-      // 摘不掉就留着下次，但不能假装成功 —— 留下一行原因。
-      AppLogger.log('ARIA2', '死任务 gid=$gid 没能摘掉：$e');
+      return e;
+    }
+  }
+
+  /// 摘僵尸第二手：`aria2.removeDownloadResult`（只对**已停下**的 gid 有效）。
+  Future<Object?> _tryRemoveDownloadResult(String gid) async {
+    try {
+      await _aria.removeDownloadResult(gid);
+      return null;
+    } catch (e) {
+      return e;
+    }
+  }
+
+  /// 兜底：`aria2.forceRemove`（不等优雅收尾；仍只对**队列里**的 gid 有效）。
+  Future<Object?> _tryForceRemove(String gid) async {
+    try {
+      await _aria.forceRemove(gid);
+      return null;
+    } catch (e) {
+      return e;
     }
   }
 

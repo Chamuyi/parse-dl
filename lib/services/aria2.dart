@@ -715,6 +715,51 @@ class Aria2 {
     gids.map((g) => (method: 'aria2.remove', params: <dynamic>[g])).toList(),
   );
 
+  /// 强制移除（`aria2.forceRemove`）—— 不等待 aria2 的优雅收尾。
+  ///
+  /// **与 [remove] 同一条限制**：只作用于**还在队列里**的 gid，对已经停在
+  /// stopped（complete / error / removed）的任务一律回
+  /// `Active Download not found for GID#…`。已停下的任务只能走
+  /// [removeDownloadResult] 清结果条目。
+  Future<void> forceRemove(String gid) => invoke('aria2.forceRemove', [gid]);
+
+  /// 清掉一条**已停止**任务的下载结果（`aria2.removeDownloadResult`）。
+  ///
+  /// 与 [remove] 的分工是 2026-10-16 修僵尸链路时定下来的，两条**不能互相
+  /// 替代**（本机 aria2c 1.37.0 实测）：
+  ///   - `aria2.remove` 只认还在队列里的 gid，对 stopped 的回
+  ///     `Active Download not found for GID#…`；
+  ///   - 本方法反过来只认 stopped 的 gid，对还在队列里的回
+  ///     `Could not remove download result of GID#…`。
+  /// 摘「本地任务表里已经没有、却仍在会话里」的死任务时两条都要试：只用
+  /// `remove` 就是「检测到了、永远摘不掉」，同一批死任务被 `--save-session`
+  /// 写回 `aria2.session`，下次开机再读回来失败一次。
+  Future<void> removeDownloadResult(String gid) =>
+      invoke('aria2.removeDownloadResult', [gid]);
+
+  /// 队列里**等待中**任务的 gid，按 aria2 的排队顺序（第 0 个最先轮到）。
+  ///
+  /// 只取 `gid` 一个键 —— `tellWaiting` 的第三个参数是 keys 过滤，队列里可能
+  /// 上千条，全字段响应纯属浪费，这里要的只是「谁排在第几个」。
+  Future<List<String>> tellWaitingGids({int max = 1000}) =>
+      _tellGids('aria2.tellWaiting', max);
+
+  /// **已停止**任务的 gid（`aria2.tellStopped`：complete / error / removed）。
+  ///
+  /// 用来找「本次开机之前就已经停下、却还在会话文件里」的残留 —— 这类任务
+  /// 不会再发任何事件，只能主动扫一遍。
+  Future<List<String>> tellStoppedGids({int max = 1000}) =>
+      _tellGids('aria2.tellStopped', max);
+
+  Future<List<String>> _tellGids(String method, int max) async {
+    final r = await invoke(method, [0, max, ['gid']]);
+    if (r is! List) return const [];
+    return [
+      for (final e in r)
+        if (e is Map && '${e['gid']}' != 'null') '${e['gid']}',
+    ];
+  }
+
   /// 合并写入**全局**选项（`aria2.changeGlobalOption`）。
   ///
   /// 传进来的项会被记住并一起下发 —— aria2 的 `changeGlobalOption`
