@@ -21,6 +21,22 @@ import 'package:parse_dl/widgets/download_list_item.dart';
 ///      同一个 gid 每开机一次就被 `--save-session` 写回 `aria2.session`。
 ///   ①b 清理入口不全。僵尸只在 error 事件里被摘，而 `--input-file` 读回的
 ///      死任务**先落在 waiting** —— 那批永远走不到 error，白占并发槽。
+///   ①c 清理入口还漏了 `active`（2026-10-16 二次取证）。同一批会话残留里，
+///      握手挂住的那条直接进 **active**：真机取样 `totalLength=0`、
+///      `downloadSpeed=0`、`connections=1`，47 秒后 `tellStatus` 仍是 `active`，
+///      `tellWaiting` / `tellStopped` 两条都返回空表 —— 于是开机清理一行日志都
+///      打不出来，它却在退出时被 `--save-session` 原样写回，每次开机复活一次。
+///      并发数为 1 时它独占唯一那个槽，整个队列就此堵死。
+///      另外 `tellActive` 的签名与另两条**不同**（只有 `keys`，没有 offset / num），
+///      照抄三参数会被 aria2 回 `The parameter at 0 has wrong type.`，
+///      而扫描源只是**静默**变空表。
+///   ①d 一轮扫描仍会从缝里漏（2026-10-16 三次取证）。并发槽一空出来，引擎立刻
+///      把 `waiting` 里的下一条提升进 `active`（真机日志里 `开始下载 gid=…`
+///      就夹在清理行之间），等轮到扫 waiting 时那几条已经不在了 —— 实测第一轮
+///      摘 5 条、漏掉 4 条。所以反复扫到「本轮没有没见过的新 gid」为止。
+///      另外**退出那次落盘靠不住**：`shutdown` 只给 aria2 2 秒，超了就 `kill()`，
+///      `--save-session` 的退出保存跟着一起丢（真机证据：关窗后 `aria2.session`
+///      的 mtime 停在注入那一刻）。摘完必须自己 `saveSession` 落一次盘。
 ///   ② 重投前「移除旧的」失败被 `catch (_) {}` 吞掉：无日志、无补救，
 ///      旧 gid 留在会话里，是「33 个文件放大成 261 个任务」的放大器。
 ///   ③ `DownloadStatus.waiting` 在全 `lib/` 里**没有任何赋值点**，引擎里几百条
@@ -31,6 +47,14 @@ import 'package:parse_dl/widgets/download_list_item.dart';
 ///     「已停下的 gid … 结果条目仍被清掉」红（`resultRemoved` 永远是空的）；
 ///   * ①b 去掉 `bootstrap` 末尾的 `_purgeOrphanSessionTasks()` →
 ///     「排队中的会话残留被摘掉」红；
+///   * ①c 把 `('aria2 活跃任务', _aria.tellActiveGids)` 从扫描源里删掉 →
+///     「正在下载里的会话残留也要摘」「活跃僵尸走 remove 那一手」红；
+///   * ①c 把 `tellActiveGids` 改成 `_tellGids('aria2.tellActive', 1000)` →
+///     「扫活跃任务用的是 tellActive(keys)」红；
+///   * ①d 把多轮扫描退回单轮（去掉 `round` 那层循环）→
+///     「批次之间被提升进 active 的残留也要摘掉」红；
+///   * ①d 去掉 `_saveSessionAfterPurge()` 那次落盘 →
+///     「摘完立刻把会话落盘」红；
 ///   * ② 把 `_resubmitAfterBackoff` 里那段换回 `catch (_) {}` →
 ///     「remove 报 Active Download not found」红（日志缺失、兜底未发）；
 ///   * ③ 把 `case AriaStatus.waiting` 合回 active 分支、或删掉
@@ -148,6 +172,122 @@ void main() {
 
       expect(env.a.resultRemoved, contains('stale-complete-1'),
           reason: '已停下的条目只能靠 removeDownloadResult 清');
+
+      await env.c.dispose();
+    });
+
+    test('正在下载里的会话残留也要摘：它不发 error，只会白占并发槽', () async {
+      final aria = _FakeAria2()..activeGids = ['orphan-active'];
+      final env = await boot(aria);
+
+      expect(env.a.removeCalls, contains('orphan-active'),
+          reason: '握手挂住的死任务不进 waiting / stopped、也不发 error'
+              '（真机 47 秒后仍是 active）—— 不扫 tellActive 就永远摘不掉，'
+              '它只会在退出时被 --save-session 原样写回，每次开机复活一次');
+
+      await env.c.dispose();
+    });
+
+    test('活跃僵尸走 remove 那一手，不去动结果条目', () async {
+      final aria = _FakeAria2()..activeGids = ['orphan-active'];
+      final env = await boot(aria);
+
+      expect(env.a.removeCalls, contains('orphan-active'));
+      expect(env.a.resultRemoved, isNot(contains('orphan-active')),
+          reason: '它还在队列里，只有 remove 认得；removeDownloadResult '
+              '对队列里的 gid 只会回 Could not remove download result');
+
+      await env.c.dispose();
+    });
+
+    test('本地表里正在下载的那条不许误伤（active 里最常见的就是它）', () async {
+      final aria = _FakeAria2()..activeGids = ['live-gid'];
+      final c = Aria2Coordinator.withAria2(aria);
+      final s = DownloadStore()..setSaveDir(tmp.path);
+      final liveId = s.addPending(_media(), tmp.path, fileName: 'live.jpg');
+      s.markActive(liveId, 'live-gid');
+      s.markDownloading(liveId);
+
+      await c.bootstrap(store: s, settings: SettingsStore());
+
+      expect(aria.removeCalls, isNot(contains('live-gid')),
+          reason: 'tellActive 里绝大多数是正常下载中的任务，'
+              '判据只能取「本地任务表里没有它」');
+      expect(s.task(liveId)!.aria2Gid, 'live-gid');
+
+      await c.dispose();
+    });
+
+    test('扫活跃任务用的是 tellActive(keys)：它没有 offset / num', () async {
+      final aria = _RecordingAria2()..response = [{'gid': 'a1'}, {'gid': 'b2'}];
+
+      expect(await aria.tellActiveGids(), ['a1', 'b2']);
+      expect(aria.calls.single.method, 'aria2.tellActive');
+      expect(aria.calls.single.args, [['gid']],
+          reason: '照 tellWaiting / tellStopped 的 [0, max, [gid]] 传过去，'
+              'aria2 会回 The parameter at 0 has wrong type —— 扫描源静默变空表，'
+              '日志里连一行异常都没有');
+    });
+
+    test('引擎响应畸形时只跳过坏条目，不整批放弃、也不凭空塞 null', () async {
+      final aria = _RecordingAria2()
+        ..response = [
+          {'gid': 'ok'},
+          {'status': 'active'},
+          {'gid': null},
+          'junk',
+        ];
+
+      expect(await aria.tellActiveGids(), ['ok']);
+    });
+
+    test('批次之间被提升进 active 的残留也要摘掉（单轮必漏）', () async {
+      final aria = _FakeAria2()
+        // 第 1 轮 active 只有 A；摘掉 A 的那一瞬间，引擎把 W 从 waiting
+        // 提升进了 active（真机日志里 `开始下载 gid=…` 就夹在清理行之间），
+        // 于是这一轮再扫 waiting 时 W 已经不在那里了。
+        ..activeGidsByRound = [
+          ['orphan-a'],
+          ['orphan-w'],
+          [],
+        ];
+      final env = await boot(aria);
+
+      expect(env.a.removeCalls, contains('orphan-a'));
+      expect(env.a.removeCalls, contains('orphan-w'),
+          reason: '只扫一轮时 W 从两张列表的缝里漏过去，它下次开机再复活一次');
+
+      await env.c.dispose();
+    });
+
+    test('摘完立刻把会话落盘：退出那一次保存靠不住', () async {
+      final aria = _FakeAria2()..activeGids = ['orphan-active'];
+      final env = await boot(aria);
+
+      expect(env.a.saveSessionCalls, greaterThan(0),
+          reason: '关窗只给 aria2 2 秒（超了就 kill），--save-session 的退出保存'
+              '会一起丢 —— 真机实测关窗后会话文件 mtime 停在注入那一刻，'
+              '摘掉的结果一个都没落盘，下次开机原样读回来');
+
+      await env.c.dispose();
+    });
+
+    test('没有摘到东西就不写盘（正常开机不该白刷一次会话文件）', () async {
+      final env = await boot(_FakeAria2());
+
+      expect(env.a.saveSessionCalls, 0);
+
+      await env.c.dispose();
+    });
+
+    test('落盘失败只记日志，不拖垮启动', () async {
+      final aria = _FakeAria2()
+        ..activeGids = ['orphan-active']
+        ..saveSessionError = StateError('aria2 尚未就绪');
+      final env = await boot(aria);
+
+      expect(env.a.removeCalls, contains('orphan-active'));
+      expect(await logText(), contains('开机清理：会话落盘失败'));
 
       await env.c.dispose();
     });
@@ -364,9 +504,19 @@ class _FakeAria2 extends Aria2 {
   /// 非 null = `tellWaitingGids` 抛这个异常。
   Object? waitingListError;
 
-  /// `tellWaiting` / `tellStopped` 的返回值（按顺序）。
+  /// `tellActive` / `tellWaiting` / `tellStopped` 的返回值（按顺序）。
+  List<String> activeGids = const [];
   List<String> waitingGids = const [];
   List<String> stoppedGids = const [];
+
+  /// 非 null 时 `tellActiveGids` 按调用次序逐轮返回（超出则重复最后一项）——
+  /// 用来模拟「引擎在两次扫描之间把 waiting 里的任务提升进 active」。
+  List<List<String>>? activeGidsByRound;
+  int _activeCalls = 0;
+
+  /// 非 null = `saveSession` 抛这个异常；[saveSessionCalls] 计调用次数。
+  Object? saveSessionError;
+  int saveSessionCalls = 0;
 
   /// 批量查询里所有任务的状态。
   AriaStatus batchStatus = AriaStatus.active;
@@ -424,6 +574,22 @@ class _FakeAria2 extends Aria2 {
   }
 
   @override
+  Future<List<String>> tellActiveGids() async {
+    final rounds = activeGidsByRound;
+    if (rounds == null || rounds.isEmpty) return activeGids;
+    final i = _activeCalls < rounds.length ? _activeCalls : rounds.length - 1;
+    _activeCalls++;
+    return rounds[i];
+  }
+
+  @override
+  Future<void> saveSession() async {
+    saveSessionCalls++;
+    final e = saveSessionError;
+    if (e != null) throw e;
+  }
+
+  @override
   Future<List<String>> tellWaitingGids({int max = 1000}) async {
     final e = waitingListError;
     if (e != null) throw e;
@@ -456,5 +622,25 @@ class _FakeAria2 extends Aria2 {
     for (var i = 0; i < 60; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
+  }
+}
+
+/// 只记录 RPC 调用形状的假客户端 —— 用来钉住 `tellActive` 的参数签名。
+///
+/// 它**只有 keys 一个参数**，与 `tellWaiting` / `tellStopped` 的
+/// `(offset, num, keys)` 三参数不同；照那两条的写法传过去，aria2 会回
+/// `The parameter at 0 has wrong type.`，而扫描源会**静默**变成空表 ——
+/// 僵尸照旧每次复活，日志里连一行异常都看不到。`_FakeAria2` 直接 override 了
+/// 结果，钉不住这层，所以这里必须量到 RPC 参数本身。
+class _RecordingAria2 extends Aria2 {
+  final List<({String method, List<dynamic> args})> calls = [];
+
+  /// `invoke` 的返回值（模拟 aria2 的 `result` 字段）。
+  dynamic response;
+
+  @override
+  Future<dynamic> invoke(String method, [List<dynamic> args = const []]) async {
+    calls.add((method: method, args: args));
+    return response;
   }
 }

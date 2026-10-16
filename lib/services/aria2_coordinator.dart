@@ -587,6 +587,12 @@ class Aria2Coordinator {
     await _purgeOrphanSessionTasks();
   }
 
+  /// 扫描轮数上限（防呆；正常 2~3 轮就收敛）。
+  static const int _kPurgeMaxRounds = 6;
+
+  /// 每轮之间留给引擎做状态迁移（`waiting` → `active`、`remove` → `stopped`）。
+  static const Duration _kPurgeRoundGap = Duration(milliseconds: 200);
+
   /// 开机扫一遍：把「aria2 会话里有、本地任务表里没有」的任务摘掉。
   ///
   /// 为什么要主动扫（2026-10-16）：`_handleFailure` 只在引擎**报 error** 时摘
@@ -594,38 +600,85 @@ class Aria2Coordinator {
   /// 失败），那批 waiting 的僵尸永远走不到 error 那条路。另外从会话读回来就已经
   /// 是 `complete` / `error` 的那些不会再发任何事件，也只能在开机时扫一遍。
   ///
-  /// 代价是两次 RPC（`tellWaiting` / `tellStopped`，都只取 gid 列表），只在开机
-  /// 跑一次；**任何一步失败都只记日志** —— 它是一次尽力而为的清理，不能拖住启动。
+  /// **`tellActive` 同样必须扫**（2026-10-16 二次取证）：还有一类僵尸既不在
+  /// waiting 也不在 stopped —— 读回后它直接进 active 去握手，握手挂住时
+  /// `--lowest-speed-limit` 判不出来（真机取样 `totalLength=0`、`downloadSpeed=0`、
+  /// `connections=1`，47 秒后仍是 `active`），于是它**永远不会**发 error 事件，
+  /// `tellWaiting` / `tellStopped` 里也都查不到它，可退出时它照样被
+  /// `--save-session` 写回 —— 每次开机复活一次。并发数为 1 时它独占唯一那个槽，
+  /// 整个下载队列就此堵死。摘它要走 `remove`（它还在队列里），
+  /// [_dropOrphanGid] 的两手顺序正好对得上。
+  ///
+  /// **一轮也扫不干净**：并发槽一空出来，引擎立刻把 `waiting` 里的下一条提升进
+  /// `active`（真机日志里 `开始下载 gid=…` 就夹在清理行之间），等轮到扫 waiting
+  /// 时那几条已经不在了。所以反复扫到「本轮一个**没见过的** gid 都没扫到」为止；
+  /// 顺手把新 gid 记进 [handled]，同一批不会被反复重摘。
+  ///
+  /// 代价是开机时每轮三次 RPC（都只取 gid 列表）；**没有僵尸时只跑一轮就返回**，
+  /// 用户完全感觉不到。**任何一步失败都只记日志** —— 它是一次尽力而为的清理，
+  /// 不能拖住启动。
   Future<void> _purgeOrphanSessionTasks() async {
     final store = _store;
     if (store == null || !_booted) return;
-    final scanned = <String>[];
-    for (final (label, fetch) in <(String, Future<List<String>> Function())>[
-      ('aria2 等待队列', _aria.tellWaitingGids),
-      ('aria2 已停任务', _aria.tellStoppedGids),
-    ]) {
-      List<String> gids;
-      try {
-        gids = await fetch();
-      } catch (e) {
-        AppLogger.log('ARIA2', '开机清理：读 $label 失败（跳过这一批）：$e');
-        continue;
+    final scanned = <String>{};
+    final handled = <String>{};
+    var totalDropped = 0;
+    var rounds = 0;
+    for (var round = 1; round <= _kPurgeMaxRounds; round++) {
+      rounds = round;
+      var fresh = 0;
+      for (final (label, fetch) in <(String, Future<List<String>> Function())>[
+        ('aria2 活跃任务', _aria.tellActiveGids),
+        ('aria2 等待队列', _aria.tellWaitingGids),
+        ('aria2 已停任务', _aria.tellStoppedGids),
+      ]) {
+        List<String> gids;
+        try {
+          gids = await fetch();
+        } catch (e) {
+          AppLogger.log('ARIA2', '开机清理：读 $label 失败（跳过这一批）：$e');
+          continue;
+        }
+        scanned.addAll(gids);
+        var dropped = 0;
+        for (final gid in gids) {
+          // 本地表里有它 → 是用户看得见的任务，一律不动。
+          if (store.taskByGid(gid) != null) continue;
+          await _dropOrphanGid(gid, '开机清理：$label 里读回的会话残留');
+          dropped++;
+          if (handled.add(gid)) fresh++;
+        }
+        if (dropped > 0) {
+          AppLogger.log('ARIA2', '开机清理：$label 里摘掉 $dropped 条会话残留'
+              '（共扫到 ${gids.length} 条）');
+        }
       }
-      scanned.addAll(gids);
-      var dropped = 0;
-      for (final gid in gids) {
-        // 本地表里有它 → 是用户看得见的任务，一律不动。
-        if (store.taskByGid(gid) != null) continue;
-        await _dropOrphanGid(gid, '开机清理：$label 里读回的会话残留');
-        dropped++;
-      }
-      if (dropped > 0) {
-        AppLogger.log('ARIA2', '开机清理：$label 里摘掉 $dropped 条会话残留'
-            '（共扫到 ${gids.length} 条）');
-      }
+      totalDropped += fresh;
+      if (fresh == 0) break;
+      await Future<void>.delayed(_kPurgeRoundGap);
+    }
+    if (totalDropped > 0) {
+      // 摘完立刻落盘：退出那次保存靠不住（见 [Aria2.saveSession] 的说明），
+      // 不落盘这批僵尸下次开机会从会话里原样读回来。
+      await _saveSessionAfterPurge();
     }
     if (scanned.isNotEmpty) {
-      AppLogger.log('ARIA2', '开机清理完成：扫到 ${scanned.length} 条引擎侧任务');
+      AppLogger.log(
+        'ARIA2',
+        '开机清理完成：扫到 ${scanned.length} 条引擎侧任务，'
+        '摘掉 $totalDropped 条会话残留（$rounds 轮）',
+      );
+    }
+  }
+
+  /// 把清理结果落盘；失败只记日志 —— 它只是「让这次清理立刻生效」，
+  /// 没落盘也就退回「下次开机再摘一遍」，不能拖住启动。
+  Future<void> _saveSessionAfterPurge() async {
+    try {
+      await _aria.saveSession();
+      AppLogger.log('ARIA2', '开机清理：已把清理后的会话落盘');
+    } catch (e) {
+      AppLogger.log('ARIA2', '开机清理：会话落盘失败（下次开机再摘一遍）：$e');
     }
   }
 

@@ -737,6 +737,16 @@ class Aria2 {
   Future<void> removeDownloadResult(String gid) =>
       invoke('aria2.removeDownloadResult', [gid]);
 
+  /// 现在就把会话落一次盘（`aria2.saveSession`）。
+  ///
+  /// `--save-session` 只在 aria2 **自己**退出时才写；而 [shutdown] 的超时刻意压到
+  /// 2 秒（关窗路径不能卡），超时就 `child.kill()` —— aria2 没在 2 秒内退干净的
+  /// 时候，那一次保存跟着进程一起丢。真机实测（2026-10-16）踩到过：关窗后
+  /// `aria2.session` 的 mtime 停在**注入那一刻**，本次开机摘掉的僵尸一条都没落盘，
+  /// 下次开机又从会话里原样读回来。所以**凡主动改过引擎侧状态的地方都要自己
+  /// 落一次盘**，不能指望退出那一次。
+  Future<void> saveSession() => invoke('aria2.saveSession');
+
   /// 队列里**等待中**任务的 gid，按 aria2 的排队顺序（第 0 个最先轮到）。
   ///
   /// 只取 `gid` 一个键 —— `tellWaiting` 的第三个参数是 keys 过滤，队列里可能
@@ -751,8 +761,24 @@ class Aria2 {
   Future<List<String>> tellStoppedGids({int max = 1000}) =>
       _tellGids('aria2.tellStopped', max);
 
-  Future<List<String>> _tellGids(String method, int max) async {
-    final r = await invoke(method, [0, max, ['gid']]);
+  /// **正在下载中**任务的 gid（`aria2.tellActive`）。
+  ///
+  /// 签名与 [tellWaitingGids] / [tellStoppedGids] **不一样**：`tellActive` 只有
+  /// `keys` 一个参数，没有 offset / num。照那两条传 `[0, max, ['gid']]` 会被
+  /// aria2 判成参数类型不对（本机 1.37.0 实测回
+  /// `The parameter at 0 has wrong type.`），扫描源于是静默变成一张空表 ——
+  /// 而「握手挂住的死任务」恰恰只在这里看得见（见 `_purgeOrphanSessionTasks`）。
+  Future<List<String>> tellActiveGids() async =>
+      _gidsOf(await invoke('aria2.tellActive', [
+        ['gid'],
+      ]));
+
+  Future<List<String>> _tellGids(String method, int max) async =>
+      _gidsOf(await invoke(method, [0, max, ['gid']]));
+
+  /// 从 `tell*` 的响应里摘出 gid。**不是列表、不是 Map、gid 缺失**一律跳过 ——
+  /// 引擎的响应形状不受我们控制，这里不能因为一条畸形条目就整批放弃。
+  static List<String> _gidsOf(dynamic r) {
     if (r is! List) return const [];
     return [
       for (final e in r)
