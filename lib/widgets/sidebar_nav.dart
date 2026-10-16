@@ -361,7 +361,12 @@ class _SidebarNavRowState extends State<_SidebarNavRow> {
               children: [
                 // 整行激活底色（比 Dock 的图标格更宽，因为横排要包住文字）
                 AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
+                  // 悬停遮罩的渐隐 / 渐显是**各自独立计时**的：180ms 时鼠标在
+                  // 行间移动，旧行还没褪完、新行已经亮起 → 用户看到「两个块
+                  // 同时出现遮罩」；快速划过则是「闪一下就消失」（2026-10-16
+                  // 真机反馈）。缩到 80ms 后重叠窗口只剩极短一瞬，观感上仍是
+                  // 一次平滑过渡。
+                  duration: const Duration(milliseconds: 80),
                   curve: Curves.easeOut,
                   height: NavMetrics.iconBox + 4,
                   margin: const EdgeInsets.symmetric(vertical: 1),

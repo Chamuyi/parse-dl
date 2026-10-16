@@ -506,7 +506,9 @@ class NavIconBox extends StatelessWidget {
     final t = AppTheme.of(context);
 
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
+      // 与侧边栏同一处理由：悬停遮罩的渐隐 / 渐显各自独立计时，180ms 会让
+      // 相邻两块出现「同时带遮罩 → 闪一下消失」的重叠窗口（2026-10-16）。
+      duration: const Duration(milliseconds: 80),
       curve: Curves.easeOut,
       transform: hoverTransform,
       width: NavMetrics.iconBox,
