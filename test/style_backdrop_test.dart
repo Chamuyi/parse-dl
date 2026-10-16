@@ -299,6 +299,55 @@ void main() {
     expect(backdropPaint('style'), findsOneWidget);
     expect(backdropPaint('material'), findsOneWidget);
   });
+
+  // ══════════════════════════════════════════════════════════
+  // 颗粒绘制开销：必须是纹理平铺，不许在整窗上逐点画圆
+  // ══════════════════════════════════════════════════════════
+
+  testWidgets('磨砂颗粒走纹理平铺，不在整窗上逐点画圆', (tester) async {
+    // 2026-10-16 用户报「亚克力选中后超级卡」。根因：颗粒按
+    // `size.width * size.height / 11 * grain` 对**整窗**逐个 `drawCircle` ——
+    // 那个密度是给设置页 64×44 缩略图（约 256 个点）定的，接到整窗后
+    // 1280×720 的亚克力档要画 **83,782 个抗锯齿圆**／次重绘，一帧上百毫秒。
+    // 现在颗粒来自预生成的噪点纹理（`ImageShader` 平铺 = 一次 `drawRect`），
+    // 这条判据把「主 canvas 上不许逐点画圆」钉死。
+    for (final m in [WindowMaterial.acrylic, WindowMaterial.acrylicThin]) {
+      await pumpBackdrop(tester, m,
+          style: AppStyle.frosted, brightness: Brightness.dark);
+      final painter =
+          tester.widget<CustomPaint>(backdropPaint('material')).painter!;
+      final probe = _DrawCallProbe();
+      painter.paint(probe, const Size(1280, 720));
+      expect(probe.circles, 0,
+          reason: '${m.id} 在 1280×720 的材质层上逐点画了 ${probe.circles} 个圆 —— '
+              '颗粒必须走预生成纹理平铺；逐点实现这一档是 '
+              '${(1280 * 720 / 11 * m.grain).round()} 个');
+      expect(probe.rects, greaterThan(0), reason: '材质层应当画了底');
+    }
+  });
+
+  testWidgets('负控制：有颗粒档的绘制调用数必须多于无颗粒档', (tester) async {
+    // 上一条只证明「没有逐点画圆」。哪天颗粒整段被删掉，它照样绿 ——
+    // 所以「颗粒确实画出来了」要单独钉一条：亚克力系（grain > 0）的
+    // 绘制调用数必须**严格多于** Mica（grain 0）。
+    Future<int> callsOf(WindowMaterial m) async {
+      await pumpBackdrop(tester, m,
+          style: AppStyle.frosted, brightness: Brightness.dark);
+      final painter =
+          tester.widget<CustomPaint>(backdropPaint('material')).painter!;
+      final probe = _DrawCallProbe();
+      painter.paint(probe, const Size(1280, 720));
+      return probe.total;
+    }
+
+    final mica = await callsOf(WindowMaterial.mica);
+    final acrylic = await callsOf(WindowMaterial.acrylic);
+    final thin = await callsOf(WindowMaterial.acrylicThin);
+    expect(acrylic, greaterThan(mica),
+        reason: '亚克力的绘制调用数（$acrylic）不多于 Mica（$mica）—— 颗粒没画出来');
+    expect(thin, greaterThan(mica),
+        reason: '细亚克力的绘制调用数（$thin）不多于 Mica（$mica）—— 颗粒没画出来');
+  });
 }
 
 // ════════════════════════════════════════════════════════════
@@ -419,3 +468,23 @@ Finder backdropPaint(String kind) => find.byWidgetPredicate((w) {
       final painter = w.painter;
       return painter is BackdropPainter && painter.kind == kind;
     });
+
+/// 只统计绘制调用次数的探针 canvas。
+///
+/// 只需要 `drawCircle` / `drawRect` 两样，其余走 [noSuchMethod] 忽略 ——
+/// 这样不必跟着 `Canvas` 的接口逐个补空实现。
+class _DrawCallProbe implements Canvas {
+  int circles = 0;
+  int rects = 0;
+
+  int get total => circles + rects;
+
+  @override
+  void drawCircle(Offset c, double radius, Paint paint) => circles++;
+
+  @override
+  void drawRect(Rect rect, Paint paint) => rects++;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}

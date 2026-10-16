@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -292,35 +293,85 @@ class _MaterialSheetPainter extends BackdropPainter {
     if (material.grain > 0) _paintGrain(canvas, size, dark);
   }
 
-  /// 磨砂颗粒。固定伪随机数，保证同尺寸下点阵每次完全一样。
+  /// 磨砂颗粒。**预生成一张噪点 tile 后平铺整窗**，不是逐点画圆。
+  ///
+  /// ### 2026-10-16 性能修复（用户报「亚克力选中后超级卡」）
+  ///
+  /// 原实现按设置页缩略图的密度公式 `size.width * size.height / 11 * grain`
+  /// 对**整窗**逐个 `drawCircle`。那个密度是给 64×44 的缩略图（约 256 个点）
+  /// 定的，接到整窗后点数随**面积**增长：1280×720 的亚克力档要画
+  /// **83,782 个抗锯齿圆**／次重绘（细亚克力 20,945 个，Mica 系 0 个）——
+  /// 一帧上百毫秒，正好解释「只有亚克力超级卡，Mica 不卡」。
+  ///
+  /// 现在噪点预生成到一张 [_kGrainTile] 见方的 tile，再用 `ImageShader` +
+  /// `TileMode.repeated` 平铺：**每帧只有一次 `drawRect`**，开销与窗口尺寸无关。
+  /// 点密度、半径、浓淡全部沿用原公式，视觉不变。
   ///
   /// 颗粒色必须与窗口底**对立**才看得见：深色主题撒亮颗粒、浅色主题撒暗颗粒。
   /// 浓淡用 `0.30 × grain` 而不是「越薄越淡」的线性关系 —— 亚克力那一档的
   /// 颗粒在真机上是它区别于 Mica 的主要证据，实测证明淡了就不够。
   void _paintGrain(Canvas canvas, Size size, bool dark) {
-    final grain = material.grain;
+    final image = _grainTile(dark, material.grain);
+    if (image == null) return;
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()
+        ..shader = ImageShader(
+          image,
+          TileMode.repeated,
+          TileMode.repeated,
+          Matrix4.identity().storage,
+          // tile 内是 0.6px 的锐利颗粒，插值会把它糊掉。
+          filterQuality: FilterQuality.none,
+        ),
+    );
+  }
+
+  /// 噪点 tile 的边长（逻辑像素）。取 128 而不是更小，是为了让平铺后的
+  /// 重复周期大到肉眼看不出规律。
+  static const double _kGrainTile = 128;
+
+  /// `(深色, grain)` → 预生成的噪点图。全项目只有 2 档 grain，至多 4 张，
+  /// 生成一次后常驻（每张 128×128 ≈ 64 KB）。
+  static final Map<String, ui.Image> _grainTiles = {};
+
+  /// 取（必要时生成）噪点 tile。`grain <= 0`（Mica 系 / 纯色）返回 null。
+  ///
+  /// 生成用的是与原来**同一套**密度 / 半径 / 种子公式，所以颗粒长相不变；
+  /// 区别只在于这次它只覆盖 128×128 那一小块，且**一辈子只算一次**。
+  static ui.Image? _grainTile(bool dark, double grain) {
+    if (grain <= 0) return null;
+    final key = '${dark ? 'dark' : 'light'}:$grain';
+    final cached = _grainTiles[key];
+    if (cached != null) return cached;
+
+    final recorder = ui.PictureRecorder();
+    final tile = Canvas(recorder);
     final paint = Paint()
-      ..color = (dark ? Colors.white : Colors.black)
-          .withValues(alpha: 0.30 * grain);
+      ..color =
+          (dark ? Colors.white : Colors.black).withValues(alpha: 0.30 * grain);
     var seed = 20261016;
     int next() {
       seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
       return seed;
     }
 
-    // 与设置页缩略图的 `_FrostPainter` 同一套密度 / 半径公式，
-    // 让「缩略图里看到的颗粒」和「真机上看到的颗粒」是同一件事。
-    final count = (size.width * size.height / 11 * grain).round();
+    final count = (_kGrainTile * _kGrainTile / 11 * grain).round();
     for (var i = 0; i < count; i++) {
-      canvas.drawCircle(
+      tile.drawCircle(
         Offset(
-          (next() % 1000) / 1000 * size.width,
-          (next() % 1000) / 1000 * size.height,
+          (next() % 1000) / 1000 * _kGrainTile,
+          (next() % 1000) / 1000 * _kGrainTile,
         ),
         0.6,
         paint,
       );
     }
+    final image = recorder
+        .endRecording()
+        .toImageSync(_kGrainTile.round(), _kGrainTile.round());
+    _grainTiles[key] = image;
+    return image;
   }
 
   @override
