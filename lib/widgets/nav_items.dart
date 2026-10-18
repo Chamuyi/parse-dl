@@ -188,7 +188,7 @@ BoxDecoration navItemDecoration(
     }
     return BoxDecoration(
       color: Colors.transparent,
-      borderRadius: BorderRadius.circular(NavMetrics.radius),
+      borderRadius: BorderRadius.circular(style.shapeOf().navRowRadius),
       border: ring,
       boxShadow: hardGlow,
     );
@@ -207,7 +207,7 @@ BoxDecoration navItemDecoration(
     //
     // 保留的是另一套反馈：图标/文字变色（[navIconColor]）与轻微位移。
     color: Colors.transparent,
-    borderRadius: BorderRadius.circular(NavMetrics.radius),
+    borderRadius: BorderRadius.circular(style.shapeOf().navRowRadius),
     // 不激活也留一圈**透明**描边：描边要占 1px，省掉会让文字在悬停瞬间跳格
     border: Border.all(color: Colors.transparent, width: 1),
   );
@@ -230,18 +230,22 @@ BoxDecoration _activeDecorationFor(
   required bool active,
   Brightness brightness = Brightness.light,
 }) {
+  // 导航行圆角随风格：WinUI3 的 NavigationView 选中项是 4px 圆角，
+  // 另三套沿用 NavMetrics.radius（12）。这一条是「形态」而不是「颜色」，
+  // 所以走 StyleShape 而不是色板。
+  final rowRadius = style.shapeOf().navRowRadius;
   if (!active) {
     return BoxDecoration(
       color: Colors.transparent,
-      borderRadius: BorderRadius.circular(NavMetrics.radius),
+      borderRadius: BorderRadius.circular(rowRadius),
       border: Border.all(color: Colors.transparent, width: 1),
     );
   }
   if (style == AppStyle.frosted) {
-    return selectedDecoration(c, radius: NavMetrics.radius);
+    return selectedDecoration(c, radius: rowRadius);
   }
   final t = style.navActiveOf(brightness);
-  final radius = BorderRadius.circular(NavMetrics.radius);
+  final radius = BorderRadius.circular(rowRadius);
   final glow =
       t.glow == null ? null : [kNavActiveGlow.copyWith(color: t.glow)];
   return BoxDecoration(

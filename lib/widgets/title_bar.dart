@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../l10n/l10n.dart';
+import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 
 /// 自绘标题栏。窗口是无边框的（titleBarStyle: hidden），
@@ -57,15 +58,23 @@ class _TitleBarState extends State<TitleBar> with WindowListener {
 
   @override
   Widget build(BuildContext context) {
-    final c = AppTheme.colorsOf(context);
+    final th = AppTheme.of(context);
+    final c = th.colors;
+    final shape = th.style.shapeOf();
+
+    // WinUI3：标题栏与侧栏**同色连成一片**（Windows 11 的 NavigationView 就是
+    // 这样 —— 标题栏不是一条独立色带，而是窗口 chrome 的延续）。另三套沿用
+    // 既有画法：surfaceSolid 85%（浅色 = 浅灰，深色 = 深灰；早先用 surfaceCard
+    // 在深色下是白色 5.5% 的白雾，与深色底不协调，故为实色）。
+    final side = th.style.sidebarOf(th.brightness);
+    final titleColor = shape.titleBarTintedLikeSidebar && side.gradient == null
+        ? side.color
+        : c.surfaceSolid.withValues(alpha: 0.85);
 
     return Container(
-      height: 44,
+      height: shape.titleBarHeight,
       decoration: BoxDecoration(
-        // 用 surfaceSolid 主题实色 + 75% alpha —— 浅色模式 = 浅灰，深色模式 = 深灰。
-        // 之前用 surfaceCard 在深色模式下是白色 5.5%（白雾），alpha 0.75 后还是浅色，
-        // 跟深色背景不协调。
-        color: c.surfaceSolid.withValues(alpha: 0.85),
+        color: titleColor,
         border: Border(bottom: BorderSide(color: c.lineSoft, width: 1)),
       ),
       child: Row(
@@ -173,7 +182,9 @@ class _CaptionButtonState extends State<_CaptionButton> {
 
   @override
   Widget build(BuildContext context) {
-    final c = AppTheme.colorsOf(context);
+    final th = AppTheme.of(context);
+    final c = th.colors;
+    final shape = th.style.shapeOf();
 
     final bg = _hover
         ? (widget.danger ? const Color(0xFFC42B1C) : c.surfaceCardHover)
@@ -190,12 +201,12 @@ class _CaptionButtonState extends State<_CaptionButton> {
           label: t(widget.label),
           button: true,
           child: Container(
-            width: 46,
-            height: 32,
-            margin: const EdgeInsets.symmetric(horizontal: 2),
+            width: shape.captionWidth,
+            height: shape.captionHeight,
+            margin: EdgeInsets.symmetric(horizontal: shape.captionMargin),
             decoration: BoxDecoration(
               color: bg,
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(shape.captionRadius),
             ),
             // 关键：必须 Center，否则 CustomPaint 的 10×10 画在容器左上角看不到
             child: Center(

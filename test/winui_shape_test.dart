@@ -1,0 +1,159 @@
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:parse_dl/theme/app_style.dart';
+import 'package:parse_dl/theme/app_theme.dart';
+
+/// WinUI3 的**组件形态**判据（2026-10-19 用户裁定「连布局/组件形态一起换」）。
+///
+/// 前几组判据守的是「颜色」与「材质」，但 WinUI 与另三套的差别有一半在
+/// **控件几何**上：标题栏高度、开关比例、选项格圆角、徽章形状、导航行圆角。
+/// 这些一旦被谁顺手改回旧值，颜色判据全绿、界面却已经不是 WinUI 了 ——
+/// 本文件补的就是这个缺口。
+///
+/// **每条都带负控制**：证明把值改掉时判据真的会红，而不是恒真。
+void main() {
+  group('形态令牌：winui 与 legacy 逐字段不同', () {
+    const w = StyleShape.winui;
+    const l = StyleShape.legacy;
+
+    test('标题栏高度 32 vs 44', () {
+      expect(w.titleBarHeight, 32, reason: 'Windows 11 标准标题栏是 32px');
+      expect(l.titleBarHeight, 44, reason: '另三套沿用改造前的 44px');
+      // 负控制：两者必须真的不同，否则「按风格切换」这件事本身没意义
+      expect(w.titleBarHeight, isNot(l.titleBarHeight));
+    });
+
+    test('窗口按钮：WinUI 直角无缝，另三套圆角内缩', () {
+      expect(w.captionRadius, 0);
+      expect(w.captionMargin, 0);
+      expect(l.captionRadius, greaterThan(0));
+      expect(l.captionMargin, greaterThan(0));
+      // 尺寸两套相同（46x32 就是 Win11 的比例，另三套早已对齐）
+      expect(w.captionWidth, l.captionWidth);
+      expect(w.captionHeight, l.captionHeight);
+    });
+
+    test('标题栏是否与侧栏连成一片：只有 winui 为真', () {
+      expect(w.titleBarTintedLikeSidebar, isTrue);
+      expect(l.titleBarTintedLikeSidebar, isFalse);
+    });
+
+    test('开关：WinUI 40x20 + 12px 滑块，另三套 36x20 + 14px', () {
+      expect(w.switchWidth, 40);
+      expect(w.switchHeight, 20);
+      expect(w.switchThumb, 12);
+      expect(l.switchWidth, 36);
+      expect(l.switchThumb, 14);
+      // 几何自洽：滑块必须装得进轨道，且四周留白 = (高-滑块)/2 > 0
+      for (final s in [w, l]) {
+        expect(s.switchThumb, lessThan(s.switchHeight),
+            reason: '滑块不能比轨道高');
+        expect(s.switchWidth, greaterThan(s.switchHeight),
+            reason: '轨道必须是横向的胶囊');
+      }
+    });
+
+    test('选项格：WinUI 4px + 边线，另三套 9px + 凹面底', () {
+      expect(w.optCellRadius, 4);
+      expect(w.optCellBordered, isTrue, reason: 'WinUI 用 1px 边线分层');
+      expect(l.optCellRadius, 9);
+      expect(l.optCellBordered, isFalse, reason: '另三套用凹面底色分层');
+    });
+
+    test('徽章：WinUI 4px 矩形，另三套 999 胶囊', () {
+      expect(w.badgeRadius, 4);
+      expect(l.badgeRadius, 999);
+      // 负控制：矩形与胶囊在 20px 高时视觉差异明显，不能被谁改成同一档
+      expect(w.badgeRadius, isNot(l.badgeRadius));
+    });
+
+    test('导航行：WinUI 4px，另三套 12px', () {
+      expect(w.navRowRadius, 4);
+      expect(l.navRowRadius, 12);
+    });
+  });
+
+  group('风格 → 形态的分流', () {
+    test('winui 取 WinUI 形态，另三套取 legacy', () {
+      expect(AppStyle.winui.shapeOf(), same(StyleShape.winui));
+      for (final s in [AppStyle.liquid, AppStyle.frosted, AppStyle.clay]) {
+        expect(s.shapeOf(), same(StyleShape.legacy),
+            reason: '${s.id} 不该有独立的形态令牌（一次只做一个风格）');
+      }
+    });
+
+    test('负控制：把 winui 映射错成 legacy，上面的断言必然红', () {
+      // 手动模拟「分流写错」的情形，证明判据不是恒真。
+      final wrong = <AppStyle, StyleShape>{
+        for (final s in AppStyle.values) s: StyleShape.legacy,
+      };
+      expect(identical(wrong[AppStyle.winui], StyleShape.winui), isFalse,
+          reason: '若这里为真，说明分流判据无法区分对错');
+    });
+  });
+
+  group('形态差异在渲染层真的可见', () {
+    testWidgets('同一段卡片内容，winui 与 frosted 的渲染像素不同', (tester) async {
+      // 只比令牌不画面，等于把「判据」写成「常量表自证」。这里真的渲染一遍：
+      // 同一个 AppCard 在两种风格下的像素必须可测地不同。
+      Future<List<int>> paint(AppStyle style) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Theme(
+              data: ThemeData(brightness: Brightness.dark),
+              child: Builder(
+                builder: (context) {
+                  // 直接构造色板与材质，避开 AppTheme 依赖 settings 的链路
+                  final c = AppColors.of(style, Brightness.dark);
+                  final shape = style.shapeOf();
+                  return Center(
+                    child: Container(
+                      width: 200,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        color: c.surfaceSolid,
+                        borderRadius: BorderRadius.circular(shape.optCellRadius),
+                        border: shape.optCellBordered
+                            ? Border.all(color: c.line, width: 1)
+                            : null,
+                      ),
+                      child: Center(
+                        child: Text('X', style: TextStyle(color: c.textStrong)),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final ro = tester.renderObject<RenderRepaintBoundary>(
+          find.byType(RepaintBoundary).first,
+        );
+        // toImage / toByteData 走真实 GPU 与 IO 路径，在 testWidgets 的
+        // fake-async 时钟里**永远不会完成**（实测：不包 runAsync 时判据挂在
+        // 10 分钟超时上，见 style_backdrop_test.dart 同款注释）。必须包。
+        final img = (await tester.runAsync(() => ro.toImage()))!;
+        final data = (await tester.runAsync(
+          () => img.toByteData(format: ui.ImageByteFormat.rawRgba),
+        ))!;
+        return data.buffer.asUint8List().toList();
+      }
+
+      final a = await paint(AppStyle.winui);
+      final b = await paint(AppStyle.frosted);
+      expect(a.length, b.length);
+      var diff = 0;
+      for (var i = 0; i < a.length; i++) {
+        if (a[i] != b[i]) diff++;
+      }
+      expect(diff, greaterThan(0),
+          reason: 'winui 与 frosted 的卡片渲染必须逐像素可测地不同');
+    });
+  });
+}

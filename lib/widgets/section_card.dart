@@ -134,9 +134,13 @@ class _SectionCardHead extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = colors;
     final right = trailing;
+    // WinUI3 的卡片头**更紧凑**（上下 8 而非 10）、标题**不带字距**：
+    // WinUI 的排版规范里正文与标题都不加 letterSpacing，靠字号/字重分层。
+    // 另三套保留预览稿的 10px + 0.3 字距。
+    final winui = AppTheme.of(context).style == AppStyle.winui;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(13, 10, 13, 10),
+      padding: EdgeInsets.fromLTRB(13, winui ? 8 : 10, 13, winui ? 8 : 10),
       child: Row(
         // min：标题按内容取宽，剩下的空白交给右侧（CSS `.ct` 默认行为）
         mainAxisSize: MainAxisSize.min,
@@ -146,7 +150,7 @@ class _SectionCardHead extends StatelessWidget {
             style: TextStyle(
               fontSize: 11.5,
               fontWeight: FontWeight.w600,
-              letterSpacing: 0.3,
+              letterSpacing: winui ? 0 : 0.3,
               color: c.textStrong,
             ),
           ),

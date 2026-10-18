@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 
 /// 预览稿的 **2×2 当前值网格** —— `.grid.g2` + `.opt` 的 Flutter 对应物。
@@ -176,6 +177,7 @@ class _OptCell<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = colors;
+    final shape = AppTheme.of(context).style.shapeOf();
     return GestureDetector(
       onTap: onTap,
       child: MouseRegion(
@@ -184,9 +186,15 @@ class _OptCell<T> extends StatelessWidget {
             : SystemMouseCursors.click,
         child: Container(
           padding: const EdgeInsets.fromLTRB(11, 9, 11, 9),
+          // WinUI3 的选项格是**透明底 + 1px 边线**（靠线分层），另三套是
+          // **凹面底 + 9px 圆角**（靠色差分层）。两种做法在浅色下差别很小，
+          // 深色下一眼可辨 —— 这正是「形态」而不只是「颜色」。
           decoration: BoxDecoration(
-            color: c.surfaceSunken,
-            borderRadius: BorderRadius.circular(9),
+            color: shape.optCellBordered ? Colors.transparent : c.surfaceSunken,
+            borderRadius: BorderRadius.circular(shape.optCellRadius),
+            border: shape.optCellBordered
+                ? Border.all(color: c.line, width: 1)
+                : null,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,

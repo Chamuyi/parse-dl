@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 
 /// 预览稿的**开关行** —— `.sw .lb .tg` 的 Flutter 对应物。
@@ -103,11 +104,22 @@ class SwitchRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 9),
-              Switch.adaptive(
-                value: value,
-                onChanged: onChanged,
-                activeTrackColor: c.accent,
-              ),
+              // WinUI3 的 ToggleSwitch 是**窄轨道 + 小圆滑块**（40x20 轨道、
+              // 12px 滑块），与 Material 的 52x32 大开关形态明显不同。另三套
+              // 继续用 Switch.adaptive —— 既有测试按 Switch 类型定位，不能一刀切。
+              if (AppTheme.of(context).style == AppStyle.winui)
+                _WinUiSwitch(
+                  value: value,
+                  onChanged: onChanged,
+                  colors: c,
+                  shape: AppTheme.of(context).style.shapeOf(),
+                )
+              else
+                Switch.adaptive(
+                  value: value,
+                  onChanged: onChanged,
+                  activeTrackColor: c.accent,
+                ),
             ],
           ),
         ),
@@ -115,3 +127,71 @@ class SwitchRow extends StatelessWidget {
     );
   }
 }
+/// WinUI3 形态的开关：40x20 轨道 + 12px 圆滑块。
+///
+/// 不用 `Switch` 改主题来做，是因为 Material 的 `Switch` 几何被 `SwitchThemeData`
+/// 锁死在「轨道 52x32 / 滑块 20」这一档，改不出 WinUI 的比例；而自绘一层只有
+/// 两个 `AnimatedContainer`，代价远低于硬改主题。
+///
+/// **交互与 [SwitchRow] 一致**：点开关切换（整行热区在父级 InkWell 上，
+/// 这里只负责开关自身那一下，`onChanged` 为 null 时不可点）。
+class _WinUiSwitch extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final AppColors colors;
+  final StyleShape shape;
+
+  const _WinUiSwitch({
+    required this.value,
+    required this.onChanged,
+    required this.colors,
+    required this.shape,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final on = value;
+    // WinUI 关闭态是「描边空心」，开启态是强调色实心 —— 这个对比比 Material
+    // 的灰/蓝两档更明显，也是 WinUI 一眼可辨的特征之一。
+    final trackColor = on ? colors.accent : Colors.transparent;
+    final trackBorder = on ? colors.accent : colors.lineStrong;
+    final thumbColor = on ? colors.onAccent : colors.textMuted;
+    // 滑块在轨道内左右各留 4px（(20-12)/2），开启时贴右。
+    final pad = (shape.switchHeight - shape.switchThumb) / 2;
+
+    return GestureDetector(
+      onTap: onChanged == null ? null : () => onChanged!(!value),
+      child: MouseRegion(
+        cursor: onChanged == null
+            ? SystemMouseCursors.basic
+            : SystemMouseCursors.click,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          width: shape.switchWidth,
+          height: shape.switchHeight,
+          padding: EdgeInsets.all(pad),
+          decoration: BoxDecoration(
+            color: trackColor,
+            borderRadius: BorderRadius.circular(shape.switchHeight / 2),
+            border: Border.all(color: trackBorder, width: 1),
+          ),
+          child: AnimatedAlign(
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOut,
+            alignment: on ? Alignment.centerRight : Alignment.centerLeft,
+            child: Container(
+              width: shape.switchThumb,
+              height: shape.switchThumb,
+              decoration: BoxDecoration(
+                color: thumbColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+

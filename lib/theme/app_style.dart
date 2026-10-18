@@ -892,3 +892,145 @@ extension AppStyleButtonTokens on AppStyle {
         (AppStyle.clay, Brightness.dark) => StyleButton.clayDark,
       };
 }
+
+// ══════════════════════════════════════════════════════════════
+// S6 · 组件形态令牌（几何：高度 / 圆角 / 边线 / 底色策略）
+//
+// 前三组令牌（AppSurface 材质、AppColors 颜色、AppStyleRadiusTokens 半径）
+// 只覆盖到「一块面长什么样」。但 2026-10-19 用户裁定「照抄窗口材质和界面
+// 风格、连布局/组件形态一起换」之后，光有面不够 —— WinUI3 与另三套的差别
+// 有一半在控件形态上：
+//
+//   组件     | 另三套                    | WinUI3
+//   标题栏   | 44px 高、圆角按钮内缩 2px | 32px 高、直角按钮 flush 到窗口边
+//   开关     | Material Switch.adaptive  | 40x20 胶囊 + 12px 圆滑块
+//   选项格   | 9px 圆角 + 凹面底         | 4px 圆角 + 1px 边线
+//   徽章     | 999 胶囊                  | 4px 圆角矩形
+//   导航行   | 12px 圆角                 | 4px 圆角
+//
+// 所以这里再加一组几何令牌。与 AppStyleRadiusTokens 的分工：后者是
+// 「卡片级」的大半径档位，这里是控件级的具体尺寸，一个槽位只服务一个
+// 组件 —— 不做通用化，通用化会把「WinUI 的标题栏就是 32px」这条事实稀释成
+// 「一个可调参数」。
+// ══════════════════════════════════════════════════════════════
+
+/// 组件形态令牌 —— 几何与「用底色还是用边线」的策略。
+///
+/// 全部字段都是具体尺寸/布尔，没有相对系数：每个槽位对应一个真实控件，
+/// 值直接取自 WinUI3 规范或既有预览稿，改动时一眼能核对。
+@immutable
+class StyleShape {
+  /// 标题栏高度。WinUI3 = 32（Windows 11 标准标题栏），另三套 44。
+  final double titleBarHeight;
+
+  /// 窗口按钮尺寸。WinUI3 = 46x32（flush 到窗口右上角）。
+  final double captionWidth;
+  final double captionHeight;
+
+  /// 窗口按钮圆角。WinUI3 = 0（直角），另三套 6。
+  final double captionRadius;
+
+  /// 窗口按钮的外边距。WinUI3 = 0（按钮之间无缝），另三套 2。
+  final double captionMargin;
+
+  /// 标题栏底色是否取侧栏同色（WinUI3 的标题栏与 NavigationView 连成一片）。
+  /// false = 取 surfaceSolid 85%（另三套的既有画法）。
+  final bool titleBarTintedLikeSidebar;
+
+  /// 开关轨道尺寸。WinUI3 = 40x20。
+  final double switchWidth;
+  final double switchHeight;
+
+  /// 滑块直径。WinUI3 = 12（轨道内缩 4）。
+  final double switchThumb;
+
+  /// 选项格圆角。WinUI3 = 4，另三套 9。
+  final double optCellRadius;
+
+  /// 选项格是否画 1px 边线（WinUI3 用边线分层，另三套用凹面底色）。
+  final bool optCellBordered;
+
+  /// 徽章圆角。WinUI3 = 4（矩形），另三套 999（胶囊）。
+  final double badgeRadius;
+
+  /// 徽章内边距。
+  final double badgePadH;
+  final double badgePadV;
+
+  /// 导航行圆角。WinUI3 = 4，另三套 12。
+  final double navRowRadius;
+
+  const StyleShape({
+    required this.titleBarHeight,
+    required this.captionWidth,
+    required this.captionHeight,
+    required this.captionRadius,
+    required this.captionMargin,
+    required this.titleBarTintedLikeSidebar,
+    required this.switchWidth,
+    required this.switchHeight,
+    required this.switchThumb,
+    required this.optCellRadius,
+    required this.optCellBordered,
+    required this.badgeRadius,
+    required this.badgePadH,
+    required this.badgePadV,
+    required this.navRowRadius,
+  });
+
+  /// WinUI3 形态。取值来源：
+  /// - 标题栏 32px / 按钮 46x32：Windows 11 标准标题栏（fluent_ui 的
+  ///   NavigationView 与系统窗口一致）。
+  /// - 开关 40x20 / 滑块 12：fluent_ui 的 ToggleSwitch 尺寸。
+  /// - 选项格 / 徽章 / 导航行 4px：WinUI3 的「控件圆角 4px」规范。
+  static const winui = StyleShape(
+    titleBarHeight: 32,
+    captionWidth: 46,
+    captionHeight: 32,
+    captionRadius: 0,
+    captionMargin: 0,
+    titleBarTintedLikeSidebar: true,
+    switchWidth: 40,
+    switchHeight: 20,
+    switchThumb: 12,
+    optCellRadius: 4,
+    optCellBordered: true,
+    badgeRadius: 4,
+    badgePadH: 7,
+    badgePadV: 2,
+    navRowRadius: 4,
+  );
+
+  /// 另三套（liquid / frosted / clay）共用一份 —— 它们改造前就是同一套形态，
+  /// 差别只在材质与颜色上。这不是「懒得分开」：既有 12 个测试文件钉着这些
+  /// 尺寸，把三套拆开会让「改形态」变成「改三套形态」，而用户要的是
+  /// 「一次只做一个风格」。
+  static const legacy = StyleShape(
+    titleBarHeight: 44,
+    captionWidth: 46,
+    captionHeight: 32,
+    captionRadius: 6,
+    captionMargin: 2,
+    titleBarTintedLikeSidebar: false,
+    switchWidth: 36,
+    switchHeight: 20,
+    switchThumb: 14,
+    optCellRadius: 9,
+    optCellBordered: false,
+    badgeRadius: 999,
+    badgePadH: 8,
+    badgePadV: 2,
+    navRowRadius: 12,
+  );
+}
+
+/// 形态令牌入口（AppStyle 的第六组扩展）。
+extension AppStyleShapeTokens on AppStyle {
+  StyleShape shapeOf() => switch (this) {
+        AppStyle.winui => StyleShape.winui,
+        AppStyle.liquid ||
+        AppStyle.frosted ||
+        AppStyle.clay =>
+          StyleShape.legacy,
+      };
+}

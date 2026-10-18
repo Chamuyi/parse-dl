@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 
 /// 预览稿的**胶囊徽章** —— `.st2` 的 Flutter 对应物。
@@ -86,11 +87,19 @@ class StatusBadge extends StatelessWidget {
         ),
     };
 
+    // WinUI3 的状态标记是**小圆角矩形**（4px），不是胶囊 —— 这是它和另三套
+    // 在「同一个语义」上最直观的形态差异之一。内边距也略收紧（8→7），
+    // 因为直角矩形比胶囊在视觉上更"占宽"，沿用 8 会显得松散。
+    final shape = t.style.shapeOf();
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: EdgeInsets.symmetric(
+        horizontal: shape.badgePadH,
+        vertical: shape.badgePadV,
+      ),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(shape.badgeRadius),
       ),
       child: Text(
         text,
