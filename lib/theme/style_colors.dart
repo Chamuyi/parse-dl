@@ -7,7 +7,14 @@ import 'app_theme.dart';
 ///
 /// 与 [AppColors] 的关系：`AppColors.light` / `.dark` 是**中性默认套**
 /// （40 多个既有测试文件的引用出口），而应用实际渲染时走的是本文件的六套。
-/// 两者的槽位完全一致，本文件多一个 [accent2]（主按钮渐变的第二个色停）。
+/// 两者的槽位完全一致。
+///
+/// ## 2026-10-19 新增 WinUI3 色板
+///
+/// 用户裁定「照抄其他 Flutter 项目的窗口材质与界面风格」，参考
+/// `bdlukaa/fluent_ui`（BSD-3-Clause）。新增 [winuiLight] / [winuiDark]：
+/// 22 级中性灰台阶、暖灰深色底 `#2C2C2C`（**不是纯黑/冷灰**，这是
+/// 「看起来像 Windows」的关键）、单色强调、1px 边线分层。
 ///
 /// ## 2026-10-16 全量重做
 ///
@@ -54,13 +61,7 @@ import 'app_theme.dart';
 class StyleColors {
   final AppColors colors;
 
-  /// 主按钮渐变的第二个色停（CSS `--ac2`）。
-  ///
-  /// 液体玻璃与陶土的主按钮是 `linear-gradient(135deg, var(--ac), var(--ac2))`；
-  /// 磨砂清晰没有渐变面，这里等于主色（[AppStyle.buttonOf] 不读它）。
-  final Color accent2;
-
-  const StyleColors({required this.colors, required this.accent2});
+  const StyleColors({required this.colors});
 
   // ══════════════════════════════════════════════════════════
   // 液体玻璃 —— 冷紫。最"设计感"的一套：近白/近黑的面 + 紫调中性色。
@@ -95,7 +96,6 @@ class StyleColors {
       warning: Color(0xFF92400E),
       onSuccess: Color(0xFFFFFFFF),
     ),
-    accent2: Color(0xFF7C3AED),
   );
 
   /// 液体玻璃 · 深色
@@ -127,7 +127,6 @@ class StyleColors {
       warning: Color(0xFFFCD34D),
       onSuccess: Color(0xFF0A2E16),
     ),
-    accent2: Color(0xFFA78BFA),
   );
 
   // ══════════════════════════════════════════════════════════
@@ -164,7 +163,6 @@ class StyleColors {
       warning: Color(0xFF92400E),
       onSuccess: Color(0xFFFFFFFF),
     ),
-    accent2: Color(0xFF0F6CBD),
   );
 
   /// 磨砂清晰 · 深色
@@ -196,7 +194,6 @@ class StyleColors {
       warning: Color(0xFFFCD34D),
       onSuccess: Color(0xFF0A2E16),
     ),
-    accent2: Color(0xFF38BDF8),
   );
 
   // ══════════════════════════════════════════════════════════
@@ -232,7 +229,6 @@ class StyleColors {
       warning: Color(0xFF92400E),
       onSuccess: Color(0xFFFFFFFF),
     ),
-    accent2: Color(0xFFEA580C),
   );
 
   /// 陶土柔和 · 深色
@@ -264,12 +260,84 @@ class StyleColors {
       warning: Color(0xFFFCD34D),
       onSuccess: Color(0xFF0A2E16),
     ),
-    accent2: Color(0xFFFDBA74),
+  );
+
+  // ══════════════════════════════════════════════════════════
+  // Windows 原生（WinUI3）—— 取值来源 `bdlukaa/fluent_ui`（BSD-3-Clause）
+  //
+  // 与前三套的差异：
+  // 1. 深色底是**暖灰 #2C2C2C**，前三套是冷灰 / 紫灰 / 棕灰；
+  // 2. 中性色走 22 级灰台阶（fluent_ui/color.dart:84-105），不带各自色相；
+  // 3. 强调色单色（三档由用户在设置里选，见 WinUiAccent）。
+  // ══════════════════════════════════════════════════════════
+
+  /// WinUI3 · 浅色。表层色取自 `fluent_ui/lib/src/styles/theme.dart:469-479`。
+  static const winuiLight = StyleColors(
+    colors: AppColors(
+      surfaceBase: Colors.transparent,
+      surfaceCard: Color(0xE6FCFCFC),
+      surfaceCardHover: Color(0xF2F3F2F1),
+      surfaceSunken: Color(0xF2F3F2F1),
+      surfaceFloat: Color(0xFFFAF9F8),
+      surfaceSolid: Color(0xFFFCFCFC),
+      scrim: Color(0x8A000000),
+      textStrong: Color(0xFF1B1A19),
+      textNormal: Color(0xFF3B3A39),
+      textMuted: Color(0xFF484644),
+      textFaint: Color(0xFF5E5C5A),
+      line: Color(0x261B1A19),
+      lineSoft: Color(0x121B1A19),
+      lineStrong: Color(0x3D1B1A19),
+      accent: Color(0xFF0078D4),
+      accentText: Color(0xFF005A9E),
+      onAccent: Color(0xFFFFFFFF),
+      accentSoft: Color(0x330078D4),
+      accentLine: Color(0x660078D4),
+      accentGlow: Color(0x1A0078D4),
+      danger: Color(0xFFC42B1C),
+      dangerSoft: Color(0x14C42B1C),
+      success: Color(0xFF0F7B0F),
+      warning: Color(0xFF9D5D00),
+      onSuccess: Color(0xFFFFFFFF),
+    ),
+  );
+
+  /// WinUI3 · 深色。底 `#2C2C2C`（暖灰）`theme.dart:470`。
+  static const winuiDark = StyleColors(
+    colors: AppColors(
+      surfaceBase: Colors.transparent,
+      surfaceCard: Color(0xE62C2C2C),
+      surfaceCardHover: Color(0xF2323232),
+      surfaceSunken: Color(0xF2252525),
+      surfaceFloat: Color(0xFF323232),
+      surfaceSolid: Color(0xFF2C2C2C),
+      scrim: Color(0x99000000),
+      textStrong: Color(0xFFFFFFFF),
+      textNormal: Color(0xFFE8E8E8),
+      textMuted: Color(0xFFC8C8C8),
+      textFaint: Color(0xFFA6A6A6),
+      line: Color(0x1FFFFFFF),
+      lineSoft: Color(0x12FFFFFF),
+      lineStrong: Color(0x2EFFFFFF),
+      accent: Color(0xFF4CC2FF),
+      accentText: Color(0xFF7FD4FF),
+      onAccent: Color(0xFF00304D),
+      accentSoft: Color(0x594CC2FF),
+      accentLine: Color(0x804CC2FF),
+      accentGlow: Color(0x264CC2FF),
+      danger: Color(0xFFFF99A4),
+      dangerSoft: Color(0x29FF99A4),
+      success: Color(0xFF6CCB5F),
+      warning: Color(0xFFFCE100),
+      onSuccess: Color(0xFF0A2E16),
+    ),
   );
 
   /// 按「风格 + 亮度」取令牌。穷尽 `switch` —— 加第四套风格时编译期就会报错。
   static StyleColors of(AppStyle style, Brightness brightness) =>
       switch ((style, brightness)) {
+        (AppStyle.winui, Brightness.light) => winuiLight,
+        (AppStyle.winui, Brightness.dark) => winuiDark,
         (AppStyle.liquid, Brightness.light) => liquidLight,
         (AppStyle.liquid, Brightness.dark) => liquidDark,
         (AppStyle.frosted, Brightness.light) => frostedLight,

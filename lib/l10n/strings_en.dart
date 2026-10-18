@@ -84,6 +84,10 @@ const Map<String, String> kStringsEn = {
       'How cards express their material: liquid glass is the most translucent, '
       'frosted stays the clearest, and clay is a solid surface. Takes effect '
       'immediately and is kept across restarts.',
+  'Windows 原生': 'Windows native',
+  'WinUI3 观感：暖灰底、单色强调、细边线、克制阴影':
+      'WinUI3 look: warm grey surfaces, a single accent colour, hairline borders '
+      'and restrained shadows',
   '液体玻璃': 'Liquid glass',
   '多层渐变加内缘亮环，模糊最轻、透光最强':
       'Layered gradients and a bright inner rim — lightest blur, most light through',

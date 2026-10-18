@@ -54,6 +54,8 @@ class StyleBackdrop {
 
   static StyleBackdrop of(AppStyle style, Brightness brightness) =>
       switch ((style, brightness)) {
+        (AppStyle.winui, Brightness.light) => winuiLight,
+        (AppStyle.winui, Brightness.dark) => winuiDark,
         (AppStyle.liquid, Brightness.light) => liquidLight,
         (AppStyle.liquid, Brightness.dark) => liquidDark,
         (AppStyle.frosted, Brightness.light) => frostedLight,
@@ -127,6 +129,41 @@ class StyleBackdrop {
   // ── 磨砂清晰 ────────────────────────────────────────────────
 
   /// CSS `:332`：单层 `linear-gradient(165deg, …)`。
+  // ── Windows 原生（WinUI3）──────────────────────────────────
+  //
+  // WinUI **没有径向光晕**（glows 为空），窗口底就是一块近乎平坦的表层色，
+  // 差异由 mica/亚克力的窗口材质承担，而不是靠风格自己画渐变。
+  // 这正是它与 liquid（三层 radial）最大的观感区别。
+  // 沿用 35% 半透明（0x59）让窗口材质透出来。
+
+  /// WinUI3 · 浅色。#FCFCFC 单层（fluent_ui theme.dart:474）。
+  static const winuiLight = StyleBackdrop(
+    glows: [],
+    linear: StyleLinear(
+      stops: [
+        Color(0x59FCFCFC),
+        Color(0x59FAF9F8),
+        Color(0x59F3F2F1),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    ),
+  );
+
+  /// WinUI3 · 深色。#2C2C2C 单层（暖灰，`theme.dart:470`）。
+  static const winuiDark = StyleBackdrop(
+    glows: [],
+    linear: StyleLinear(
+      stops: [
+        Color(0x592C2C2C),
+        Color(0x592A2A2A),
+        Color(0x59252525),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    ),
+  );
+
   static const frostedLight = StyleBackdrop(
     glows: [],
     linear: StyleLinear(

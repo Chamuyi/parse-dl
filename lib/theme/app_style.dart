@@ -22,6 +22,10 @@ const List<Color> kPreviewWallpaper = [
 /// 布局全部共用，差别只落在卡片的模糊 / 透明度 / 半径 / 渐变 / 描边 / 阴影上。
 /// 所以它跟 [AppColors]（管「用什么颜色」）正交，由 [AppSurface] 表达。
 enum AppStyle {
+  /// Windows 原生（WinUI3）。色板与材质取自 `bdlukaa/fluent_ui`（BSD-3-Clause）：
+  /// 22 级中性灰、暖灰深色底 `#2C2C2C`、单色强调、4/8px 圆角、1px 边线。
+  winui('winui', 'Windows 原生', 'WinUI3 观感：暖灰底、单色强调、细边线、克制阴影'),
+
   liquid('liquid', '液体玻璃', '多层渐变加内缘亮环，模糊最轻、透光最强'),
   frosted('frosted', '磨砂清晰', '单层磨砂，模糊与不透明度取中，文字最清楚'),
   clay('clay', '陶土柔和', '实心面配更重的软阴影，完全不透明，性能最好');
@@ -132,7 +136,24 @@ class AppSurface {
     shadowOpacity: 0.20,
   );
 
+  /// Windows 原生（WinUI3）：**实心面**，几乎无模糊，阴影极轻。
+  ///
+  /// 与 clay 的区别在「浮起感靠边线不靠投影」——WinUI 的卡片靠 1px 边线
+  /// 与表层色差分层，投影只是极淡的一层（官方 Card 阴影几乎看不见）。
+  /// 抄的是 `fluent_ui` 的观感，不是它的实现（未引入其依赖）。
+  static const winui = AppSurface(
+    blur: 0,
+    opacity: 1.0,
+    radiusScale: 1.0,
+    gradient: false,
+    rim: false,
+    shadowY: 2,
+    shadowBlur: 8,
+    shadowOpacity: 0.08,
+  );
+
   static AppSurface of(AppStyle s) => switch (s) {
+        AppStyle.winui => winui,
         AppStyle.liquid => liquid,
         AppStyle.frosted => frosted,
         AppStyle.clay => clay,
@@ -205,6 +226,12 @@ enum AppRadius {
 /// 圆角分档表：`(风格, 档位) → 半径`。
 extension AppStyleRadiusTokens on AppStyle {
   double radiusOf(AppRadius slot) => switch ((this, slot)) {
+        // WinUI3 规范：卡片/浮层 8px，控件 4px。
+        // 档位映射：card/hero2 = 8（容器），qi/field = 4（控件）。
+        (AppStyle.winui, AppRadius.card) => 8,
+        (AppStyle.winui, AppRadius.qi) => 4,
+        (AppStyle.winui, AppRadius.field) => 4,
+        (AppStyle.winui, AppRadius.hero2) => 8,
         (AppStyle.liquid, AppRadius.card) => 20,
         (AppStyle.frosted, AppRadius.card) => 14,
         (AppStyle.clay, AppRadius.card) => 16,
@@ -302,6 +329,11 @@ extension AppStyleBorderTokens on AppStyle {
         (AppStyle.clay, Brightness.light) ||
         (AppStyle.clay, Brightness.dark) =>
           StyleBorder.uniform(c.line),
+        // WinUI3：卡片靠 **1px 边线**分层，没有顶部高光。
+        // 浅色用 c.line（#E1DFDD 附近），深色同色板，取色板单出处。
+        (AppStyle.winui, Brightness.light) ||
+        (AppStyle.winui, Brightness.dark) =>
+          StyleBorder.uniform(c.line),
       };
 }
 
@@ -388,6 +420,21 @@ extension AppStyleShadowTokens on AppStyle {
               spreadRadius: -18,
             ),
           ],
+        // WinUI3：浮起感靠 1px 边线，投影只有极淡一层（官方 Card 几乎看不见影）。
+        (AppStyle.winui, Brightness.light) => const [
+            BoxShadow(
+              color: Color(0x0A000000),
+              offset: Offset(0, 1),
+              blurRadius: 4,
+            ),
+          ],
+        (AppStyle.winui, Brightness.dark) => const [
+            BoxShadow(
+              color: Color(0x1F000000),
+              offset: Offset(0, 1),
+              blurRadius: 4,
+            ),
+          ],
       };
 }
 
@@ -413,6 +460,9 @@ extension AppStyleHoverTokens on AppStyle {
         (AppStyle.clay, Brightness.light) => const Color(0x0D2B2622),
         // `:942` `body.dark #v-c .grp > .hd:hover { … rgba(245,240,235,.06) }`。
         (AppStyle.clay, Brightness.dark) => const Color(0x0FF5F0EB),
+        // WinUI3 的 hover 是"表层提亮一档"：浅色叠极淡黑，深色叠极淡白。
+        (AppStyle.winui, Brightness.light) => const Color(0x0A000000),
+        (AppStyle.winui, Brightness.dark) => const Color(0x0FFFFFFF),
       };
 }
 
@@ -547,6 +597,18 @@ class StyleSidebar {
     required this.borderRight,
   });
 
+  /// WinUI3 · 浅色。`fluent_ui` theme.dart:469 `#F9F9F9`，带右分隔线。
+  static const winuiLight = StyleSidebar(
+    color: Color(0xFFF9F9F9),
+    borderRight: true,
+  );
+
+  /// WinUI3 · 深色。`fluent_ui` theme.dart:470 `#2C2C2C`（暖灰，不是纯黑）。
+  static const winuiDark = StyleSidebar(
+    color: Color(0xFF2C2C2C),
+    borderRight: true,
+  );
+
   /// liquid · 浅色。CSS `:255`
   /// `linear-gradient(160deg, rgba(255,255,255,.5), rgba(255,255,255,.24))`。
   static const liquidLight = StyleSidebar(
@@ -599,6 +661,10 @@ class StyleSidebar {
 extension AppStyleSidebarTokens on AppStyle {
   StyleSidebar sidebarOf(Brightness brightness) =>
       switch ((this, brightness)) {
+        // WinUI3 NavigationView：侧栏是独立表层色，带右侧 1px 分隔线。
+        // 取自 `fluent_ui` theme.dart:469-482（浅 #F9F9F9 / 深 #2C2C2C）。
+        (AppStyle.winui, Brightness.light) => StyleSidebar.winuiLight,
+        (AppStyle.winui, Brightness.dark) => StyleSidebar.winuiDark,
         (AppStyle.liquid, Brightness.light) => StyleSidebar.liquidLight,
         (AppStyle.liquid, Brightness.dark) => StyleSidebar.liquidDark,
         (AppStyle.frosted, Brightness.light) => StyleSidebar.frostedLight,
@@ -644,6 +710,25 @@ class StyleButton {
     required this.primaryShadow,
     this.primaryTopHighlight,
   });
+
+  /// WinUI3 · 浅色。主按钮是**纯强调色实心**，没有渐变（这是与 liquid/clay
+  /// 最大的形态差异）；普通按钮是极淡表层色 + 1px 边线，阴影几乎为零。
+  static const winuiLight = StyleButton(
+    color: Color(0x0A000000),
+    primaryColor: Color(0xFF0078D4),
+    borderColor: Color(0x14000000),
+    shadow: BoxShadow(color: Color(0x08000000), offset: Offset(0, 1), blurRadius: 2),
+    primaryShadow: BoxShadow(color: Color(0x14000000), offset: Offset(0, 1), blurRadius: 2),
+  );
+
+  /// WinUI3 · 深色。主按钮用亮一档的强调色（配深字，见色板 onAccent）。
+  static const winuiDark = StyleButton(
+    color: Color(0x0FFFFFFF),
+    primaryColor: Color(0xFF4CC2FF),
+    borderColor: Color(0x1FFFFFFF),
+    shadow: BoxShadow(color: Color(0x1A000000), offset: Offset(0, 1), blurRadius: 2),
+    primaryShadow: BoxShadow(color: Color(0x1F000000), offset: Offset(0, 1), blurRadius: 2),
+  );
 
   /// liquid · 浅色。CSS `:293-302`。
   static const liquidLight = StyleButton(
@@ -781,6 +866,8 @@ class StyleButton {
 /// 按钮令牌入口。
 extension AppStyleButtonTokens on AppStyle {
   StyleButton buttonOf(Brightness brightness) => switch ((this, brightness)) {
+        (AppStyle.winui, Brightness.light) => StyleButton.winuiLight,
+        (AppStyle.winui, Brightness.dark) => StyleButton.winuiDark,
         (AppStyle.liquid, Brightness.light) => StyleButton.liquidLight,
         (AppStyle.liquid, Brightness.dark) => StyleButton.liquidDark,
         (AppStyle.frosted, Brightness.light) => StyleButton.frostedLight,
