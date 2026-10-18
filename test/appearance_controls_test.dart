@@ -249,7 +249,7 @@ void main() {
       // 本意的迁移版（S5）：「不许有第二种选中画法」这条约束对 frosted（默认风格）
       // 逐字段成立 —— 它必须继续走 selectedDecoration。
       final sel = selectedDecoration(c);
-      final nav = navItemDecoration(c, active: true, hover: false);
+      final nav = navItemDecoration(c, active: true);
       expect(nav.color, sel.color);
       expect(
         (nav.border! as Border).top.color,
@@ -262,14 +262,12 @@ void main() {
       final liq = navItemDecoration(
         c,
         active: true,
-        hover: false,
-        style: AppStyle.liquid,
+style: AppStyle.liquid,
       );
       final liq2 = navItemDecoration(
         c,
         active: true,
-        hover: false,
-        style: AppStyle.liquid,
+style: AppStyle.liquid,
       );
       expect(liq == liq2, isTrue, reason: '同一风格两次取值必须一致（无第二种画法）');
     });
@@ -281,15 +279,13 @@ void main() {
         final fromSidebar = navItemDecoration(
           c,
           active: true,
-          hover: false,
-          style: style,
+style: style,
           brightness: Brightness.dark,
         );
         final fromDock = navItemDecoration(
           c,
           active: true,
-          hover: false,
-          style: style,
+style: style,
           brightness: Brightness.dark,
         );
         expect(

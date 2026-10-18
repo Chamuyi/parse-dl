@@ -229,7 +229,6 @@ class _SidebarGroupHeaderState extends State<_SidebarGroupHeader> {
               decoration: navItemDecoration(
                 c,
                 active: false,
-                hover: _hover,
                 focused: focused,
                 style: th.style,
                 brightness: th.brightness,
@@ -379,7 +378,6 @@ class _SidebarNavRowState extends State<_SidebarNavRow> {
                   decoration: navItemDecoration(
                     c,
                     active: widget.active,
-                    hover: _hover,
                     focused: focused,
                     style: th.style,
                     brightness: th.brightness,

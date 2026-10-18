@@ -113,7 +113,7 @@ void main() {
   });
 
   test('焦点框画得出来：描边非透明，且压在卡片上够 3:1', () {
-    final d = navItemDecoration(c, active: false, hover: false, focused: true);
+    final d = navItemDecoration(c, active: false, focused: true);
     final border = (d.border! as Border).top;
     expect(border.color, isNot(Colors.transparent), reason: '焦点框不能是透明的');
 
@@ -142,20 +142,27 @@ void main() {
     }
   });
 
-  test('焦点态与悬停态、选中态两两不同形', () {
-    final idle = navItemDecoration(c, active: false, hover: false);
-    final hover = navItemDecoration(c, active: false, hover: true);
-    final focused = navItemDecoration(c, active: false, hover: false, focused: true);
-    final selected = navItemDecoration(c, active: true, hover: false);
+  test('焦点态与静止态、选中态两两不同形（悬停底色已于 2026-10-17 移除）', () {
+    final idle = navItemDecoration(c, active: false);
+    final focused = navItemDecoration(c, active: false, focused: true);
+    final selected = navItemDecoration(c, active: true);
 
     Color fillOf(Decoration d) => (d as BoxDecoration).color!;
-    // 悬停必须与静止不同，否则"鼠标在这儿"这件事没有任何反馈
-    expect(fillOf(hover), isNot(fillOf(idle)));
-    // 焦点必须有描边，而静止/悬停是透明描边（宽度恒 1px，避免文字跳格）
-    expect((focused.border! as Border).top.color,
-        isNot((idle.border! as Border).top.color));
-    // 选中与悬停不能同形：这是 2026-09-30 那条旧账（"都是深底胶囊，只差一圈描边"）
+
+    // **语义反转**（2026-10-17 用户裁定删除悬停遮罩）：静止态**不再**有悬停底色。
+    // 原先这里断言「悬停底色 ≠ 静止底色」，现改为两者都必须是透明 —— 删掉的效果
+    // 不许以任何形式回流。悬停的用户反馈改由 navIconColor（图标/文字变色）承担，
+    // 那条判据见 nav_layout_test 的「navIconColor 是两种布局共用的唯一取色来源」。
+    expect(fillOf(idle), Colors.transparent, reason: '静止态不该有底色');
+    expect(focused.border, isNot(idle.border), reason: '焦点必须有描边');
+    expect((focused.border! as Border).top.color, isNot(Colors.transparent),
+        reason: '焦点框不能是透明的');
+    expect(fillOf(focused), Colors.transparent,
+        reason: '聚焦元素也不该带悬停底色（该效果已删）');
+
+    // 选中态仍要与其它两态可区分：这是 2026-09-30 那条旧账（"都是深底胶囊，只差一圈描边"）
+    expect(fillOf(selected), isNot(fillOf(idle)));
     final ls = selected.boxShadow!.first.color.a;
-    expect(ls, greaterThan(0), reason: '选中态要有柔光，否则与悬停只差一圈边');
+    expect(ls, greaterThan(0), reason: '选中态要有柔光，否则与静止只差一圈边');
   });
 }

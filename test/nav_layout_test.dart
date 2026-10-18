@@ -258,30 +258,31 @@ void main() {
       const c = AppColors.dark;
 
       // frosted（默认风格）激活态 = selectedDecoration 的现值（选中底色唯一出处）。
-      final active = navItemDecoration(c, active: true, hover: false);
+      final active = navItemDecoration(c, active: true);
       expect(active.color, c.accentSoft);
       expect((active.border as Border).top.color, c.accentLine);
       expect(active.boxShadow, isNotNull, reason: '激活态要发光');
 
-      final hover = navItemDecoration(c, active: false, hover: true);
-      expect(hover.color, c.surfaceCardHover);
-      expect((hover.border as Border).top.color, Colors.transparent);
-      expect(hover.boxShadow, isNull);
-
-      final idle = navItemDecoration(c, active: false, hover: false);
-      expect(idle.color, Colors.transparent);
+      // **语义反转**（2026-10-17 用户裁定删除悬停遮罩）：非激活项**恒为透明底**。
+      // 原先这里断言「悬停底色 = c.surfaceCardHover」，现改为静止与任何状态都不带
+      // 底色 —— 被删掉的效果不许以任何形式回流（该效果在真机上表现为两个圆角块
+      // 同时闪现后消失，根因在渲染层未定位）。悬停反馈改由 navIconColor 承担。
+      final idle = navItemDecoration(c, active: false);
+      expect(idle.color, Colors.transparent, reason: '静止态不该有底色');
       expect(idle.boxShadow, isNull);
+      expect((idle.border as Border).top.color, Colors.transparent,
+          reason: '静止态是透明描边（宽度恒 1px，避免文字跳格）');
     });
 
     test('激活态随风格两两不同（frosted=纯色12%无外发光 / liquid=渐变+发光 / clay=纯色10%）', () {
       const c = AppColors.dark;
 
       final frosted =
-          navItemDecoration(c, active: true, hover: false, style: AppStyle.frosted);
+          navItemDecoration(c, active: true, style: AppStyle.frosted);
       final liquid =
-          navItemDecoration(c, active: true, hover: false, style: AppStyle.liquid);
+          navItemDecoration(c, active: true, style: AppStyle.liquid);
       final clay =
-          navItemDecoration(c, active: true, hover: false, style: AppStyle.clay);
+          navItemDecoration(c, active: true, style: AppStyle.clay);
 
       // frosted 仍走 selectedDecoration：底 = accentSoft，有柔光
       expect(frosted.color, c.accentSoft);

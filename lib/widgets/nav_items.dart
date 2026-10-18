@@ -169,7 +169,6 @@ abstract final class NavMetrics {
 BoxDecoration navItemDecoration(
   AppColors c, {
   required bool active,
-  required bool hover,
   bool focused = false,
   AppStyle style = AppStyle.frosted,
   Brightness brightness = Brightness.light,
@@ -188,7 +187,7 @@ BoxDecoration navItemDecoration(
           .copyWith(border: ring, boxShadow: hardGlow);
     }
     return BoxDecoration(
-      color: hover ? c.surfaceCardHover : Colors.transparent,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(NavMetrics.radius),
       border: ring,
       boxShadow: hardGlow,
@@ -198,7 +197,16 @@ BoxDecoration navItemDecoration(
     return _activeDecorationFor(c, style, active: true, brightness: brightness);
   }
   return BoxDecoration(
-    color: hover ? c.surfaceCardHover : Colors.transparent,
+    // **不再画悬停底色**（2026-10-17 用户裁定删除该效果）。
+    //
+    // 原先这里是 `hover ? c.surfaceCardHover : Colors.transparent`。真机表现为
+    // 鼠标划过时「两个完整的圆角矩形块同时出现、再闪一下消失」，且鼠标**停住
+    // 不动也会自己消失**；日志证明 `MouseTracker` 的 enter/exit 完全正常
+    // （停住时 600ms 内没有 EXIT），即状态是对的、问题在渲染层，属合成/脏区
+    // 层面的残留，排查多轮未能定位。用户据此裁定不要这个效果。
+    //
+    // 保留的是另一套反馈：图标/文字变色（[navIconColor]）与轻微位移。
+    color: Colors.transparent,
     borderRadius: BorderRadius.circular(NavMetrics.radius),
     // 不激活也留一圈**透明**描边：描边要占 1px，省掉会让文字在悬停瞬间跳格
     border: Border.all(color: Colors.transparent, width: 1),
@@ -250,14 +258,12 @@ BoxDecoration _activeDecorationFor(
 BoxDecoration navDecorationFor(
   BuildContext context, {
   required bool active,
-  required bool hover,
   bool focused = false,
 }) {
   final t = AppTheme.of(context);
   return navItemDecoration(
     t.colors,
     active: active,
-    hover: hover,
     focused: focused,
     style: t.style,
     brightness: t.brightness,
@@ -518,7 +524,6 @@ class NavIconBox extends StatelessWidget {
       decoration: navItemDecoration(
         c,
         active: active,
-        hover: hover,
         focused: focused,
         style: t.style,
         brightness: t.brightness,

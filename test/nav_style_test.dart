@@ -22,7 +22,7 @@ void main() {
       const c = AppColors.light;
       final d = <AppStyle, BoxDecoration>{
         for (final s in AppStyle.values)
-          s: navItemDecoration(c, active: true, hover: false, style: s),
+          s: navItemDecoration(c, active: true, style: s),
       };
       expect(d[AppStyle.liquid], isNot(d[AppStyle.frosted]));
       expect(d[AppStyle.liquid], isNot(d[AppStyle.clay]));
@@ -33,7 +33,7 @@ void main() {
       const c = AppColors.dark;
       final d = <AppStyle, BoxDecoration>{
         for (final s in AppStyle.values)
-          s: navItemDecoration(c, active: true, hover: false, style: s),
+          s: navItemDecoration(c, active: true, style: s),
       };
       expect(d[AppStyle.liquid], isNot(d[AppStyle.frosted]));
       expect(d[AppStyle.liquid], isNot(d[AppStyle.clay]));
@@ -42,7 +42,7 @@ void main() {
 
     test('frosted 分支继续走 selectedDecoration（CSS :356-357 纯色12%+内描边）', () {
       const c = AppColors.dark;
-      final nav = navItemDecoration(c, active: true, hover: false,
+      final nav = navItemDecoration(c, active: true,
           style: AppStyle.frosted);
       // selectedDecoration 的现值 = accentSoft 底 + accentLine 描边 + 柔光
       expect(nav.color, c.accentSoft);
@@ -52,7 +52,7 @@ void main() {
 
     test('liquid 激活态 = 渐变 + 外发光（CSS :284-286）', () {
       const c = AppColors.dark;
-      final nav = navItemDecoration(c, active: true, hover: false,
+      final nav = navItemDecoration(c, active: true,
           style: AppStyle.liquid, brightness: Brightness.light);
       expect(nav.gradient, isNotNull, reason: 'liquid 底是 135° 线性渐变');
       expect(nav.color, isNull);
@@ -66,7 +66,7 @@ void main() {
 
     test('clay 激活态 = 纯色 10% + 仅内描边、无外发光（CSS :418-420）', () {
       const c = AppColors.dark;
-      final nav = navItemDecoration(c, active: true, hover: false,
+      final nav = navItemDecoration(c, active: true,
           style: AppStyle.clay, brightness: Brightness.light);
       expect(nav.gradient, isNull);
       expect(nav.color, const Color(0x1AC2410C));
