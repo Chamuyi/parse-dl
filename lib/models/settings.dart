@@ -100,6 +100,18 @@ class AppearanceSettings {
   /// 形如 #RRGGBB
   String tintColor;
 
+  /// 自定义色调的浓度 0~1（图吧工具箱「色调不透明度」滑块）。
+  ///
+  /// 越大越接近用户选的 [tintColor]，越小越接近主题底色。
+  /// 默认 0.6 就是引入该参数之前写死的那档权重（见 `AppColors.tintFor`）。
+  double tintOpacity;
+
+  /// 明度层的不透明度 0~1（图吧工具箱「明度不透明度」滑块）。
+  ///
+  /// 越大越接近主题底色（越透、越不浓），越小越接近纯色调。
+  /// 默认 0.3 是中性点 —— 取这个值时对最终颜色零偏移。
+  double tintLuminosityOpacity;
+
   /// 背景图本地路径，空串表示未设置
   String backgroundImage;
 
@@ -135,6 +147,8 @@ class AppearanceSettings {
     this.windowMaterial = WindowMaterial.mica,
     this.customTint = false,
     this.tintColor = '#1d9bf0',
+    this.tintOpacity = 0.6,
+    this.tintLuminosityOpacity = 0.3,
     this.backgroundImage = '',
     this.backgroundImageOpacity = 0.35,
     this.navLayout = NavLayout.dock,
@@ -158,6 +172,17 @@ class AppearanceSettings {
     };
   }
 
+  /// 读 0~1 的比例字段：缺字段 / 坏值落 [fallback]，越界 clamp 回 0~1。
+  ///
+  /// NaN 与无穷也算坏值 —— 它们能穿过 `clamp` 混进颜色计算（NaN 与任何数
+  /// 比较都为 false），最后表现为整块底色变黑或消失，而且不会抛异常。
+  static double _unit(Object? raw, double fallback) {
+    if (raw is! num) return fallback;
+    final v = raw.toDouble();
+    if (!v.isFinite) return fallback;
+    return v.clamp(0.0, 1.0).toDouble();
+  }
+
   /// 读展开状态的持久化字段：不是 Map 就当没记过（全展开）。
   static Map<String, bool> _readExpandedMap(Object? raw) {
     if (raw is! Map) return const {};
@@ -169,10 +194,14 @@ class AppearanceSettings {
   factory AppearanceSettings.fromJson(Map<String, dynamic> j) =>
       AppearanceSettings(
         themeMode: ThemeMode2.fromId(j['themeMode'] as String?),
-        // 旧配置里的五档材质已删除，fromId 一律回落到 mica（迁移不报错）。
-        windowMaterial: WindowMaterial.mica,
+        // 四档材质已恢复（2026-10-19 照抄图吧工具箱）。fromId 原样保留
+        // mica / mica-alt / acrylic / acrylic-thin 四个 id；已删除的 none
+        // 与坏值 / null 一律回落 mica（迁移不报错）。
+        windowMaterial: WindowMaterial.fromId(j['windowMaterial'] as String?),
         customTint: j['customTint'] as bool? ?? false,
         tintColor: j['tintColor'] as String? ?? '#1d9bf0',
+        tintOpacity: _unit(j['tintOpacity'], 0.6),
+        tintLuminosityOpacity: _unit(j['tintLuminosityOpacity'], 0.3),
         backgroundImage: j['backgroundImage'] as String? ?? '',
         backgroundImageOpacity:
             (j['backgroundImageOpacity'] as num?)?.toDouble() ?? 0.35,
@@ -188,6 +217,8 @@ class AppearanceSettings {
     'windowMaterial': windowMaterial.id,
     'customTint': customTint,
     'tintColor': tintColor,
+    'tintOpacity': tintOpacity,
+    'tintLuminosityOpacity': tintLuminosityOpacity,
     'backgroundImage': backgroundImage,
     'backgroundImageOpacity': backgroundImageOpacity,
     'navLayout': navLayout.id,

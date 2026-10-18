@@ -65,6 +65,61 @@ void main() {
   });
 
 
+  // ══════════════════════════════════════════════════════════
+  // 材质档位必须真的从配置读出来（2026-10-19）
+  // ══════════════════════════════════════════════════════════
+
+  group('材质档位不被硬编码', () {
+    /// 一份最小的 {state, version} 配置骨架，只换 `windowMaterial` 一个字段。
+    ///
+    /// 不复用上面 group 里的 `legacyJson`（那是局部变量），这里自带一份，
+    /// 保证这条判据只依赖材质字段本身。
+    String withMaterial(String materialId) => '''
+{"state":{"appearance":{"themeMode":"system","windowMaterial":"$materialId"}},"version":3}''';
+
+    test('配置里写 mica-alt，读出来就是 mica-alt', () {
+      // 上面「能正确解析既有配置」那条的 legacyJson 写的是 "mica"，
+      // 而 mica 恰好也是回落值 —— 光靠它证明不了「字段真被读了」：
+      // 把 fromJson 写成硬编码 mica 它照样绿。这条换个非默认档位。
+      final s = Settings.decode(withMaterial('mica-alt'));
+      expect(s.appearance.windowMaterial, WindowMaterial.micaAlt,
+          reason: '配置里的 mica-alt 必须被读出来 —— 硬编码 mica 会让这条红');
+      expect(s.appearance.themeMode, ThemeMode2.system,
+          reason: '换材质不该影响同一份配置里的其他字段');
+    });
+
+    test('四个有效档位逐个往返（配置 → 对象 → 配置）', () {
+      for (final m in WindowMaterial.values) {
+        final a = Settings.decode(withMaterial(m.id));
+        expect(a.appearance.windowMaterial, m, reason: '${m.id} 读丢了');
+        final root = jsonDecode(a.encode()) as Map<String, dynamic>;
+        expect((root['state'] as Map)['appearance']['windowMaterial'], m.id,
+            reason: '${m.id} 写回配置时变了');
+      }
+    });
+
+    test('已删除的 none 与坏值仍回落 mica', () {
+      expect(Settings.decode(withMaterial('none')).appearance.windowMaterial,
+          WindowMaterial.mica);
+      expect(Settings.decode(withMaterial('garbage')).appearance.windowMaterial,
+          WindowMaterial.mica);
+    });
+
+    test('负控制：硬编码 mica 会让上面两条变红', () {
+      // c10b41e 那版就是 `windowMaterial: WindowMaterial.mica`（不读字段）。
+      WindowMaterial hardcoded(String _) => WindowMaterial.mica;
+      expect(
+        () => expect(hardcoded('mica-alt'), WindowMaterial.micaAlt),
+        throwsA(isA<TestFailure>()),
+        reason: '硬编码时「mica-alt 读回 mica-alt」必须红',
+      );
+      expect(
+        () => expect(hardcoded('acrylic'), WindowMaterial.acrylic),
+        throwsA(isA<TestFailure>()),
+      );
+    });
+  });
+
   group('ThemeMode2', () {
     test('id 映射与回退', () {
       expect(ThemeMode2.fromId('light'), ThemeMode2.light);

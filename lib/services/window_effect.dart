@@ -14,10 +14,35 @@ import '../theme/window_material.dart';
 /// 2026-10-15 加这条判据的原因：`dark` 参数曾被写成按材质猜
 /// （`material == mica || material == micaAlt`），浅色+Mica 与深色+亚克力
 /// 两种组合都传反 —— 而这件事**零测试覆盖**，所以错了很久没人发现。
+///
+/// ### 映射表（2026-10-19 恢复 4 档，照抄图吧工具箱的 BackdropService）
+///
+/// | 材质 | 效果 | 原生 `SYSTEMBACKDROP_TYPE` |
+/// |---|---|---|
+/// | [WindowMaterial.mica]        | `mica`     | 2 = `DWMSBT_MAINWINDOW` |
+/// | [WindowMaterial.micaAlt]     | `tabbed`   | 4 = `DWMSBT_TABBEDWINDOW`（官方 Mica Alt） |
+/// | [WindowMaterial.acrylic]     | `acrylic`  | 3 = `DWMSBT_TRANSIENTWINDOW` |
+/// | [WindowMaterial.acrylicThin] | `acrylic`  | 3（同上，见下） |
+///
+/// ### 细亚克力落到亚克力是**能力边界**，不是没生效
+///
+/// `flutter_acrylic` 1.1.4 的 `WindowEffect` 在 Windows 上只有
+/// disabled / solid / transparent / aero / acrylic / mica / tabbed 七个值，
+/// **没有「细亚克力」这一档**；其 `windows/flutter_acrylic_plugin.cpp` 也只
+/// 把 mica→2、tabbed→4、acrylic→3 三档写进 `SYSTEMBACKDROP_TYPE`。
+///
+/// 参照物能做到 `DesktopAcrylicKind.Thin`，是因为它直接持有
+/// `DesktopAcrylicController`（WinUI3 的合成控制器）；本项目的
+/// `flutter_acrylic` 没有暴露这个开关，所以 [WindowMaterial.acrylicThin]
+/// **只能**落到 `acrylic`。真机对照时这两档截图会一模一样 —— 预期行为。
 acrylic.WindowEffect windowEffectOf(WindowMaterial material) =>
-    // 2026-10-19：材质只剩 Mica 一档（官方给长驻窗口的唯一选择）。
-    // 保留函数签名是为了让调用点与判据不用改。
-    acrylic.WindowEffect.mica;
+    switch (material) {
+      WindowMaterial.mica => acrylic.WindowEffect.mica,
+      WindowMaterial.micaAlt => acrylic.WindowEffect.tabbed,
+      WindowMaterial.acrylic => acrylic.WindowEffect.acrylic,
+      // 能力边界：没有「细亚克力」这个原生效果，只能落到普通亚克力。
+      WindowMaterial.acrylicThin => acrylic.WindowEffect.acrylic,
+    };
 
 /// 把设置里的材质应用到原生窗口。
 ///
@@ -40,12 +65,10 @@ acrylic.WindowEffect windowEffectOf(WindowMaterial material) =>
 ///
 /// ### 细亚克力与亚克力在原生层是同一个效果（能力边界，如实记录）
 ///
-/// `flutter_acrylic` 只有三个效果：`acrylic` / `mica` / `tabbed`，
-/// **没有「细亚克力」这一档**，所以 [WindowMaterial.acrylicThin] 只能落到
-/// `acrylic`。两者在 [WindowMaterial] 里参数不同（seeThrough 0.62 / blur 1.6
-/// 对 0.45 / 3.2），那是**应用内卡片材质**的差异；窗口背景这一层目前
-/// 由系统统一绘制，程序无法区分得更细。真机对照时这两张截图会一模一样，
-/// 是预期行为，不是没生效。
+/// `flutter_acrylic` 在 Windows 上只有 `acrylic` / `mica` / `tabbed` 三个
+/// 材质效果，**没有「细亚克力」这一档**，所以 [WindowMaterial.acrylicThin]
+/// 只能落到 `acrylic`（见 [windowEffectOf] 的映射表）。真机对照时这两张
+/// 截图会一模一样，是预期行为，不是没生效。
 Future<MaterialApplyResult> applyWindowMaterial(
   WindowMaterial material, {
   required bool dark,
@@ -63,7 +86,7 @@ Future<MaterialApplyResult> applyWindowMaterial(
     await acrylic.Window.setEffect(effect: effect, dark: dark);
     return MaterialApplyResult(
       ok: true,
-      // 材质只剩 Mica 一档，「关闭材质」这个分支没有对象了。
+      // 四档材质都会落到某个系统效果上，「关闭材质」这个分支没有对象。
       message: '${material.label} 已应用',
     );
   } catch (e) {

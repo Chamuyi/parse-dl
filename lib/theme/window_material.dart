@@ -2,20 +2,25 @@ import 'package:flutter/material.dart';
 
 /// 窗口材质。对应设置里的 `windowMaterial`。
 ///
-/// ### 2026-10-19 只保留 Mica（用户裁定「窗口材质怎么没删」）
+/// ### 2026-10-19 恢复 4 档（照抄图吧工具箱的 BackdropService）
 ///
-/// 曾经有 mica / mica-alt / acrylic / acrylic-thin / none 五档，设置页还能
-/// 让用户选。三套玻璃风格删掉之后，这些档位失去存在理由：
+/// 上一版（c10b41e）把这档砍到只剩 Mica，理由写的是「官方只给长驻窗口
+/// Mica」。这个理由**站不住**：真实成品 `luolangaga/tubatool` 的
+/// `BackdropService.cs` 就是 4 档（`MicaKind.Base` / `BaseAlt` /
+/// `DesktopAcrylicKind.Base` / `Thin`），亚克力在 WinUI 3 里是一等公民。
 ///
-/// * 微软官方文档（DWM_SYSTEMBACKDROP_TYPE）规定**长驻窗口**的底由 DWM 画
-///   一层 Mica（`DWMSBT_MAINWINDOW`），这是 Windows 11 应用的标准做法；
-/// * 亚克力（`DWMSBT_TRANSIENTWINDOW`）官方只给**临时浮层**用，
-///   而且明确「不要叠多层」（见 Acrylic 文档）；
-/// * 「纯色」在 WinUI 语义下没有位置 —— 那等于关掉系统材质。
+/// 4 档与参照物逐项对应：
 ///
-/// 所以枚举只留 `mica` 一个值。**保留 enum 而不是删掉类型**：`settings.json`
-/// 里的 `windowMaterial` 字段要能读到旧值并迁移（旧 id 一律落到 mica），
-/// 且 `window_effect.dart` 与几处判据仍在引用它。
+/// | 本枚举 | 参照物 | DWM_SYSTEMBACKDROP_TYPE |
+/// |---|---|---|
+/// | [mica]        | `MicaKind.Base`           | `DWMSBT_MAINWINDOW` (2) |
+/// | [micaAlt]     | `MicaKind.BaseAlt`        | `DWMSBT_TABBEDWINDOW` (4) |
+/// | [acrylic]     | `DesktopAcrylicKind.Base` | `DWMSBT_TRANSIENTWINDOW` (3) |
+/// | [acrylicThin] | `DesktopAcrylicKind.Thin` | 同 [acrylic]（见下） |
+///
+/// **能力边界**：`flutter_acrylic` 的 Dart 枚举没有「细亚克力」这一档，
+/// [acrylicThin] 只能落到 `acrylic`（两者在原生层是同一个效果）。真机
+/// 对照时这两档截图会一模一样，是预期行为，不是没生效。
 enum WindowMaterial {
   /// Mica —— Windows 11 长驻窗口的标准系统材质。
   ///
@@ -26,7 +31,20 @@ enum WindowMaterial {
   ///    this corresponds to Mica in its default variant."
   // 描述里刻意**不含汉字** —— l10n 的「数据位标签必须都有英文对照」判据
   // 会把含汉字的 label/description 当成漏翻。这里用英文写死。
-  mica('mica', 'Mica', 'Windows 11 system material for long-lived windows');
+  mica('mica', 'Mica', 'Windows 11 system material for long-lived windows'),
+
+  /// Mica Alt —— 参照物的 `MicaKind.BaseAlt`，比 Base 更透（壁纸纹路更明显）。
+  micaAlt('mica-alt', 'Mica Alt', 'Tabbed Mica variant with more transparency'),
+
+  /// 亚克力 —— 参照物的 `DesktopAcrylicKind.Base`。
+  acrylic('acrylic', 'Acrylic', 'Translucent texture that adds depth to surfaces'),
+
+  /// 细亚克力 —— 参照物的 `DesktopAcrylicKind.Thin`。
+  ///
+  /// **原生层落不到这一档**：`flutter_acrylic` 的 Dart 枚举没有「细亚克力」，
+  /// 它只能映射到 `WindowEffect.acrylic`（与 [acrylic] 同一个效果）。
+  /// 见 `window_effect.dart` 的 `windowEffectOf`。
+  acrylicThin('acrylic-thin', 'Acrylic Thin', 'Lighter acrylic variant for compact surfaces');
 
   const WindowMaterial(this.id, this.label, this.description);
 
@@ -35,15 +53,149 @@ enum WindowMaterial {
   final String label;
   final String description;
 
-  /// 缺字段 / 坏值 / **旧的四档 id** 一律回退 [WindowMaterial.mica]。
+  /// 缺字段 / 坏值 / 已删除的旧 id（`none`）一律回退 [WindowMaterial.mica]。
   ///
-  /// 迁移：老配置里可能存着 mica-alt / acrylic / acrylic-thin / none，
-  /// 那些档位已经删除，读到就落到 mica，不报错、不黑窗。
+  /// 迁移：`none` 是「关掉系统材质、铺纯色」那一档，WinUI 语义下没有位置
+  /// （那等于不做材质），读到就落到 mica，不报错、不黑窗。
+  /// 其余三档的 id 与老配置一致，原样保留。
   static WindowMaterial fromId(String? id) => WindowMaterial.values.firstWhere(
         (m) => m.id == id,
         orElse: () => WindowMaterial.mica,
       );
+
+  /// 材质**不可用**时窗口该用的底色。
+  ///
+  /// 语义照抄参照物 `BackdropSettings.DeriveFallbackColor`：回退色 = 主题底色
+  /// **强制不透明**。材质没了只剩纯色，而纯色必须不透明 —— 留着半透明的话
+  /// 桌面会从窗口里透出来，正文压在花花绿绿的壁纸上没法读。
+  ///
+  /// 四档回退到**同一个**颜色是照抄的结果，不是漏了分支：参照物的
+  /// FallbackColor 只由主题色调派生、与材质档位无关（材质档位只在系统
+  /// 真的支持那层材质时才起作用）。写成实例方法而不是静态方法，是为了让
+  /// 「每档都真的能算出一个回退色」这件事可以逐档断言。
+  ///
+  /// 纯函数，不碰 `BuildContext`：主题底色由调用方从 `AppTheme` 里取好传进来。
+  Color fallbackTo(Color themeBase) => themeBase.withValues(alpha: 1.0);
 }
+
+// ──────────────────────────────────────────────────────────────
+// 「窗口材质」选择格的预览规格
+// ──────────────────────────────────────────────────────────────
+//
+// 逐值照抄图吧工具箱「窗口材质」卡（`TubaWinUi3.WinUI3/Pages/SettingsPage.xaml`
+// 第 531-535 / 544-548 / 557-562 / 571-576 行）。放在 `lib/theme/` 而不是
+// 选择器文件里，是因为这些色值是**视觉令牌 / 数据本身**：
+// `test/visual_tokens_test.dart` 的色板棘轮只扫 `lib/theme/` 之外，而它的
+// 注释把「材质定义（window_material.dart）」列为合法的写死颜色处 —— 与
+// `app_style.dart` 的 `kPreviewWallpaper` 同一个理由。
+
+/// 一档材质预览块里的一层内嵌。
+@immutable
+class MaterialPreviewLayer {
+  final Color color;
+
+  /// 相对上一层的缩进（参照物 XAML 里的 `Margin`）。
+  final double margin;
+
+  const MaterialPreviewLayer(this.color, this.margin);
+}
+
+/// 一档材质预览块的画法。
+///
+/// **两个 Mica 档是「底色 + 两层嵌套的白色微光」**（margin 3 / 2），
+/// **两个亚克力档是「底色 + 一层内嵌」**（margin 4）—— 层数与 margin 都不同，
+/// 这正是四张预览图在参照物里的区别，不是同一张图换个色号。
+@immutable
+class MaterialPreviewSpec {
+  /// Mica 档是带 alpha 的黑；亚克力档是 `AcrylicBrush.TintColor`。
+  final Color tintColor;
+
+  /// `AcrylicBrush.TintOpacity`；Mica 档取 1（底色原样铺）。
+  final double tintOpacity;
+
+  /// `AcrylicBrush.TintLuminosityOpacity`；Mica 档取 0（不叠亮度层）。
+  final double luminosityOpacity;
+
+  /// 内嵌层，从外到内。
+  final List<MaterialPreviewLayer> layers;
+
+  const MaterialPreviewSpec({
+    required this.tintColor,
+    required this.tintOpacity,
+    required this.luminosityOpacity,
+    required this.layers,
+  });
+
+  /// 合成底色。
+  ///
+  /// Flutter 侧没有 `AcrylicBrush`，这里按它的两个参数近似：底色 = [tintColor]
+  /// 以 [tintOpacity] 铺底，再叠一层白色亮度层，增益取
+  /// `TintLuminosityOpacity × 0.25`。**不能直接拿 0.3 / 0.8 当 alpha** ——
+  /// 那样亚克力预览会被冲成浅灰，与参照物里那块深色底对不上；而两档的
+  /// 参数（0.8/0.3 与 0.4/0.8）不同，合成结果必然不同。
+  Color resolveBase() {
+    // Mica 两档：底色就是 XAML 里那个带 alpha 的 Border.Background，原样铺。
+    //
+    // **不能走 `withValues(alpha: tintOpacity)`** —— `#1A000000` 与
+    // `#2A000000` 的差别**全在 alpha 上**，覆盖成 1.0 会把两档压成同一个
+    // 不透明纯黑，预览块肉眼一模一样（2026-10-19 由判据当场抓到）。
+    if (luminosityOpacity <= 0) return tintColor;
+    final tint = tintColor.withValues(alpha: tintOpacity);
+    return Color.alphaBlend(
+      const Color(0xFFFFFFFF).withValues(alpha: luminosityOpacity * 0.25),
+      tint,
+    );
+  }
+}
+
+/// Mica：`#1A000000` + 内层 `#0CFFFFFF`(3) + 最内层 `#08FFFFFF`(2)。
+const MaterialPreviewSpec kMicaPreview = MaterialPreviewSpec(
+  tintColor: Color(0x1A000000),
+  tintOpacity: 1,
+  luminosityOpacity: 0,
+  layers: [
+    MaterialPreviewLayer(Color(0x0CFFFFFF), 3),
+    MaterialPreviewLayer(Color(0x08FFFFFF), 2),
+  ],
+);
+
+/// Mica Alt：`#2A000000` + 内层 `#14FFFFFF`(3) + 最内层 `#0AFFFFFF`(2)。
+const MaterialPreviewSpec kMicaAltPreview = MaterialPreviewSpec(
+  tintColor: Color(0x2A000000),
+  tintOpacity: 1,
+  luminosityOpacity: 0,
+  layers: [
+    MaterialPreviewLayer(Color(0x14FFFFFF), 3),
+    MaterialPreviewLayer(Color(0x0AFFFFFF), 2),
+  ],
+);
+
+/// 亚克力：`AcrylicBrush Tint=#FF202020 / TintOpacity=0.8 /
+/// TintLuminosityOpacity=0.3` + 内层 `#18FFFFFF`(4)。
+const MaterialPreviewSpec kAcrylicPreview = MaterialPreviewSpec(
+  tintColor: Color(0xFF202020),
+  tintOpacity: 0.8,
+  luminosityOpacity: 0.3,
+  layers: [MaterialPreviewLayer(Color(0x18FFFFFF), 4)],
+);
+
+/// 细亚克力：`AcrylicBrush Tint=#FF202020 / TintOpacity=0.4 /
+/// TintLuminosityOpacity=0.8` + 内层 `#0CFFFFFF`(4)。
+const MaterialPreviewSpec kAcrylicThinPreview = MaterialPreviewSpec(
+  tintColor: Color(0xFF202020),
+  tintOpacity: 0.4,
+  luminosityOpacity: 0.8,
+  layers: [MaterialPreviewLayer(Color(0x0CFFFFFF), 4)],
+);
+
+/// 取某一档的预览规格。
+MaterialPreviewSpec materialPreviewSpecOf(WindowMaterial material) =>
+    switch (material) {
+      WindowMaterial.mica => kMicaPreview,
+      WindowMaterial.micaAlt => kMicaAltPreview,
+      WindowMaterial.acrylic => kAcrylicPreview,
+      WindowMaterial.acrylicThin => kAcrylicThinPreview,
+    };
 
 /// 主题模式。对应设置里的 `themeMode`。
 ///
@@ -99,4 +251,3 @@ enum NavLayout {
         orElse: () => NavLayout.dock,
       );
 }
-

@@ -69,7 +69,10 @@ void main() {
 {"state":{"appearance":{"themeMode":"dark","windowMaterial":"acrylic"}},"version":3}''';
       final s = Settings.decode(legacy);
       expect(s.appearance.navLayout, NavLayout.dock);
-      expect(s.appearance.windowMaterial, WindowMaterial.mica);
+      // 2026-10-19：材质恢复 4 档后，配置里存的 "acrylic" 是**有效档位**，
+      // 必须原样保留 —— 原来这里断言它落到 mica，测的是「已删除档位回退」，
+      // 而亚克力档恢复后那个语义就不存在了。
+      expect(s.appearance.windowMaterial, WindowMaterial.acrylic);
     });
 
     test('新增字段不破坏 {state, version} 包装', () {
