@@ -169,7 +169,8 @@ class AppearanceSettings {
   factory AppearanceSettings.fromJson(Map<String, dynamic> j) =>
       AppearanceSettings(
         themeMode: ThemeMode2.fromId(j['themeMode'] as String?),
-        windowMaterial: WindowMaterial.fromId(j['windowMaterial'] as String?),
+        // 旧配置里的五档材质已删除，fromId 一律回落到 mica（迁移不报错）。
+        windowMaterial: WindowMaterial.mica,
         customTint: j['customTint'] as bool? ?? false,
         tintColor: j['tintColor'] as String? ?? '#1d9bf0',
         backgroundImage: j['backgroundImage'] as String? ?? '',

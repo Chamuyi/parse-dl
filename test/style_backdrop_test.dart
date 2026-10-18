@@ -98,7 +98,7 @@ void main() {
   // ══════════════════════════════════════════════════════════
 
   testWidgets('纯色材质 → 不透明实色（不走风格绘制器）', (tester) async {
-    await pumpBackdrop(tester, WindowMaterial.none);
+    await pumpBackdrop(tester, WindowMaterial.mica);
     // 底色 = 该风格色板的 surfaceSolid（2026-10-16 起 solidFor 按风格取 ——
     // liquid 浅色是 #FAFAFF 的冷紫调，不是旧的通用灰 #F3F3F3），
     // 且无风格绘制器
@@ -110,7 +110,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(backdropPaint('style'), findsNothing, reason: '纯色材质不该画风格渐变');
+    // 2026-10-19：风格渐变绘制器已随三套风格删除，这里不再需要「不该画渐变」的断言。
   });
 
   testWidgets('自定义色调 → tintFor 混合色（不走风格绘制器）', (tester) async {
@@ -137,7 +137,7 @@ void main() {
       find.byWidgetPredicate((w) => w is ColoredBox && w.color == expected),
       findsOneWidget,
     );
-    expect(backdropPaint('style'), findsNothing);
+    // 同上：风格渐变绘制器已删除。
   });
 }
 
@@ -250,15 +250,9 @@ Future<void> pumpBackdrop(
   await tester.pump();
 }
 
-/// 背景底绘制器的 Finder，按 [BackdropPainter.kind] 区分两层：
-/// `'style'` = 风格渐变打底，`'material'` = 材质底（分层 / 颗粒）。
-///
-/// 按**公开类型**匹配，不再依赖私有类名或 `toString()` 指纹。
-Finder backdropPaint(String kind) => find.byWidgetPredicate((w) {
-      if (w is! CustomPaint) return false;
-      final painter = w.painter;
-      return painter is BackdropPainter && painter.kind == kind;
-    });
+// 2026-10-19：`backdropPaint(kind)` 这个 Finder 已删除。
+// 它按 `BackdropPainter.kind` 区分「风格渐变打底」与「材质底」两层 ——
+// 材质只剩 Mica、窗口底改由 DWM 画之后，那两层绘制器整个不存在了。
 
 /// 只统计绘制调用次数的探针 canvas。
 ///

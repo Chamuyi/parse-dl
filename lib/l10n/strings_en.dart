@@ -42,11 +42,8 @@ const Map<String, String> kStringsEn = {
   '全局设置': 'General Settings',
   '抖音解析下载设置': 'Douyin Download Settings',
   '外观': 'Appearance',
-  '窗口材质': 'Window material',
-  '云母材质需要 Windows 11，亚克力需要 Windows 10 1809 以上；系统不支持时会退回纯色背景。':
-      'Mica requires Windows 11 and acrylic requires Windows 10 1809 or newer. '
-      'Unsupported systems fall back to a solid background.',
-  '界面风格': 'Interface style',
+  // 2026-10-19：'窗口材质' / '界面风格' 两个设置项连同描述一起删除
+  //（五档材质与三套风格都不存在了），对应的英文条目一并移除。
   // 「总览」是首个导航项（置顶，不属于三个模块），也是标题栏文案。
   '总览': 'Overview',
   // 总览页（dashboard_page.dart）的文案。
@@ -80,10 +77,7 @@ const Map<String, String> kStringsEn = {
   // 且空串在拼装处自然消失（数字与单位之间不加空格由调用方处理）。
   '个': '',
   '条': '',
-  '卡片用哪种材质表达：液体玻璃最透亮、磨砂清晰最清楚、陶土柔和是实心面。切换后立即生效，并在下次启动时保留。':
-      'How cards express their material: liquid glass is the most translucent, '
-      'frosted stays the clearest, and clay is a solid surface. Takes effect '
-      'immediately and is kept across restarts.',
+
   'Windows 原生': 'Windows native',
   '强调色': 'Accent colour',
   'WinUI 风格下的强调色：按钮、选中态与链接都用它。':
@@ -570,14 +564,7 @@ const Map<String, String> kStringsEn = {
 
   // ── 数据位标签：枚举 / 常量表（渲染处 t(label)，扫描器抓不到）────
   // 不含汉字的（Mica、H.264、webp）不列 —— 没有该翻的东西。
-  '亚克力': 'Acrylic',
-  '细亚克力': 'Thin acrylic',
-  '纯色': 'Solid colour',
-  '柔和云母': 'Soft mica',
-  '层次云母': 'Layered mica',
-  '磨砂玻璃': 'Frosted glass',
-  '更透亮的磨砂': 'Clearer frost',
-  '不使用特殊材质，性能最好': 'No special material — the fastest option',
+  // 2026-10-19：五档材质删除，只剩 Mica（不含汉字，无需翻译）。
   '悬浮 Dock': 'Floating Dock',
   '常规侧边栏': 'Sidebar',
   '底部居中悬浮，图标式，横向占用小':

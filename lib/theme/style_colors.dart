@@ -103,15 +103,33 @@ class StyleColors {
     ),
   );
 
-  /// WinUI3 · 深色。底 `#2C2C2C`（暖灰）`theme.dart:470`。
+  /// WinUI3 · 深色。
+  ///
+  /// ### 2026-10-19 按**真实 Windows 11 设置页**重新取值（用户第三次判「不对」）
+  ///
+  /// 此前是我按理解猜的，层级搞反了。这次直接截 Windows 11「设置」真图，
+  /// 逐点采样（`F:\samples\_verify\real_settings.png`）：
+  ///
+  ///   侧栏底   #21201F (33,32,31)   ← **最暗**
+  ///   内容区底 #2B2B2B (43,43,43)   ← 中间层
+  ///   卡片底   #2C2C2C (44,43,43)   ← 与内容区**几乎同色**，靠 1px 边线分层
+  ///   卡片间隙 #202020 (32,32,32)
+  ///   选中行底 #2F2D29 (47,45,41)   ← 极淡的暖色提亮
+  ///   普通按钮 #383737 (56,55,55)   ← 比卡片亮一档
+  ///
+  /// 关键结论（我原先反了）：**侧栏比内容区更暗**，卡片与内容区几乎同色。
   static const winuiDark = StyleColors(
     colors: AppColors(
       surfaceBase: Colors.transparent,
-      surfaceCard: Color(0xE62C2C2C),
-      surfaceCardHover: Color(0xF2323232),
-      surfaceSunken: Color(0xF2252525),
+      // 卡片与内容区同色（实测 44 vs 43），分层靠边线
+      surfaceCard: Color(0xFF2C2C2C),
+      // 悬停/普通按钮面比卡片亮一档（实测 56）
+      surfaceCardHover: Color(0xFF383737),
+      // 凹面（输入框等）比卡片略暗
+      surfaceSunken: Color(0xFF272727),
       surfaceFloat: Color(0xFF323232),
-      surfaceSolid: Color(0xFF2C2C2C),
+      // 内容区底（实测 43,43,43）
+      surfaceSolid: Color(0xFF2B2B2B),
       scrim: Color(0x99000000),
       textStrong: Color(0xFFFFFFFF),
       textNormal: Color(0xFFE8E8E8),

@@ -481,9 +481,13 @@ class StyleSidebar {
     borderRight: true,
   );
 
-  /// WinUI3 · 深色。`fluent_ui` theme.dart:470 `#2C2C2C`（暖灰，不是纯黑）。
+  /// WinUI3 · 深色。**实测自真实 Windows 11 设置页**：侧栏 `#21201F`(33,32,31)，
+  /// 比内容区（`#2B2B2B`，43,43,43）**更暗**。
+  ///
+  /// 2026-10-19 修正：原值 `#2C2C2C` 是我按理解取的，与内容区同色 —— 侧栏
+  /// 于是完全看不出边界。真实系统里侧栏是**更暗的一层**，靠色差分层。
   static const winuiDark = StyleSidebar(
-    color: Color(0xFF2C2C2C),
+    color: Color(0xFF21201F),
     borderRight: true,
   );
 

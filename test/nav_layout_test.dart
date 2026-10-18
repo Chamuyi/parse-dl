@@ -69,7 +69,7 @@ void main() {
 {"state":{"appearance":{"themeMode":"dark","windowMaterial":"acrylic"}},"version":3}''';
       final s = Settings.decode(legacy);
       expect(s.appearance.navLayout, NavLayout.dock);
-      expect(s.appearance.windowMaterial, WindowMaterial.acrylic);
+      expect(s.appearance.windowMaterial, WindowMaterial.mica);
     });
 
     test('新增字段不破坏 {state, version} 包装', () {

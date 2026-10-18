@@ -14,7 +14,6 @@ import 'package:parse_dl/services/settings_store.dart';
 import 'package:parse_dl/theme/app_style.dart';
 import 'package:parse_dl/theme/app_theme.dart';
 import 'package:parse_dl/theme/window_material.dart';
-import 'package:parse_dl/widgets/material_picker.dart';
 import 'package:parse_dl/widgets/nav_items.dart';
 import 'package:parse_dl/widgets/section_card.dart';
 
@@ -108,51 +107,6 @@ void main() {
     return rects;
   }
 
-  // ══════════════════════════════════════════════════════════
-  group('材质缩略图', () {
-    test('五种材质的缩略图参数两两不同', () {
-      final specs = {
-        for (final m in WindowMaterial.values)
-          (m.seeThrough, m.blur, m.layered),
-      };
-      expect(
-        specs.length,
-        WindowMaterial.values.length,
-        reason: '透出度/磨砂/分层三个参数必须把五种材质区分开，'
-            '否则缩略图又会画成一张脸',
-      );
-      expect(
-        WindowMaterial.none.seeThrough,
-        0,
-        reason: '纯色就是完全不透，若还透出壁纸就跟云母没区别了',
-      );
-      expect(
-        WindowMaterial.acrylicThin.seeThrough,
-        greaterThan(WindowMaterial.acrylic.seeThrough),
-        reason: '细亚克力比亚克力更透亮',
-      );
-    });
-
-    testWidgets('五张缩略图渲染出来确实不一样：磨砂只出现在两种亚克力上',
-        (tester) async {
-      await pumpAppearance(tester);
-
-      // 缩略图按材质分别画：只有亚克力系才挂 BackdropFilter。
-      // 五张图若长得一样（以前的画法），这里会是 0 个。
-      expect(
-        find.descendant(
-          of: find.byType(MaterialPicker),
-          matching: find.byType(BackdropFilter),
-        ),
-        findsNWidgets(2),
-      );
-      expect(
-        find.byType(MaterialPicker),
-        findsOneWidget,
-        reason: '材质选择器得在外观分区里',
-      );
-    });
-  });
 
   // ══════════════════════════════════════════════════════════
   group('自定义色调', () {
@@ -298,7 +252,7 @@ style: style,
 
       for (final f in [
         'lib/widgets/nav_items.dart',
-        'lib/widgets/material_picker.dart',
+        // 2026-10-19：material_picker.dart 已删除（材质选择器随五档材质一起去掉）
         'lib/widgets/nav_layout_picker.dart',
       ]) {
         expect(src(f), contains('selectedDecoration('), reason: '$f 的选中态要走那一个定义');

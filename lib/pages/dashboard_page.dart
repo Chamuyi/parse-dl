@@ -706,11 +706,8 @@ class _EnvironmentCard extends StatelessWidget {
             label: t('日志'),
             value: t(logsOn ? '已开启' : '已关闭'),
           ),
-          _InfoLine(
-            colors: c,
-            label: t('界面风格'),
-            value: t(settings.appearance.visualStyle.label),
-          ),
+          // 2026-10-19：'界面风格' 这一行已删除 —— 风格只剩 WinUI 一套，
+          // 显示「Windows 原生」等于什么都没说。窗口材质同理（只剩 Mica）。
         ],
       ),
     );

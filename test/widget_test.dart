@@ -64,28 +64,6 @@ void main() {
     });
   });
 
-  group('WindowMaterial 持久化标识稳定', () {
-    test('id 映射正确', () {
-      expect(WindowMaterial.fromId('mica'), WindowMaterial.mica);
-      expect(WindowMaterial.fromId('mica-alt'), WindowMaterial.micaAlt);
-      expect(WindowMaterial.fromId('acrylic'), WindowMaterial.acrylic);
-      expect(WindowMaterial.fromId('acrylic-thin'), WindowMaterial.acrylicThin);
-      expect(WindowMaterial.fromId('none'), WindowMaterial.none);
-    });
-
-    test('未知值回退到 mica', () {
-      expect(WindowMaterial.fromId('???'), WindowMaterial.mica);
-      expect(WindowMaterial.fromId(null), WindowMaterial.mica);
-    });
-
-    test('持久化用的 id 与原版字符串完全一致', () {
-      expect(WindowMaterial.mica.id, 'mica');
-      expect(WindowMaterial.micaAlt.id, 'mica-alt');
-      expect(WindowMaterial.acrylic.id, 'acrylic');
-      expect(WindowMaterial.acrylicThin.id, 'acrylic-thin');
-      expect(WindowMaterial.none.id, 'none');
-    });
-  });
 
   group('ThemeMode2', () {
     test('id 映射与回退', () {

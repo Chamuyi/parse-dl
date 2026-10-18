@@ -15,14 +15,9 @@ import '../theme/window_material.dart';
 /// （`material == mica || material == micaAlt`），浅色+Mica 与深色+亚克力
 /// 两种组合都传反 —— 而这件事**零测试覆盖**，所以错了很久没人发现。
 acrylic.WindowEffect windowEffectOf(WindowMaterial material) =>
-    switch (material) {
-      WindowMaterial.mica => acrylic.WindowEffect.mica,
-      WindowMaterial.micaAlt => acrylic.WindowEffect.tabbed,
-      WindowMaterial.acrylic => acrylic.WindowEffect.acrylic,
-      // 见类文档：库没有独立的「细亚克力」效果，只能落到 acrylic。
-      WindowMaterial.acrylicThin => acrylic.WindowEffect.acrylic,
-      WindowMaterial.none => acrylic.WindowEffect.disabled,
-    };
+    // 2026-10-19：材质只剩 Mica 一档（官方给长驻窗口的唯一选择）。
+    // 保留函数签名是为了让调用点与判据不用改。
+    acrylic.WindowEffect.mica;
 
 /// 把设置里的材质应用到原生窗口。
 ///
@@ -68,9 +63,8 @@ Future<MaterialApplyResult> applyWindowMaterial(
     await acrylic.Window.setEffect(effect: effect, dark: dark);
     return MaterialApplyResult(
       ok: true,
-      message: material == WindowMaterial.none
-          ? '已关闭窗口材质'
-          : '${material.label} 已应用',
+      // 材质只剩 Mica 一档，「关闭材质」这个分支没有对象了。
+      message: '${material.label} 已应用',
     );
   } catch (e) {
     debugPrint('应用窗口材质失败: $e');

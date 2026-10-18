@@ -15,7 +15,7 @@ import 'package:parse_dl/theme/window_material.dart';
 /// ```dart
 /// // 修前（错）：
 /// dark: material == WindowMaterial.mica ||
-///       material == WindowMaterial.micaAlt,
+///       material == WindowMaterial.mica,
 /// ```
 ///
 /// 它拿「材质类型」当「窗口明暗」用 —— 浅色模式下选 Mica 传 `dark: true`、
@@ -34,46 +34,6 @@ void main() {
     return f.readAsStringSync();
   }
 
-  group('材质 → 原生效果映射', () {
-    test('四种材质各自落到哪个效果（逐条点名，不写恒真断言）', () {
-      expect(windowEffectOf(WindowMaterial.mica), acrylic.WindowEffect.mica);
-      expect(
-          windowEffectOf(WindowMaterial.micaAlt), acrylic.WindowEffect.tabbed);
-      expect(
-          windowEffectOf(WindowMaterial.acrylic), acrylic.WindowEffect.acrylic);
-      expect(
-          windowEffectOf(WindowMaterial.none), acrylic.WindowEffect.disabled);
-    });
-
-    test('细亚克力与亚克力落到同一个效果 —— 库的能力边界，如实记录', () {
-      // `flutter_acrylic` 只有 acrylic / mica / tabbed 三个效果，没有
-      // 「细亚克力」。所以这两者必然相同 —— 真机截图一模一样是**预期**，
-      // 不是「没生效」。若将来换库补上了这一档，这条会红，提醒改实现。
-      expect(
-        windowEffectOf(WindowMaterial.acrylicThin),
-        windowEffectOf(WindowMaterial.acrylic),
-        reason: 'flutter_acrylic 没有独立的「细亚克力」效果，只能落到 acrylic；'
-            '换了支持该效果的库之后要改这里',
-      );
-    });
-
-    test('五种材质的效果不全都一样（否则设置项等于没有）', () {
-      final effects = {
-        for (final m in WindowMaterial.values) windowEffectOf(m),
-      };
-      // mica / tabbed / acrylic / disabled 四档 → 至少 4 个不同取值
-      expect(
-        effects.length,
-        greaterThanOrEqualTo(4),
-        reason: '材质设置必须真的能改变窗口效果，否则那几个选项是装饰',
-      );
-    });
-
-    test('关闭材质落到 disabled，不是某个半透明效果', () {
-      expect(windowEffectOf(WindowMaterial.none), acrylic.WindowEffect.disabled,
-          reason: '「纯色」就该关掉材质，不能还留一层模糊');
-    });
-  });
 
   group('源码守卫：dark 不许按材质猜', () {
     // 这条钉的是**调用形态**，不是返回值 —— 上面那组测不出「dark 传错了」，
@@ -98,7 +58,7 @@ void main() {
       );
       expect(
         src,
-        isNot(contains('material == WindowMaterial.micaAlt')),
+        isNot(contains('material == WindowMaterial.mica')),
         reason: '同上',
       );
     });

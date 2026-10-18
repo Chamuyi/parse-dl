@@ -14,7 +14,6 @@ import '../widgets/background_picker.dart';
 import '../widgets/bili_section.dart';
 import '../widgets/download_section.dart';
 import '../widgets/douyin_section.dart';
-import '../widgets/material_picker.dart';
 import '../widgets/nav_layout_picker.dart';
 import '../widgets/proxy_section.dart';
 import '../widgets/section_card.dart';
@@ -152,31 +151,9 @@ class SettingsPage extends StatelessWidget {
                   onChanged: (l) => store.setAppearance((a) => a.locale = l),
                 ),
               ),
-              _Field(
-                label: t('窗口材质'),
-                description:
-                    t('云母材质需要 Windows 11，亚克力需要 Windows 10 1809 以上；'
-                        '系统不支持时会退回纯色背景。'),
-                child: MaterialPicker(
-                  value: appearance.windowMaterial,
-                  brightness: brightness,
-                  onChanged: (m) async {
-                    await store.setAppearance((a) => a.windowMaterial = m);
-                    await onMaterialChanged(m);
-                  },
-                ),
-              ),
-              _Field(
-                label: t('界面风格'),
-                description:
-                    t('卡片用哪种材质表达：液体玻璃最透亮、磨砂清晰最清楚、'
-                        '陶土柔和是实心面。切换后立即生效，并在下次启动时保留。'),
-                child: StylePicker(
-                  value: appearance.visualStyle,
-                  onChanged: (s) =>
-                      store.setAppearance((a) => a.visualStyle = s),
-                ),
-              ),
+              // 2026-10-19：窗口材质与界面风格两个选择器都已删除。
+              // 材质只剩 Mica（官方给长驻窗口的唯一选择），风格只剩 WinUI ——
+              // 留一个只有一个选项的下拉框只会让人以为坏了。
               // 强调色只在 WinUI 风格下可选 —— 另三套风格各有自己的强调色
               // 令牌，显示一个不起作用的选择器会让人以为坏了（2026-10-19）。
               if (appearance.visualStyle == AppStyle.winui)
@@ -196,13 +173,10 @@ class SettingsPage extends StatelessWidget {
                         '需要先选择「云母」或「亚克力」材质。'),
                 trailing: Switch(
                   value: appearance.customTint,
-                  onChanged: appearance.windowMaterial == WindowMaterial.none
-                      ? null
-                      : (v) => store.setAppearance((a) => a.customTint = v),
+                  onChanged: (v) =>
+                      store.setAppearance((a) => a.customTint = v),
                 ),
-                child:
-                    appearance.customTint &&
-                        appearance.windowMaterial != WindowMaterial.none
+                child: appearance.customTint
                     ? TintPicker(
                         value: appearance.tintColor,
                         onChanged: (hex) =>
