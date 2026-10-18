@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../l10n/app_locale.dart';
 import '../theme/app_style.dart';
+import '../theme/winui_accent.dart';
 import '../theme/window_material.dart';
 import 'bili_config.dart';
 import 'douyin_config.dart';
@@ -123,6 +124,12 @@ class AppearanceSettings {
   /// 拿到的就是改造前那套观感，升级不改变外观。
   AppStyle visualStyle;
 
+  /// WinUI 风格下的强调色三选一（[WinUiAccent]）。
+  ///
+  /// **只对 [AppStyle.winui] 生效** —— 另三套风格各有自己的强调色令牌，
+  /// 不读这个字段。旧配置没有它时回退到 Windows 官方蓝。
+  WinUiAccent winUiAccent;
+
   AppearanceSettings({
     this.themeMode = ThemeMode2.system,
     this.windowMaterial = WindowMaterial.mica,
@@ -134,6 +141,7 @@ class AppearanceSettings {
     this.navGroupExpanded = const {},
     this.locale = AppLocale.system,
     this.visualStyle = AppStyle.frosted,
+    this.winUiAccent = WinUiAccent.windows,
   });
 
   /// 某个模块入口当前是否展开（没记录过 = 收起）
@@ -171,6 +179,7 @@ class AppearanceSettings {
         navGroupExpanded: _readExpandedMap(j['navGroupExpanded']),
         locale: AppLocale.fromId(j['locale'] as String?),
         visualStyle: AppStyle.fromId(j['visualStyle'] as String?),
+        winUiAccent: WinUiAccent.fromId(j['winUiAccent'] as String?),
       );
 
   Map<String, dynamic> toJson() => {
@@ -184,6 +193,7 @@ class AppearanceSettings {
     'navGroupExpanded': navGroupExpanded,
     'locale': locale.id,
     'visualStyle': visualStyle.id,
+    'winUiAccent': winUiAccent.id,
   };
 }
 

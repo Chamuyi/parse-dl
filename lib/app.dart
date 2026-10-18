@@ -176,7 +176,11 @@ class XDownloaderApp extends StatelessWidget {
           return AppTheme(
             // 色板按「风格 + 亮度」取：三套风格各有自己的整套色彩令牌，
             // 不再是全局一套（风格切换时整个子树重建，色彩立刻跟着变）。
-            colors: AppColors.of(appearance.visualStyle, brightness),
+            colors: AppColors.of(
+              appearance.visualStyle,
+              brightness,
+              accent: appearance.winUiAccent,
+            ),
             brightness: brightness,
             // 界面风格：与 navLayout / locale 同一套做法 —— 从设置读，
             // 切换后整个子树重建，卡片材质立刻跟着变。

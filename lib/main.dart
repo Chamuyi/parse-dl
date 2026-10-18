@@ -28,6 +28,7 @@ import 'services/homepage_store.dart';
 import 'services/settings_store.dart';
 import 'services/shutdown_guard.dart';
 import 'services/x_api.dart';
+import 'theme/winui_accent.dart';
 import 'widgets/liquid_glass.dart';
 
 /// 启动流程：
@@ -237,6 +238,10 @@ Future<void> main() async {
   // 预热只填 `_program` 程序缓存，组件侧行为不变；失败静默走 Stage A。
   unawaited(LiquidGlassSurface.warmUp());
 
+  // Windows 系统强调色（「跟随系统」档用）。**不 await** —— 读注册表是子进程
+  // 调用，绝不能让窗口等它。读失败时 `WinUiAccent.system` 自动回退到官方蓝。
+  unawaited(readSystemAccentColor());
+
   await windowManager.ensureInitialized();
 
   if (Platform.isWindows) {
@@ -286,4 +291,39 @@ Future<void> main() async {
     biliBatchStore: biliBatchStore,
     biliLedger: biliLedger,
   ));
+}
+
+/// 读 Windows「个性化 → 颜色」里的强调色，供 [WinUiAccent.system] 用。
+///
+/// 来源：`HKCU\\Software\\Microsoft\\Windows\\DWM` 的 `ColorizationColor`，
+/// 形如 `0xC4D8E4F0`（**AABBGGRR**，注意是 BGR 序不是 RGB）。
+///
+/// **失败一律静默**：读不到就什么都不设，`WinUiAccent.system` 会自动回退到
+/// Windows 官方蓝（见 `winui_accent.dart`）。绝不能因为读注册表失败就影响
+/// 启动 —— 用户设置了「跟随系统」不该看到任何异常。
+Future<void> readSystemAccentColor() async {
+  if (!Platform.isWindows) return;
+  try {
+    final r = await Process.run('reg', [
+      'query',
+      r'HKCU\\Software\\Microsoft\\Windows\\DWM',
+      '/v',
+      'ColorizationColor',
+    ]);
+    if (r.exitCode != 0) return;
+    final m = RegExp(r'0x([0-9a-fA-F]{8})').firstMatch(r.stdout.toString());
+    if (m == null) return;
+    final v = int.parse(m.group(1)!, radix: 16);
+    // AABBGGRR -> 0xFFRRGGBB（系统色自带 alpha，这里统一按不透明用）
+    final bb = (v >> 16) & 0xFF;
+    final gg = (v >> 8) & 0xFF;
+    final rr = v & 0xFF;
+    WinUiAccent.setSystemColor(Color.fromARGB(0xFF, rr, gg, bb));
+    final hex = rr.toRadixString(16).padLeft(2, '0') +
+        gg.toRadixString(16).padLeft(2, '0') +
+        bb.toRadixString(16).padLeft(2, '0');
+    AppLogger.log('APP', '系统强调色 = #$hex');
+  } catch (_) {
+    // 读不到就用官方蓝，不打扰用户
+  }
 }

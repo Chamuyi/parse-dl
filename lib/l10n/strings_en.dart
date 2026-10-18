@@ -85,6 +85,20 @@ const Map<String, String> kStringsEn = {
       'frosted stays the clearest, and clay is a solid surface. Takes effect '
       'immediately and is kept across restarts.',
   'Windows 原生': 'Windows native',
+  '强调色': 'Accent colour',
+  'WinUI 风格下的强调色：按钮、选中态与链接都用它。':
+      'The accent colour for the Windows-native style: used by buttons, '
+      'selection states and links.',
+  'Windows 蓝': 'Windows blue',
+  'WinUI3 官方强调色，最像系统自带应用':
+      'WinUI3 default accent — looks closest to a built-in Windows app',
+  '紫罗兰': 'Violet',
+  '保留改造前的紫色系，与旧观感衔接':
+      'Keeps the previous violet palette for continuity',
+  '读取 Windows 个性化里的强调色':
+      "Reads the accent colour from Windows personalisation settings",
+  '跟随系统（未取到，当前为 Windows 蓝）':
+      'Follow system (unavailable — using Windows blue)',
   'WinUI3 观感：暖灰底、单色强调、细边线、克制阴影':
       'WinUI3 look: warm grey surfaces, a single accent colour, hairline borders '
       'and restrained shadows',

@@ -5,6 +5,7 @@ import '../l10n/app_locale.dart';
 import '../l10n/l10n.dart';
 import '../services/app_state.dart';
 import '../services/settings_store.dart';
+import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 import '../theme/window_material.dart';
 import '../widgets/account_section.dart';
@@ -17,6 +18,7 @@ import '../widgets/material_picker.dart';
 import '../widgets/nav_layout_picker.dart';
 import '../widgets/proxy_section.dart';
 import '../widgets/section_card.dart';
+import '../widgets/accent_picker.dart';
 import '../widgets/style_picker.dart';
 import '../widgets/sub_section.dart';
 import '../widgets/tint_picker.dart';
@@ -171,9 +173,22 @@ class SettingsPage extends StatelessWidget {
                         '陶土柔和是实心面。切换后立即生效，并在下次启动时保留。'),
                 child: StylePicker(
                   value: appearance.visualStyle,
-                  onChanged: (s) => store.setAppearance((a) => a.visualStyle = s),
+                  onChanged: (s) =>
+                      store.setAppearance((a) => a.visualStyle = s),
                 ),
               ),
+              // 强调色只在 WinUI 风格下可选 —— 另三套风格各有自己的强调色
+              // 令牌，显示一个不起作用的选择器会让人以为坏了（2026-10-19）。
+              if (appearance.visualStyle == AppStyle.winui)
+                _Field(
+                  label: t('强调色'),
+                  description: t('WinUI 风格下的强调色：按钮、选中态与链接都用它。'),
+                  child: AccentPicker(
+                    value: appearance.winUiAccent,
+                    onChanged: (a) =>
+                        store.setAppearance((x) => x.winUiAccent = a),
+                  ),
+                ),
               _Field(
                 label: t('自定义色调'),
                 description:

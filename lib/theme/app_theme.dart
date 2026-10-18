@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'app_style.dart';
 import 'style_colors.dart';
+import 'winui_accent.dart';
 
 /// 「已识别 / 已勾选」的黄色描边色。
 ///
@@ -121,6 +122,58 @@ class AppColors {
     required this.onSuccess,
   });
 
+  /// 换掉整套强调色（**只有 winui 风格需要**，见 [WinUiAccent]）。
+  ///
+  /// 六个 accent 槽位一起换，派生规则与原色板一致：
+  /// - `accentSoft` = 主色 0x33（浅）/ 0x59（深）
+  /// - `accentLine` = 主色 0x66（浅）/ 0x80（深）
+  /// - `accentGlow` = 主色 0x1A（浅）/ 0x26（深）
+  ///
+  /// **系数必须写成「十六进制 alpha ÷ 255」，不能写 0.35 这类小数**：
+  /// [StyleColors.winuiLight] / [StyleColors.winuiDark] 里这几个槽位是用
+  /// `Color(0x594CC2FF)` 写死的，0.35 ≠ 0x59/255（差 1/255），于是「用户不
+  /// 换强调色」时渲染出来的色与色板定义**不是同一个值**，两处各自演化。
+  /// 判据 `winui 默认档与色板逐值相等` 就是抓这个的，别改回去。
+  ///
+  /// 透明度按明暗分档不是随意的：A16 判据要求「选中底比悬停底朝主色推进
+  /// ≥0.10」，实测 0x33/0x59 是能同时过判据又不显得浓的值。
+  AppColors withAccent(
+    ({Color accent, Color accentText, Color onAccent}) t,
+    Brightness brightness,
+  ) {
+    final dark = brightness == Brightness.dark;
+    final softA = (dark ? 0x59 : 0x33) / 255;
+    final lineA = (dark ? 0x80 : 0x66) / 255;
+    final glowA = (dark ? 0x26 : 0x1A) / 255;
+    return AppColors(
+      surfaceBase: surfaceBase,
+      surfaceCard: surfaceCard,
+      surfaceCardHover: surfaceCardHover,
+      surfaceSunken: surfaceSunken,
+      surfaceFloat: surfaceFloat,
+      surfaceSolid: surfaceSolid,
+      scrim: scrim,
+      textStrong: textStrong,
+      textNormal: textNormal,
+      textMuted: textMuted,
+      textFaint: textFaint,
+      line: line,
+      lineSoft: lineSoft,
+      lineStrong: lineStrong,
+      accent: t.accent,
+      accentText: t.accentText,
+      onAccent: t.onAccent,
+      accentSoft: t.accent.withValues(alpha: softA),
+      accentLine: t.accent.withValues(alpha: lineA),
+      accentGlow: t.accent.withValues(alpha: glowA),
+      danger: danger,
+      dangerSoft: dangerSoft,
+      success: success,
+      warning: warning,
+      onSuccess: onSuccess,
+    );
+  }
+
   /// 浅色（默认 `frosted` 那一套的中性版；风格化的取值见 [StyleColors]）。
   ///
   /// ### 2026-10-16 全量重做（用户裁定「所有材质与风格都不满意」）
@@ -212,12 +265,24 @@ class AppColors {
   ///
   /// frosted 是默认风格 —— 用户不切风格时看到的就是它，所以它必须与 liquid/clay
   /// 同等待遇地取预览稿取值，否则「三套风格」对默认用户等于没做。
-  static AppColors of(AppStyle style, Brightness brightness) =>
-      switch ((style, brightness)) {
-        (AppStyle.frosted, Brightness.light) => StyleColors.frostedLight.colors,
-        (AppStyle.frosted, Brightness.dark) => StyleColors.frostedDark.colors,
-        _ => StyleColors.of(style, brightness).colors,
-      };
+  static AppColors of(
+    AppStyle style,
+    Brightness brightness, {
+    WinUiAccent accent = WinUiAccent.windows,
+  }) {
+    if (style == AppStyle.winui) {
+      // winui 的强调色是**用户自选**的三档（[WinUiAccent]），所以不能像
+      // 另三套那样直接返回常量 —— 要在这层换上 accent 槽位。
+      return StyleColors.of(style, brightness)
+          .colors
+          .withAccent(accent.colorsFor(brightness), brightness);
+    }
+    return switch ((style, brightness)) {
+      (AppStyle.frosted, Brightness.light) => StyleColors.frostedLight.colors,
+      (AppStyle.frosted, Brightness.dark) => StyleColors.frostedDark.colors,
+      _ => StyleColors.of(style, brightness).colors,
+    };
+  }
 
   /// 按「强调色 + 明暗」算出一个合适的底色调。
   ///

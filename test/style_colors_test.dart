@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:parse_dl/theme/app_style.dart';
 import 'package:parse_dl/theme/app_theme.dart';
 import 'package:parse_dl/theme/style_colors.dart';
+import 'package:parse_dl/theme/winui_accent.dart';
 
 /// `StyleColors` 的 6 套令牌（3 风格 × 2 亮度）。
 ///
@@ -379,12 +380,58 @@ void main() {
           isTrue);
     });
 
-    test('6 组都有值，且都来自 StyleColors 一处', () {
+    test('非 winui 风格直接返回 StyleColors 的实例（来源唯一）', () {
+      // winui 是**唯一**例外：它的强调色由用户三选一（[WinUiAccent]），
+      // 必须在 `of` 里换掉 6 个 accent 槽位，因此只能新建实例。
+      // 其余三套仍必须返回**同一个对象** —— 这条守住「派生路径只有
+      // StyleColors 一处」，不许任何风格偷偷再起一套色板。
       for (final s in AppStyle.values) {
+        if (s == AppStyle.winui) continue;
         for (final b in Brightness.values) {
           expect(AppColors.of(s, b), same(StyleColors.of(s, b).colors),
               reason: '${s.id}/${b.name} 的派生路径应当只有 StyleColors 一处');
         }
+      }
+    });
+
+    test('winui 默认档（Windows 蓝）与色板逐值相等 —— 换 accent 是恒等变换', () {
+      // 色板里存的 accent 就是 WinUI 官方蓝，而 `withAccent` 的派生系数
+      // （soft .20/.35、line .40/.50、glow .10/.15）也与色板写死的 alpha
+      // 完全一致。所以默认档必须**一个字节都不差**：一旦哪天两处各自
+      // 演化，这条立刻红。
+      for (final b in Brightness.values) {
+        expect(slots(AppColors.of(AppStyle.winui, b)),
+            slots(StyleColors.of(AppStyle.winui, b).colors),
+            reason: '${b.name} 默认档必须与色板逐值相等');
+      }
+    });
+
+    test('winui 换档只动 6 个 accent 槽位，其余 19 个原样', () {
+      // 槽位序见 [slots]：14..19 = accent / accentText / onAccent /
+      // accentSoft / accentLine / accentGlow。
+      const accentIdx = [14, 15, 16, 17, 18, 19];
+      for (final b in Brightness.values) {
+        final base = slots(StyleColors.of(AppStyle.winui, b).colors);
+        final got = slots(
+            AppColors.of(AppStyle.winui, b, accent: WinUiAccent.violet));
+        for (var i = 0; i < base.length; i++) {
+          if (accentIdx.contains(i)) continue;
+          expect(got[i], base[i],
+              reason: '${b.name} 的槽位 $i 不该被强调色改动');
+        }
+        // 6 个 accent 槽位必须真的换成紫罗兰，且仍按原派生系数展开。
+        final t = WinUiAccent.violet.colorsFor(b);
+        final dark = b == Brightness.dark;
+        expect(got[14], t.accent);
+        expect(got[15], t.accentText);
+        expect(got[16], t.onAccent);
+        // 系数与色板写死的十六进制 alpha 同源（见 AppColors.withAccent 注释）
+        expect(got[17], t.accent.withValues(alpha: (dark ? 0x59 : 0x33) / 255));
+        expect(got[18], t.accent.withValues(alpha: (dark ? 0x80 : 0x66) / 255));
+        expect(got[19], t.accent.withValues(alpha: (dark ? 0x26 : 0x1A) / 255));
+        // 负控制：紫罗兰档的主色必须与官方蓝不同，否则上面几条可能恒真。
+        expect(got[14], isNot(StyleColors.of(AppStyle.winui, b).colors.accent),
+            reason: '紫罗兰档的主色必须与官方蓝不同');
       }
     });
 
