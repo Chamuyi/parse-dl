@@ -1,21 +1,15 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:parse_dl/theme/app_style.dart';
 import 'package:parse_dl/theme/app_theme.dart';
-import 'package:parse_dl/theme/style_backdrop.dart';
 import 'package:parse_dl/theme/style_colors.dart';
 import 'package:parse_dl/models/settings.dart';
 import 'package:parse_dl/theme/window_material.dart';
 import 'package:parse_dl/widgets/background_layer.dart';
 
-/// S3 验收：背景层按风格出不同底；五种窗口材质出**可测**的不同底。
-///
-/// 层数判据是任务书钉死的：liquid = 3（三层 radial）+ 1（线性），
-/// frosted = 1、clay = 1（单层线性）。
+/// 背景层：窗口底在「材质可用 ⇒ 透明」与「材质不可用 ⇒ 不透明回退色」
+/// 两档之间二选一。
 ///
 /// ### ⚠️ 2026-10-16：材质判据从「比参数」改成「量渲染像素」
 ///
@@ -25,201 +19,194 @@ import 'package:parse_dl/widgets/background_layer.dart';
 /// 判据必绿」，与真实渲染无关：同一条判据在真机实测四档材质**逐像素平均差
 /// 0.000** 时照样全绿。
 ///
-/// 现在 [renderLuma] 走 `RepaintBoundary.toImage()` 读回**真实像素**，
-/// 判据是「两档材质的窗口底平均亮度差 ≥ [_kMinDelta]」—— 名字里写「渲染」
-/// 就必须真的量渲染。
+/// ### ⚠️ 2026-10-19：窗口底改透明，本文件的两条旧判据语义反转
+///
+/// 旧判据是「纯色材质 → **不透明实色**」「自定义色调 → **tintFor 混合色**」。
+/// 那是「应用自己铺窗口底」时代的口径。现在（用户裁定「照抄图吧」）窗口底
+/// **必须透明**，否则 Flutter 画的不透明像素会把 DWM 画的材质整个盖住，
+/// 四档材质在真机上就是四张一模一样的图 —— 那正是本轮要修的缺陷。
+///
+/// 所以两条判据按新语义重写：
+///
+/// | 旧口径 | 新口径 |
+/// |---|---|
+/// | 材质可用 ⇒ 底 = `solidFor` 实色 | 材质可用 ⇒ 底 = `Colors.transparent` |
+/// | 自定义色调 ⇒ 底 = `tintFor`（85% 半透明） | 材质**不可用** ⇒ 底 = `fallbackTo(tintFor)`（强制不透明） |
+///
+/// 这不是放宽：旧判据断言「不透明」，新判据断言「透明」，两者互斥；
+/// 而「材质不可用时必须不透明」这条判据仍然断言 alpha == 1.0，
+/// 并且比旧版更严 —— 旧版根本没测过回退路径。
 void main() {
   // ══════════════════════════════════════════════════════════
-  // 令牌层：层数与两两不同
+  // 为什么这里**没有**「四档材质窗口底两两可辨」的判据
+  // ══════════════════════════════════════════════════════════
+  //
+  // 曾经这里有一条矩阵判据，遍历 `WindowMaterial.values` 两两比窗口底亮度。
+  // 2026-10-19 恢复 4 档后复查发现它是**空跑**：
+  //
+  //     for (final style in [AppStyle.winui]) {
+  //       if (style == AppStyle.winui) continue;   // ← 唯一元素被 continue
+  //
+  // 循环体一次都不执行 ⇒ 判据恒绿。恒绿与恒红一样没用，所以整段删除，
+  // 不留一个永不执行的循环充数。
+  //
+  // 现在窗口底是透明的（材质由 DWM 画在窗口**后面**），widget 层**结构上
+  // 不可能**量到四档材质的差异 —— 那本来就该由真机截图链路覆盖
+  // （`material_matrix.ps1`）。四档回退色两两相同是**照抄参照物的结果**：
+  // 参照物的 `FallbackColor` 只由主题色调派生、与材质档位无关。
+
+  // ══════════════════════════════════════════════════════════
+  // 一、材质可用：窗口底必须透明
   // ══════════════════════════════════════════════════════════
 
+  testWidgets('材质可用 → 窗口底是 **transparent**（不再铺 solidFor 实色）',
+      (tester) async {
+    await pumpBackdrop(tester, WindowMaterial.mica, materialAvailable: true);
+    final bottom = backdropBoxColors(tester).first;
 
-  // ══════════════════════════════════════════════════════════
-  // 渲染像素层：判据落在真实像素上
-  // ══════════════════════════════════════════════════════════
+    expect(bottom, Colors.transparent,
+        reason: '材质可用时窗口底必须透明 —— 不透明像素会把 DWM 画的材质'
+            '整个盖住，四档材质就变成四张一模一样的图');
 
-  group('背景层渲染像素', () {
-    testWidgets('五种窗口材质的窗口底两两可测地不同（材质选择必须有实际后果）',
-        (tester) async {
-      // 2026-10-16 真机实测到的缺陷：mica / mica-alt / acrylic / acrylic-thin
-      // 四种材质渲染出来**逐像素完全相同**（平均差 0.00 × 4 组）。
-      // 现在材质由 `_MaterialSheetPainter` 整片画在 85% 调色层**之上**：
-      // `previewFor` 的材质底（alpha 0.86）给亮度身份，`layered`
-      // 叠上半区分层与接缝，`grain` 撒磨砂颗粒。
-      //
-      // 2026-10-19：材质底色改为**相对风格底色偏移**后，必须**每套风格各测一遍**
-      // —— 旧判据只测 frosted，winui 的底色（深 #2C2C2C）与旧值差 21 个灰阶，
-      // 只在 frosted 上验过的间距不能推广到它。
-      //
-      // 2026-10-19 收窄：**winui 不再参与这条矩阵**。微软官方文档
-      // （DWM_SYSTEMBACKDROP_TYPE / Mica）规定长驻窗口的底由 DWM 绘制
-      // 一层 Mica（DWMSBT_MAINWINDOW），应用侧不该再按"材质"画自己的底色
-      // —— 所以 winui 下五种材质本来就**应当**渲染成同一张不透明底。
-      // 这条判据的前提在 winui 上被官方规范合法推翻，故跳过它，
-      // 另三套玻璃风格的「材质必须可辨」原样保留（不放宽）。
-      for (final style in [AppStyle.winui]) {
-        if (style == AppStyle.winui) continue;
-        final luma = <WindowMaterial, List<double>>{};
-        for (final m in WindowMaterial.values) {
-          luma[m] = await renderLuma(tester, material: m, style: style);
-        }
+    // 负控制：这正是被替换掉的旧实现（铺 solidFor 实色）。它必须**不等于**
+    // 新期望，否则上面那条断言没有区分力。
+    final legacy = StyleColors.winuiLight.colors.surfaceSolid;
+    expect(legacy.a, 1.0,
+        reason: '前提：旧口径铺的 solidFor 是全不透明的');
+    expect(bottom, isNot(equals(legacy)),
+        reason: '若窗口底仍等于 solidFor 实色，说明 opaqueShell 那层'
+            '或背景层的实色底还在');
+  });
 
-        final pairs = <String, double>{};
-        final mats = WindowMaterial.values;
-        for (var i = 0; i < mats.length; i++) {
-          for (var j = i + 1; j < mats.length; j++) {
-            pairs['${mats[i].id}↔${mats[j].id}'] =
-                meanAbsDiff(luma[mats[i]]!, luma[mats[j]]!);
-          }
-        }
-        // 失败时把整张矩阵带出来，不要只说「有一对没达标」。
-        final matrix = pairs.entries
-            .map((e) => '  ${e.key.padRight(28)} ${e.value.toStringAsFixed(3)}')
-            .join('\n');
-        // ignore: avoid_print
-        print('[${style.id}] 材质窗口底差异矩阵（采样点平均绝对亮度差）:\n$matrix');
-
-        for (final entry in pairs.entries) {
-          expect(
-            entry.value,
-            greaterThanOrEqualTo(_kMinDelta),
-            reason: '${style.id}/${entry.key} 的窗口底只差 '
-                '${entry.value.toStringAsFixed(3)}'
-                '（判据要求 ≥ $_kMinDelta）—— 这一对材质真机上分不出来。\n'
-                '该风格全部 10 对：\n$matrix',
-          );
-        }
-      }
-    });
+  testWidgets('四档材质**都**铺透明底（没有哪一档漏掉）', (tester) async {
+    for (final m in WindowMaterial.values) {
+      await pumpBackdrop(tester, m, materialAvailable: true);
+      expect(backdropBoxColors(tester).first, Colors.transparent,
+          reason: '${m.id} 这一档没走透明底 —— 真机上它会盖住自己的材质');
+    }
   });
 
   // ══════════════════════════════════════════════════════════
-  // 既有三条路径仍工作
+  // 二、材质不可用：回退到不透明的 fallbackTo 色
   // ══════════════════════════════════════════════════════════
 
-  testWidgets('纯色材质 → 不透明实色（不走风格绘制器）', (tester) async {
-    await pumpBackdrop(tester, WindowMaterial.mica);
-    // 底色 = 该风格色板的 surfaceSolid（2026-10-16 起 solidFor 按风格取 ——
-    // liquid 浅色是 #FAFAFF 的冷紫调，不是旧的通用灰 #F3F3F3），
-    // 且无风格绘制器
-    expect(
-      find.byWidgetPredicate(
-        (w) =>
-            w is ColoredBox &&
-            w.color == StyleColors.winuiLight.colors.surfaceSolid,
-      ),
-      findsOneWidget,
-    );
-    // 2026-10-19：风格渐变绘制器已随三套风格删除，这里不再需要「不该画渐变」的断言。
+  testWidgets('材质不可用 → 回退到 fallbackTo 的**不透明**实色', (tester) async {
+    await pumpBackdrop(tester, WindowMaterial.mica, materialAvailable: false);
+    final bottom = backdropBoxColors(tester).first;
+    final themeBase = StyleColors.winuiLight.colors.surfaceSolid;
+
+    expect(bottom, WindowMaterial.mica.fallbackTo(themeBase),
+        reason: '回退色必须来自 WindowMaterial.fallbackTo()，不是另写一个色值');
+    expect(bottom.a, 1.0,
+        reason: '回退底必须不透明 —— 材质挂不上时若还透明，桌面会从窗口里'
+            '透出来，正文压在花花绿绿的壁纸上没法读');
+
+    // 负控制：把 available 反过来传，底必须变成透明 —— 证明这条判据
+    // 真的在区分两档，而不是恒读同一个值。
+    await pumpBackdrop(tester, WindowMaterial.mica, materialAvailable: true);
+    expect(backdropBoxColors(tester).first, Colors.transparent);
   });
 
-  testWidgets('自定义色调 → tintFor 混合色（不走风格绘制器）', (tester) async {
+  testWidgets('四档材质的回退色**都**不透明（逐档断言，不是只测一档）',
+      (tester) async {
+    for (final m in WindowMaterial.values) {
+      await pumpBackdrop(tester, m, materialAvailable: false);
+      expect(backdropBoxColors(tester).first.a, 1.0,
+          reason: '${m.id} 这一档的回退底不透明 —— 任何一档漏掉都会露桌面');
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════
+  // 三、自定义色调：仍然走 tintFor，但按材质可用性决定透不透明
+  // ══════════════════════════════════════════════════════════
+
+  testWidgets('自定义色调 + 材质不可用 → fallbackTo(tintFor 混合色)，强制不透明',
+      (tester) async {
     final appearance = AppearanceSettings(
       windowMaterial: WindowMaterial.mica,
       customTint: true,
       tintColor: '#FF0000',
     );
-    await tester.pumpWidget(
-      AppTheme(
-        colors: AppColors.of(AppStyle.winui, Brightness.light),
-        brightness: Brightness.light,
-        style: AppStyle.winui,
-        child: MaterialApp(
-          home: Scaffold(
-            body: BackgroundLayer(
-                appearance: appearance, brightness: Brightness.light),
-          ),
-        ),
-      ),
+    await pumpBackdrop(
+      tester,
+      WindowMaterial.mica,
+      materialAvailable: false,
+      appearance: appearance,
+      brightness: Brightness.light,
     );
-    final expected = AppColors.tintFor(const Color(0x59FF0000), Brightness.light);
-    expect(
-      find.byWidgetPredicate((w) => w is ColoredBox && w.color == expected),
-      findsOneWidget,
+
+    // tintFor 的输入只看 RGB（alpha 位不参与混合），所以这里传什么都不影响
+    // 结果 —— 保留 0x59 这个写法是为了让「旧判据用的是什么」在 diff 里可追。
+    final expected = WindowMaterial.mica.fallbackTo(
+        AppColors.tintFor(const Color(0x59FF0000), Brightness.light));
+
+    expect(backdropBoxColors(tester).first, expected,
+        reason: '自定义色调分支必须同样接上「材质不可用 ⇒ 不透明回退」');
+
+    // 负控制：tintFor 原样输出是 85% 半透明的，直接铺它会让桌面透上来 ——
+    // 所以 fallbackTo 的强制不透明不是摆设。
+    expect(AppColors.tintFor(const Color(0x59FF0000), Brightness.light).a,
+        lessThan(1.0),
+        reason: '前提：tintFor 输出本身半透明，否则「强制不透明」这一步'
+            '没有可断言的效果');
+  });
+
+  testWidgets('自定义色调 + 材质可用 → 底透明（色调只在回退时可见）',
+      (tester) async {
+    final appearance = AppearanceSettings(
+      windowMaterial: WindowMaterial.mica,
+      customTint: true,
+      tintColor: '#FF0000',
     );
-    // 同上：风格渐变绘制器已删除。
+    await pumpBackdrop(
+      tester,
+      WindowMaterial.mica,
+      materialAvailable: true,
+      appearance: appearance,
+      brightness: Brightness.light,
+    );
+    expect(backdropBoxColors(tester).first, Colors.transparent,
+        reason: '材质可用时窗口底必须透明 —— 自定义色调不该在窗口底'
+            '再铺一层，那会把材质盖住（色调体现在失焦覆盖层与卡片上）');
   });
 }
 
 // ════════════════════════════════════════════════════════════
-// 量渲染的工具
+// 工具
 // ════════════════════════════════════════════════════════════
-
-/// 两档窗口底在当前判据下的最小可测差。
-///
-/// ### 定标依据（2026-10-16 真机标定）
-///
-/// 真机 `material_matrix.ps1` 出的 1400×1000 图要求**逐像素平均差 ≥1.5**。
-/// 实测出真机读数 ≈ **0.20 ×** 这里的窗口底差：材质特征只落在**窗口底可见
-/// 区**上，采样区里约八成被卡片盖住（卡片只透一成窗口底）。标定用的是
-/// 改版前的两组实测 —— mica↔acrylic-thin 7.402→1.428（0.193）、
-/// acrylic-thin↔none 6.200→1.313（0.212）。
-///
-/// 所以真机 1.5 对应这里约 **7.5**。判据取 **9.0**（真机落点 ≈1.8，余量 20%），
-/// 而材质底色按相邻 10.7 分排序，实际最小一对落在 10.4。
-const double _kMinDelta = 9.0;
 
 /// 背景层的抓图锚点。
 final _kBoundaryKey = UniqueKey();
 
-/// 渲染 [BackgroundLayer] 并读回**真实像素**，返回窗口底的平均亮度。
+/// 抓出背景层里所有 `ColoredBox` 的颜色，**按绘制顺序**（先底后覆盖层）。
 ///
-/// 采样口径与真机脚本 `material_matrix.ps1` 一致：取窗口中部、
-/// `x ∈ [200, W-200)` / `y ∈ [120, H-120)`、步长 4，量 RGB 简单平均。
-///
-/// 底下垫一层**不透明**的 `solidFor`：真机上窗口底下面是 DWM backdrop，
-/// 而 `ImageByteFormat.rawRgba` 是**预乘 alpha** 的 —— 不垫这一层，
-/// 读回的 RGB 会被窗口底自身的 alpha（85%）缩放，量的就不是窗口底本身了。
-Future<List<double>> renderLuma(
-  WidgetTester tester, {
-  WindowMaterial material = WindowMaterial.mica,
-  AppStyle style = AppStyle.winui,
-  Brightness brightness = Brightness.dark,
-}) async {
-  await pumpBackdrop(tester, material, style: style, brightness: brightness);
-  final boundary =
-      tester.renderObject<RenderRepaintBoundary>(find.byKey(_kBoundaryKey));
-  // `toImage` / `toByteData` 走真实的 GPU 与 IO 路径，在 testWidgets 的
-  // fake-async 时钟里永远不会完成（实测：不包 runAsync 时整条判据挂在
-  // pumpAndSettle 的 10 分钟超时上）。必须在真实异步区里读像素。
-  final image = (await tester.runAsync(() => boundary.toImage()))!;
-  final data = (await tester.runAsync(
-    () => image.toByteData(format: ui.ImageByteFormat.rawRgba),
-  ))!;
-  final bytes = data.buffer.asUint8List();
-  final width = image.width;
-  final height = image.height;
-
-  final out = <double>[];
-  for (var y = 120; y < height - 120; y += 4) {
-    for (var x = 200; x < width - 200; x += 4) {
-      final o = (y * width + x) * 4;
-      out.add((bytes[o] + bytes[o + 1] + bytes[o + 2]) / 3);
-    }
+/// 只扫 `BackgroundLayer` 子树，不会撞到外层的装饰性 `ColoredBox`。
+List<Color> backdropBoxColors(WidgetTester tester) {
+  final out = <Color>[];
+  void visit(Element e) {
+    final w = e.widget;
+    if (w is ColoredBox) out.add(w.color);
+    e.visitChildren(visit);
   }
-  image.dispose();
+
+  visit(find.byType(BackgroundLayer).evaluate().single);
   return out;
 }
 
-/// 两个等长采样的平均绝对差。
-double meanAbsDiff(List<double> a, List<double> b) {
-  if (a.isEmpty || a.length != b.length) {
-    throw StateError('采样长度不一致：${a.length} vs ${b.length}');
-  }
-  var sum = 0.0;
-  for (var i = 0; i < a.length; i++) {
-    sum += (a[i] - b[i]).abs();
-  }
-  return sum / a.length;
-}
-
-/// 把背景层挂进 AppTheme，外层包一个 `RepaintBoundary` 供抓图。
+/// 把背景层挂进 AppTheme，外层包一个 `RepaintBoundary`。
 Future<void> pumpBackdrop(
   WidgetTester tester,
   WindowMaterial material, {
   AppStyle style = AppStyle.winui,
   Brightness brightness = Brightness.light,
+  bool materialAvailable = true,
+  AppearanceSettings? appearance,
 }) async {
+  final available = ValueNotifier<bool>(materialAvailable);
+  final focus = ValueNotifier<bool>(true);
+  addTearDown(available.dispose);
+  addTearDown(focus.dispose);
+
   await tester.pumpWidget(
     AppTheme(
       colors: AppColors.of(style, brightness),
@@ -229,16 +216,12 @@ Future<void> pumpBackdrop(
         home: Scaffold(
           body: RepaintBoundary(
             key: _kBoundaryKey,
-            child: ColoredBox(
-              // 真机上窗口底下面是 DWM backdrop；这里垫**黑**，因为黑给
-              // 透光项 0 贡献（各档材质的 `seeThrough` 不同 ⇒ 透光率不同），
-              // 是所有底色里最小的一档 —— 测试读数因此是保守下界。
-              // 也不能用 `solidFor`：纯色材质的窗口底就是它，finder 会撞车。
-              color: Colors.black,
-              child: BackgroundLayer(
-                appearance: AppearanceSettings(windowMaterial: material),
-                brightness: brightness,
-              ),
+            child: BackgroundLayer(
+              appearance:
+                  appearance ?? AppearanceSettings(windowMaterial: material),
+              brightness: brightness,
+              focus: focus,
+              materialAvailable: available,
             ),
           ),
         ),
@@ -248,28 +231,4 @@ Future<void> pumpBackdrop(
   // 背景层是静态的，一帧就够 —— 不用 pumpAndSettle（它在有挂起 future 时
   // 会一直等到 10 分钟超时，把失败原因埋在一堆无关堆栈里）。
   await tester.pump();
-}
-
-// 2026-10-19：`backdropPaint(kind)` 这个 Finder 已删除。
-// 它按 `BackdropPainter.kind` 区分「风格渐变打底」与「材质底」两层 ——
-// 材质只剩 Mica、窗口底改由 DWM 画之后，那两层绘制器整个不存在了。
-
-/// 只统计绘制调用次数的探针 canvas。
-///
-/// 只需要 `drawCircle` / `drawRect` 两样，其余走 [noSuchMethod] 忽略 ——
-/// 这样不必跟着 `Canvas` 的接口逐个补空实现。
-class _DrawCallProbe implements Canvas {
-  int circles = 0;
-  int rects = 0;
-
-  int get total => circles + rects;
-
-  @override
-  void drawCircle(Offset c, double radius, Paint paint) => circles++;
-
-  @override
-  void drawRect(Rect rect, Paint paint) => rects++;
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
 }

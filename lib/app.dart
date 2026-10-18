@@ -29,6 +29,7 @@ import 'services/douyin_store.dart';
 import 'services/homepage_store.dart';
 import 'services/settings_store.dart';
 import 'services/window_effect.dart';
+import 'services/window_material_state.dart';
 import 'theme/app_scroll_behavior.dart';
 import 'theme/app_style.dart';
 import 'theme/app_theme.dart';
@@ -167,21 +168,27 @@ class XDownloaderApp extends StatelessWidget {
           // 只在变化时调用，避免每帧都打一次原生通道。用模块级变量而不是
           // 实例字段：`XDownloaderApp` 是 `StatelessWidget`（见类定义），
           // 存不了可变状态。
-          // WinUI3 风格下窗口底**固定用 Mica**：这是微软官方给长驻窗口的
-          // 材质（DWM_SYSTEMBACKDROP_TYPE = DWMSBT_MAINWINDOW）。用户在设置里
-          // 选的五档材质只对另三套玻璃风格有意义 —— WinUI 的观感来自
-          // 「一层 Mica + 不透明内容面」，自己叠材质反而不像。
-          final effectiveMaterial = appearance.visualStyle == AppStyle.winui
-              ? WindowMaterial.mica
-              : s.settings.appearance.windowMaterial;
+          // 材质直接读配置里的四档（mica / mica-alt / acrylic / acrylic-thin）。
+          //
+          // 这里曾写成 `visualStyle == AppStyle.winui ? mica : 配置值` ——
+          // 那时还有四套风格，winui 想固定用 Mica。但 e5c4b6e 删掉另三套之后
+          // `AppStyle` 只剩 winui 一个值，这个三元**恒取 mica 分支**：用户在
+          // 设置里选的亚克力/细亚克力/Mica Alt 在启动路径上被静默覆盖成 Mica，
+          // 界面里选什么都一样。现在按配置走，材质选择才真的生效。
+          final effectiveMaterial = s.settings.appearance.windowMaterial;
           final materialKey = '${effectiveMaterial.id}/${brightness.name}';
           if (_lastAppliedDark != materialKey) {
             _lastAppliedDark = materialKey;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              applyWindowMaterial(
+            WidgetsBinding.instance.addPostFrameCallback((_) async {
+              final r = await applyWindowMaterial(
                 effectiveMaterial,
                 dark: brightness == Brightness.dark,
               );
+              // 材质**是否真的挂上了**决定窗口底该透明还是该铺不透明回退色
+              // （见 `BackgroundLayer`）。这里必须回写：系统关掉「透明效果」
+              // 时 `DwmSetWindowAttribute` 会失败，此时底若还透明，桌面就
+              // 从窗口里透出来。
+              windowMaterialAvailable.value = r.ok;
             });
           }
 
@@ -408,13 +415,24 @@ class _AppShellState extends State<_AppShell> {
     // 所以「切换后界面即时生效」是天然成立的，不需要额外通知机制。
     final useSidebar = appearance.navLayout == NavLayout.sidebar;
 
-    // WinUI3 是**不透明应用面**：内容区铺满实色，壁纸/材质只在窗口边缘
-    // （标题栏与侧栏之外的 chrome）可见。另三套是「玻璃浮在壁纸上」，
-    // 内容区透出背景图正是它们的设计意图。
+    // 内容区**必须透明**（2026-10-19 用户裁定「照抄图吧」）。
     //
-    // 2026-10-19 修：之前内容区一直透明，只是被侧栏的悬浮卡挡住了看不出来；
-    // 侧栏一贴边，右侧与底部就露出壁纸 —— 那不是 WinUI。
-    final opaqueShell = AppTheme.of(context).style == AppStyle.winui;
+    // 这里曾有一层 `opaqueShell`：WinUI 风格时给内容区铺一块不透明实色
+    // （`AppColors.solidFor`），理由是「WinUI 是不透明应用面」。那个理由
+    // 站不住 —— 参照物 `tubatool/TubaWinUi3.WinUI3/MainWindow.xaml:279-281`
+    // 恰恰把内容区背景显式改成了 `Transparent`：
+    //
+    //     <NavigationView.Resources>
+    //         <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+    //     </NavigationView.Resources>
+    //
+    // 它这么做是因为 Flutter/WinUI 画的不透明像素会把 DWM 画的材质**整个
+    // 盖住**：那一层实色 + `BackgroundLayer` 的实色底，两层叠起来之后四档
+    // 材质（mica / mica-alt / acrylic / acrylic-thin）在真机上是四张一模一样
+    // 的图。删掉这层，材质才真的透得上来。
+    //
+    // 文字可读性由**卡片**保证（`AppCard` 等承载文字的组件保持不透明），
+    // 不是靠给内容区铺底。
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -468,18 +486,10 @@ class _AppShellState extends State<_AppShell> {
                               taskRunning: taskRunning,
                             ),
                           ),
+                        // 内容区**不铺底**（见上面 opaqueShell 删除处的说明）：
+                        // 铺了就把 DWM 材质盖住。可读性由卡片保证。
                         Expanded(
-                          child: opaqueShell
-                              // WinUI：内容区是一块不透明实色面（Mica 的
-                              // 「内容层」色），壁纸不会透上来。
-                              ? ColoredBox(
-                                  color: AppColors.solidFor(
-                                    widget.brightness,
-                                    style: AppTheme.of(context).style,
-                                  ),
-                                  child: _buildContent(context, useSidebar),
-                                )
-                              : _buildContent(context, useSidebar),
+                          child: _buildContent(context, useSidebar),
                         ),
                       ],
                     ),
@@ -679,6 +689,8 @@ class _AppShellState extends State<_AppShell> {
       m,
       dark: AppTheme.of(context).brightness == Brightness.dark,
     );
+    // 窗口底按这个值在「透明（材质透出）」与「不透明回退色」之间二选一。
+    windowMaterialAvailable.value = r.ok;
     if (!r.ok && mounted) {
       // 用 State.context：build 的参数 context 会被 lint 认为与
       // State.mounted 无关（异步间隙后无法证明它还活着）。
