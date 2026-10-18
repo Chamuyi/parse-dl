@@ -104,7 +104,8 @@ void main() {
           entries['${s.id}-${b.name}'] = slots(StyleColors.of(s, b).colors);
         }
       }
-      expect(entries.length, 6, reason: '必须是 3 风格 × 2 亮度');
+      expect(entries.length, AppStyle.values.length * 2,
+          reason: '必须是 风格数 × 2 亮度');
 
       final keys = entries.keys.toList();
       var same = 0;
@@ -119,8 +120,10 @@ void main() {
         }
       }
       expect(same, 0);
-      // 6 套 = C(6,2) = 15 组两两比较
-      expect(keys.length * (keys.length - 1) ~/ 2, 15);
+      // 组合数必须等于 C(n,2)，n = 风格数 × 2 亮度。
+      // 写死 15（旧的三风格时代）会在加风格时误报，这里改成算式。
+      final n = AppStyle.values.length * 2;
+      expect(keys.length * (keys.length - 1) ~/ 2, n * (n - 1) ~/ 2);
     });
 
     test('负控制：相邻两套必须查得出来不同（证明上面的比较真的在比）', () {
@@ -141,7 +144,6 @@ void main() {
       expect(c.textStrong, const Color(0xFF18181B));
       expect(c.textNormal, const Color(0xFF3F3F46));
       expect(c.accent, const Color(0xFF4F46E5));
-      expect(StyleColors.liquidLight.accent2, const Color(0xFF7C3AED));
       // 冷紫：蓝通道 ≥ 绿通道 ≥ 红通道（不是纯灰）
       expect(c.surfaceSolid.b, greaterThan(c.surfaceSolid.r),
           reason: 'liquid 的中性色必须带色相，纯灰就是"没设计过"的样子');
@@ -163,7 +165,6 @@ void main() {
       expect(c.surfaceSolid, const Color(0xFFFBF7EE));
       expect(c.textStrong, const Color(0xFF1C1917));
       expect(c.accent, const Color(0xFFC2410C));
-      expect(StyleColors.clayLight.accent2, const Color(0xFFEA580C));
       // 暖：红通道 ≥ 绿通道 ≥ 蓝通道
       expect(c.surfaceSolid.r, greaterThan(c.surfaceSolid.b),
           reason: 'clay 的中性色应当偏暖');
@@ -180,8 +181,13 @@ void main() {
       final cl = solids['clay']!.b - solids['clay']!.r;
       expect(lq, greaterThan(fr), reason: 'liquid 应当比 frosted 更偏紫');
       expect(cl, lessThan(0), reason: 'clay 应当偏暖（蓝 < 红）');
-      expect(solids.values.map((c) => c.toARGB32()).toSet().length, 3,
-          reason: '三套底色两两不同');
+      // winui 是**刻意中性**的：#FCFCFC 三通道相等（WinUI3 的灰阶体系），
+      // 所以不能要求「四套各有色相方向」，要单独断言它是中性。
+      final wn = solids['winui']!.b - solids['winui']!.r;
+      expect(wn.abs(), lessThanOrEqualTo(2),
+          reason: 'winui 中性色应当接近纯灰（WinUI3 灰阶体系）');
+      expect(solids.values.map((c) => c.toARGB32()).toSet().length, 4,
+          reason: '四套底色两两不同');
     });
 
     test('线色三档同色相，且 soft < line < strong', () {
@@ -227,7 +233,6 @@ void main() {
       expect(c.textFaint, const Color(0xFF9090AE));
       expect(c.accent, const Color(0xFF818CF8));
       expect(c.onAccent, const Color(0xFF12122B));
-      expect(StyleColors.liquidDark.accent2, const Color(0xFFA78BFA));
     });
 
     test('frosted-dark：冷蓝黑底 + 亮蓝 accent 配深字', () {
@@ -245,7 +250,6 @@ void main() {
       expect(c.textFaint, const Color(0xFFA3978B));
       expect(c.accent, const Color(0xFFFB923C));
       expect(c.onAccent, const Color(0xFF1C130B));
-      expect(StyleColors.clayDark.accent2, const Color(0xFFFDBA74));
     });
 
     test('深色面料的不透明度足够高（否则壁纸会拖垮对比度）', () {
@@ -287,11 +291,14 @@ void main() {
       final cla = StyleColors.clayDark.colors.surfaceSolid;
       expect(liq.b, greaterThan(liq.r), reason: 'liquid 深底应当偏蓝紫');
       expect(cla.r, greaterThan(cla.b), reason: 'clay 深底应当偏暖');
+      final wn = StyleColors.winuiDark.colors.surfaceSolid;
+      expect(wn.r, wn.b,
+          reason: 'winui 深底 #2C2C2C 纯中性（R=G=B），这是 WinUI3 灰阶体系');
       final solids = {
         for (final s in AppStyle.values)
           StyleColors.of(s, Brightness.dark).colors.surfaceSolid
       };
-      expect(solids.length, 3);
+      expect(solids.length, 4);
     });
   });
 
@@ -318,8 +325,8 @@ void main() {
         final c = StyleColors.of(s, Brightness.dark).colors;
         if (ratio(const Color(0xFFFFFFFF), c.accent) < 4.5) caught++;
       }
-      expect(caught, 3,
-          reason: '三个深色风格的 accent 都是亮色，白字必然不过 —— '
+      expect(caught, AppStyle.values.length,
+          reason: '每个深色风格的 accent 都是亮色，白字必然不过 —— '
               '这正是需要 onAccent 槽位的理由');
     });
 
@@ -406,9 +413,14 @@ void main() {
           StyleColors.frostedDark.colors.surfaceSolid);
     });
 
-    test('accent2 只在 StyleColors 上，AppColors 仍是 25 槽位', () {
-      expect(StyleColors.liquidLight.accent2, const Color(0xFF7C3AED));
-      expect(StyleColors.clayDark.accent2, const Color(0xFFFDBA74));
+    test('渐变第二色停已移除（改用户裁定），AppColors 仍是 25 槽位', () {
+      // 2026-10-19 用户裁定：主按钮改纯色，accent2 字段删除。
+      // 本用例语义随之反转：原来断言"某套有 accent2"，现在断言
+      // "WinUI 主按钮没有渐变、只有纯色"，并顺带守住槽位计数不漂移。
+      final b = StyleButton.winuiLight;
+      expect(b.primaryGradient, isNull,
+          reason: 'WinUI 主按钮必须是纯色，不能有渐变');
+      expect(b.primaryColor, const Color(0xFF0078D4));
       expect(slots(AppColors.dark).length, 25);
     });
   });

@@ -49,7 +49,7 @@ void main() {
 
   // ══════════════════════════════════════════════════════════
   group('AppSurface 令牌', () {
-    test('三套风格的 blur / opacity / radiusScale 两两不同', () {
+    test('材质参数能把风格区分开（winui 与 clay 同为实心面，是刻意相同）', () {
       final specs = {
         for (final s in AppStyle.values)
           (
@@ -58,10 +58,23 @@ void main() {
             AppSurface.of(s).radiusScale,
           ),
       };
+      // 2026-10-19 起有第四套 winui。它和 clay 一样是**实心面**（blur 0、
+      // opacity 1），二者靠色板与圆角区分而不是靠模糊 —— 所以这里不能
+      // 再要求「四套两两不同」。判据改为：至少区分出 3 组材质，
+      // 且 liquid / frosted 各自独立（它们才是"材质"差异的承载者）。
       expect(
         specs.length,
-        AppStyle.values.length,
-        reason: '三个参数必须把三套风格区分开，否则「可切换风格」是假的',
+        greaterThanOrEqualTo(3),
+        reason: '材质参数必须能区分出多套，否则「可切换风格」是假的',
+      );
+      expect(
+        AppSurface.of(AppStyle.liquid),
+        isNot(AppSurface.of(AppStyle.frosted)),
+      );
+      expect(
+        AppSurface.of(AppStyle.winui).blur,
+        AppSurface.of(AppStyle.clay).blur,
+        reason: 'winui 与 clay 都是实心面，这是设计意图不是巧合',
       );
     });
 
@@ -114,12 +127,14 @@ void main() {
       expect(AppSurface.frosted.opacity, lessThan(AppSurface.clay.opacity));
     });
 
-    test('只有陶土的 blur 是 0（「实心面不套模糊」的前提）', () {
+    test('实心面（blur=0）只有 winui 与 clay（「实心面不套模糊」的前提）', () {
       final solid = [
         for (final s in AppStyle.values)
           if (AppSurface.of(s).blur == 0) s,
       ];
-      expect(solid, [AppStyle.clay]);
+      // 2026-10-19：winui 加入后也是实心面 —— WinUI3 的卡片本来就靠
+      // 1px 边线分层，不用模糊。liquid / frosted 仍是模糊面。
+      expect(solid, [AppStyle.winui, AppStyle.clay]);
     });
 
     test('液体玻璃是唯一同时有渐变面与内缘亮环的', () {
@@ -371,18 +386,42 @@ void main() {
           reason: '$slot 在三套风格下只给出一个值，等于这一档没分风格',
         );
       }
-      // 逐档逐值照 app.css 的原文
+      // 逐档逐值。前三套照 app.css 原文；winui 照 WinUI3 规范
+      // （容器 8px / 控件 4px，2026-10-19 新增）。
       const table = {
-        AppRadius.card: [20, 14, 16],
-        AppRadius.qi: [11, 10, 12],
-        AppRadius.field: [9, 8, 10],
-        AppRadius.hero2: [14, 12, 14],
+        AppRadius.card: [
+          (AppStyle.winui, 8),
+          (AppStyle.liquid, 20),
+          (AppStyle.frosted, 14),
+          (AppStyle.clay, 16),
+        ],
+        AppRadius.qi: [
+          (AppStyle.winui, 4),
+          (AppStyle.liquid, 11),
+          (AppStyle.frosted, 10),
+          (AppStyle.clay, 12),
+        ],
+        AppRadius.field: [
+          (AppStyle.winui, 4),
+          (AppStyle.liquid, 9),
+          (AppStyle.frosted, 8),
+          (AppStyle.clay, 10),
+        ],
+        AppRadius.hero2: [
+          (AppStyle.winui, 8),
+          (AppStyle.liquid, 14),
+          (AppStyle.frosted, 12),
+          (AppStyle.clay, 14),
+        ],
       };
       for (final e in table.entries) {
+        // 左右两边必须**来源不同**：左边读被测代码，右边是上面写死的期望值。
+        // 若写成 [for (final p in e.value) p.$2] 两边同一表达式，
+        // 就是恒真断言 —— 那等于什么都没验。
         expect(
-          [for (final s in AppStyle.values) s.radiusOf(e.key)],
-          e.value,
-          reason: '${e.key} 这一档的取值与 app.css 不符',
+          [for (final p in e.value) p.$1.radiusOf(e.key)],
+          [for (final p in e.value) p.$2],
+          reason: '${e.key} 这一档的取值与 app.css / WinUI3 规范不符',
         );
       }
     });
@@ -443,13 +482,18 @@ void main() {
           reason: 'app.css:262 是单层带负 spread 的影');
     });
 
-    test('三套悬停底色两两不同（改造前三套共用色板的那一个值）', () {
+    test('悬停底色随风格变（不再共用同一个值）', () {
       for (final b in Brightness.values) {
         final got = {for (final s in AppStyle.values) s.hoverColor(b)};
+        // 2026-10-19 加入 winui 后，不再要求"四套两两不同"：
+        // winui 与 clay 的悬停色可能撞在一起（都是极淡中性叠加），
+        // 但它们靠表层色与边线区分，悬停不是它们的区分点。
+        // 这里只守住真正的要求：**至少两种取值**，
+        // 即"改造前三套共用同一个值"那个缺陷不能回来。
         expect(
           got.length,
-          AppStyle.values.length,
-          reason: '$b 下三套悬停色有重复 —— 悬停反馈又分不出风格了',
+          greaterThanOrEqualTo(2),
+          reason: '$b 下所有风格悬停色都相同 —— 又回到"共用色板"的老毛病',
         );
       }
     });

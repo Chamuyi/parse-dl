@@ -85,7 +85,7 @@ void main() {
         for (final s in AppStyle.values)
           for (final b in Brightness.values) '${s.id}-${b.name}': s.sidebarOf(b),
       };
-      expect(tokens, hasLength(6));
+      expect(tokens, hasLength(AppStyle.values.length * 2));
       final seen = <StyleSidebar>[];
       for (final entry in tokens.entries) {
         for (final prev in seen) {
@@ -195,7 +195,7 @@ void main() {
         for (final s in AppStyle.values)
           for (final b in Brightness.values) '${s.id}-${b.name}': s.buttonOf(b),
       };
-      expect(tokens, hasLength(6));
+      expect(tokens, hasLength(AppStyle.values.length * 2));
       final seen = <StyleButton>[];
       for (final entry in tokens.entries) {
         for (final prev in seen) {

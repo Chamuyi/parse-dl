@@ -87,7 +87,7 @@ void main() {
           for (final b in Brightness.values)
             '${s.id}-${b.name}': StyleBackdrop.of(s, b),
       };
-      expect(tokens, hasLength(6));
+      expect(tokens, hasLength(AppStyle.values.length * 2));
       final seen = <StyleBackdrop>[];
       for (final entry in tokens.entries) {
         for (final prev in seen) {
@@ -146,7 +146,7 @@ void main() {
           for (final b in Brightness.values)
             '${s.id}-${b.name}': AppColors.solidFor(b, style: s),
       };
-      expect(solids, hasLength(6));
+      expect(solids, hasLength(AppStyle.values.length * 2));
       final seen = <MapEntry<String, Color>>[];
       for (final entry in solids.entries) {
         for (final prev in seen) {

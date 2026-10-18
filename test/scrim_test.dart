@@ -34,10 +34,10 @@ void main() {
 
   group('遮罩', () {
     test('六种组合都齐（少一种这条判据就只盖住一半）', () {
-      expect(combos, hasLength(6));
+      expect(combos, hasLength(AppStyle.values.length * 2));
       // 负控制：组合确实是**互不相同**的色板，不是同一个对象被列了六遍。
       final distinct = combos.map((e) => identityHashCode(e.$2)).toSet();
-      expect(distinct, hasLength(6), reason: '六种组合取到的是同一个色板，遍历是假的');
+      expect(distinct, hasLength(AppStyle.values.length * 2), reason: '六种组合取到的是同一个色板，遍历是假的');
     });
 
     test('本身是近黑（不是从浅色文字色派生出来的）', () {
