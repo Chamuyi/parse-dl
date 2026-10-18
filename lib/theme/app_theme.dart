@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'app_style.dart';
@@ -285,11 +287,31 @@ class AppColors {
   /// 关键：**不能**把强调色按固定不透明度直接铺满窗口。
   /// 深色模式下 #1d9bf0 铺 55% 会变成一大片刺眼的亮蓝，浅色文字压上去几乎看不见
   /// —— 这里踩过坑。正确做法是与主题底色按比例混合。
-  static Color tintFor(Color tint, Brightness brightness) {
+  ///
+  /// ### 两个可调参数（2026-10-19 照抄图吧工具箱「自定义色调」）
+  ///
+  /// | 参数 | 语义 | 默认 |
+  /// |---|---|---|
+  /// | [tintOpacity] | 色调浓度：越大越接近 [tint]，越小越接近主题底色 | 0.6 |
+  /// | [tintLuminosityOpacity] | 明度层：越大越透（越接近底色），越小越浓 | 0.3 |
+  ///
+  /// **默认值必须逐值复现改造前的输出**（一堆像素判据压在上面）：0.6 经
+  /// [tintWeight] 换算回深色 0.30 / 浅色 0.18，0.3 是明度层的中性点 1.0 ——
+  /// 两个换算都恰好得到 `×1.0`，浮点上也是精确的。
+  ///
+  /// 两者都不是摆设：浓度直接改混合权重（0 → 纯底色，1 → 权重再抬 1/0.6 倍），
+  /// 明度层在同一权重上再乘 0~2 的系数（0 → 最浓、1 → 纯底色）。
+  static Color tintFor(
+    Color tint,
+    Brightness brightness, {
+    double tintOpacity = 0.6,
+    double tintLuminosityOpacity = 0.3,
+  }) {
     final base = brightness == Brightness.dark
         ? const Color(0xFF18181B)
         : const Color(0xFFF3F3F3);
-    final w = brightness == Brightness.dark ? 0.30 : 0.18;
+    final w = tintWeight(brightness, tintOpacity) *
+        luminosityFactor(tintLuminosityOpacity);
     // 用 .r/.g/.b（0~1 浮点）做混合，避免已废弃的 .red/.green/.blue
     int mix(double t, double b) =>
         ((t * w + b * (1 - w)) * 255).round().clamp(0, 255);
@@ -301,6 +323,50 @@ class AppColors {
       mix(tint.b, base.b),
     );
   }
+
+  /// 主题底色（[tintFor] 混合的另一端）。
+  static Color tintBaseFor(Brightness brightness) =>
+      brightness == Brightness.dark
+          ? const Color(0xFF18181B)
+          : const Color(0xFFF3F3F3);
+
+  /// 「色调不透明度」→ 混合权重。
+  ///
+  /// 线性映射到 `0 .. (默认权重 / 默认不透明度)`：默认 0.6 恰好落回改造前
+  /// 写死的 0.30（深色）/ 0.18（浅色），所以 `0.6` 这个取值不是新发明的，
+  /// 而是把旧常量反解出来的。两端行为：0 → 纯主题底色，1 → 权重抬到
+  /// 默认值的 1/0.6 ≈ 1.67 倍（浅色 0.30、深色 0.50，接近「铺满色调」）。
+  static double tintWeight(Brightness brightness, double tintOpacity) {
+    final base = brightness == Brightness.dark ? 0.30 : 0.18;
+    return base * _unit(tintOpacity) / kDefaultTintOpacity;
+  }
+
+  /// 「明度不透明度」→ 明度层系数，乘在 [tintWeight] 得到的权重上。
+  ///
+  /// 语义是「越大越透、越不浓」：系数随参数**递减**。取 `2^(2·(0.3−l))`，
+  /// 于是 0 → 1.516（权重抬到默认的 1.5 倍，最浓）、0.3 → 1.0（中性点）、
+  /// 1 → 0.379（权重压到三成多，混合结果明显偏向主题底色）。
+  ///
+  /// 不用 `1 + (0.3 − l)·2` 那种线性式：它在 l > 0.8 之后会穿过 0 变负
+  /// （权重为负 = 颜色越界），或在 0 处被 clamp 出一段平台（滑块拖到最后
+  /// 一截没有任何变化）。指数式在 0..1 上严格递减且恒为正。
+  ///
+  /// 默认档显式返回 1.0 而不是靠 `2^0` 算出来 —— 默认参数必须**逐值**复现
+  /// 改造前的输出，不能把这一点押在 pow 的实现细节上。
+  static double luminosityFactor(double tintLuminosityOpacity) {
+    final d = kDefaultTintLuminosityOpacity - _unit(tintLuminosityOpacity);
+    if (d == 0) return 1;
+    return math.pow(2, d * 2).toDouble();
+  }
+
+  /// 两个滑块的默认档（也是 [tintFor] 的默认参数）。
+  static const double kDefaultTintOpacity = 0.6;
+  static const double kDefaultTintLuminosityOpacity = 0.3;
+
+  /// 把任意输入夹进 0~1；NaN / 无穷一律当 0（它们在比较里恒为 false，
+  /// 会一路混进颜色运算，最后表现为整块底色消失而不报错）。
+  static double _unit(double v) =>
+      v.isFinite ? v.clamp(0.0, 1.0).toDouble() : 0.0;
 
   /// 纯色材质时用的不透明底色，也用作「窗口底压在壁纸上」的那一层。
   ///
@@ -402,10 +468,10 @@ ThemeData buildAppTheme(
   //     （普通按钮：StyleButton.color 半透面 + 该套 --ink2 字色；
   //     liquid 浅色的半透白 0xB3 不满足 SDK 的 disabled/onPrimary 压字前提，
   //     压实成白面板底再保留 18% 通透 —— 偏差如实记录）
-  final Color tonalSurface = false &&
-          brightness == Brightness.light
-      ? Color.lerp(button.color, c.surfaceSolid, 0.18)!
-      : button.color;
+  // 曾有过「浅色下把 tonal 底压实成白面板再保留 18% 通透」的分支，
+  // 用 `false && ...` 停用后一直留在原地（既不可达又看不出是废弃代码）。
+  // 2026-10-19 直接删掉：偏差理由仍在上面的注释里，代码不该留假分支。
+  final Color tonalSurface = button.color;
   final ButtonStyle ordinaryButtonStyle = ButtonStyle(
     backgroundColor: WidgetStatePropertyAll<Color>(tonalSurface),
     foregroundColor: WidgetStatePropertyAll<Color>(c.textNormal),
