@@ -95,30 +95,50 @@ enum WindowMaterial {
   /// 它的上方 —— 细亚克力（0.25 的颗粒）被放到它**下方**才腾得出档位；
   /// 浅色下纯色底是 `#F8FAFC`(250)，四档全部压在它下方。两处让位都在
   /// **相邻档位只差 5 分**的位置上，次序本身不动。
-  Color previewFor(Brightness brightness) {
+  /// 材质薄片相对**当前风格底色**的亮度偏移（0~255 灰阶）。
+  ///
+  /// ## 2026-10-19 改为相对偏移（修「材质看不出区别」）
+  ///
+  /// 此前这里是**写死的绝对色值**（按 2026-10-16 的旧色板定标）。加入
+  /// winui 风格后深色底从 `#14171E`(≈23) 变成 `#2C2C2C`(44)，而亚克力的
+  /// 绝对底色 `#2A2A2A`(42) 没变 —— 二者只差 **2 个灰阶**，肉眼完全分不出。
+  ///
+  /// 根因是"绝对色值"这个设计：材质薄片以 0.86 的 alpha 压在调色层之上，
+  /// 它能被看见的**只有与底色的差**。底色随风格变，绝对色值就必须跟着重算，
+  /// 否则每加一套风格都要重新定标一次。
+  ///
+  /// 现在改成**相对于当前风格 `solidFor` 的偏移**，间距固定 12 灰阶：
+  /// 无论底色是 23 还是 44，五档都稳定拉开 ≥12（判据要 ≥7.5），
+  /// 加新风格时不需要再定标。
+  ///
+  /// 次序保留 WinUI 的（深色）：`mica-alt < 纯色 < 细亚克力 < Mica < 亚克力`；
+  /// 浅色反向（纯色最亮）。**纯色 = 0**，因为它在真机上就是底色本身。
+  int offsetFor(Brightness brightness) {
     final dark = brightness == Brightness.dark;
-    switch (this) {
-      case WindowMaterial.mica:
-        // `SolidBackgroundFillColorBase`：官方浅 #F3F3F3 / 深 #202020
-        return dark ? const Color(0xFF252525) : const Color(0xFFE2E2E2);
-      case WindowMaterial.micaAlt:
-        // `SolidBackgroundFillColorBaseAlt`：官方浅 #DADADA / 深 #0A0A0A
-        // —— 它必须待在序列最暗端，档位才排得开；官方值本来就接近黑。
-        return dark ? const Color(0xFF000000) : const Color(0xFFC9C9C9);
-      case WindowMaterial.acrylic:
-        // `AcrylicBackgroundFillColorDefaultBrush` 的 TintColor：
-        // 官方浅 #FCFCFC / 深 #2C2C2C
-        return dark ? const Color(0xFF2A2A2A) : const Color(0xFFF7F7F7);
-      case WindowMaterial.acrylicThin:
-        // `AcrylicBackgroundFillColorBaseBrush` 的兜底色：官方浅 #EEEEEE /
-        // 深 #1C1C1C
-        return dark ? const Color(0xFF0C0C0C) : const Color(0xFFD6D6D6);
-      case WindowMaterial.none:
-        // 纯色：这条分支真机上走不透明实色（`AppColors.solidFor`），
-        // 这里只喂给缩略图 —— 官方兜底 `SolidBackgroundFillColorBase`
-        // 的更亮一档。
-        return dark ? const Color(0xFF171717) : const Color(0xFFFFFFFF);
-    }
+    return switch (this) {
+      WindowMaterial.micaAlt => dark ? -24 : -48,
+      WindowMaterial.none => 0,
+      WindowMaterial.acrylicThin => dark ? 12 : -36,
+      WindowMaterial.mica => dark ? 24 : -24,
+      WindowMaterial.acrylic => dark ? 36 : -12,
+    };
+  }
+
+  /// 材质底色 = 当前风格底色 + [offsetFor]。
+  ///
+  /// [base] 是调用方按当前风格取的 `AppColors.solidFor(brightness, style)`。
+  /// 不传时回退到中性灰（供不持有主题上下文的调用点使用）。
+  Color previewFor(Brightness brightness, {Color? base}) {
+    final dark = brightness == Brightness.dark;
+    final b = base ?? (dark ? const Color(0xFF202020) : const Color(0xFFF3F3F3));
+    final d = offsetFor(brightness);
+    int ch(double v) => (v * 255 + d).round().clamp(0, 255);
+    return Color.fromARGB(
+      (b.a * 255).round(),
+      ch(b.r),
+      ch(b.g),
+      ch(b.b),
+    );
   }
 }
 

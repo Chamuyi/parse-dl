@@ -507,6 +507,18 @@ class StyleNavActive {
     this.glow,
   });
 
+  /// WinUI3 · 浅色。选中底 = 强调色 10%，描边 = 强调色 40%，无发光。
+  static const winuiLight = StyleNavActive(
+    color: Color(0x1A0078D4),
+    borderColor: Color(0x660078D4),
+  );
+
+  /// WinUI3 · 深色。深色下强调色亮一档（#4CC2FF）。
+  static const winuiDark = StyleNavActive(
+    color: Color(0x264CC2FF),
+    borderColor: Color(0x804CC2FF),
+  );
+
   /// liquid · 浅色。CSS `:284-286`：
   /// `linear-gradient(135deg, rgba(91,108,255,.20), rgba(139,92,246,.12))`
   /// + `inset 0 0 0 1px rgba(91,108,255,.28), 0 4px 14px -8px var(--ac)`。
@@ -570,6 +582,10 @@ extension AppStyleNavTokens on AppStyle {
   /// 这个入口只服务 liquid / clay 两套新增画法。
   StyleNavActive navActiveOf(Brightness brightness) =>
       switch ((this, brightness)) {
+        // WinUI3 NavigationView：选中项是**极淡的强调底 + 左侧竖条**，
+        // 没有渐变、没有外发光。竖条由 NavActiveBar 画（与另三套共用）。
+        (AppStyle.winui, Brightness.light) => StyleNavActive.winuiLight,
+        (AppStyle.winui, Brightness.dark) => StyleNavActive.winuiDark,
         (AppStyle.liquid, Brightness.light) => StyleNavActive.liquidLight,
         (AppStyle.liquid, Brightness.dark) => StyleNavActive.liquidDark,
         (AppStyle.clay, Brightness.light) => StyleNavActive.clayLight,

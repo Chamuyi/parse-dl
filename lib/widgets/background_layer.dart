@@ -149,6 +149,7 @@ class _StyleBackdropWash extends StatelessWidget {
           painter: _MaterialSheetPainter(
             material: material,
             brightness: brightness,
+            base: AppColors.solidFor(brightness, style: theme.style),
           ),
         ),
       ],
@@ -255,9 +256,14 @@ class _MaterialSheetPainter extends BackdropPainter {
   final WindowMaterial material;
   final Brightness brightness;
 
+  /// 当前风格的窗口底色 —— 材质薄片按它做相对偏移（2026-10-19）。
+  /// 传 null 时 [WindowMaterial.previewFor] 回退到中性灰。
+  final Color? base;
+
   const _MaterialSheetPainter({
     required this.material,
     required this.brightness,
+    this.base,
   }) : super('material');
 
   /// 分层接缝的位置（命令区与内容区的分界，窗口高度的 42%）。
@@ -266,9 +272,10 @@ class _MaterialSheetPainter extends BackdropPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final dark = brightness == Brightness.dark;
-    final sheet = material.previewFor(brightness);
+    final sheet = material.previewFor(brightness, base: base);
 
-    // ① 材质底：整窗一层 [WindowMaterial.previewFor] 的 WinUI 材质底色。
+    // ① 材质底：整窗一层 [WindowMaterial.previewFor] 的材质底色
+    //    （相对当前风格底色偏移，见该方法文档）。
     canvas.drawRect(
       Offset.zero & size,
       Paint()..color = sheet.withValues(alpha: _kSheetAlpha),

@@ -183,7 +183,12 @@ class _PreviewSwatch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sheet = material.previewFor(brightness);
+    // 材质薄片按**当前风格底色**做相对偏移 —— 缩略图必须与真机窗口底一致，
+    // 否则用户在设置里挑的和实际看到的不是一个东西（2026-10-19）。
+    final sheet = material.previewFor(
+      brightness,
+      base: AppColors.solidFor(brightness, style: AppTheme.of(context).style),
+    );
     final opacity = 1 - material.seeThrough;
     // 磨砂颗粒的浓淡跟着模糊程度走：细亚克力比亚克力更透亮，颗粒也更细
     final grain = (material.blur / 3.2).clamp(0.0, 1.0);
