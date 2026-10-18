@@ -169,36 +169,43 @@ void main() {
       // 2026-10-16 真机实测到的缺陷：mica / mica-alt / acrylic / acrylic-thin
       // 四种材质渲染出来**逐像素完全相同**（平均差 0.00 × 4 组）。
       // 现在材质由 `_MaterialSheetPainter` 整片画在 85% 调色层**之上**：
-      // `previewFor` 的 WinUI 材质底（alpha 0.86）给亮度身份，`layered`
+      // `previewFor` 的材质底（alpha 0.86）给亮度身份，`layered`
       // 叠上半区分层与接缝，`grain` 撒磨砂颗粒。
-      final luma = <WindowMaterial, List<double>>{};
-      for (final m in WindowMaterial.values) {
-        luma[m] = await renderLuma(tester, material: m);
-      }
-
-      final pairs = <String, double>{};
-      final mats = WindowMaterial.values;
-      for (var i = 0; i < mats.length; i++) {
-        for (var j = i + 1; j < mats.length; j++) {
-          pairs['${mats[i].id}↔${mats[j].id}'] =
-              meanAbsDiff(luma[mats[i]]!, luma[mats[j]]!);
+      //
+      // 2026-10-19：材质底色改为**相对风格底色偏移**后，必须**每套风格各测一遍**
+      // —— 旧判据只测 frosted，winui 的底色（深 #2C2C2C）与旧值差 21 个灰阶，
+      // 只在 frosted 上验过的间距不能推广到它。
+      for (final style in AppStyle.values) {
+        final luma = <WindowMaterial, List<double>>{};
+        for (final m in WindowMaterial.values) {
+          luma[m] = await renderLuma(tester, material: m, style: style);
         }
-      }
-      // 失败时把整张矩阵带出来，不要只说「有一对没达标」。
-      final matrix = pairs.entries
-          .map((e) => '  ${e.key.padRight(28)} ${e.value.toStringAsFixed(3)}')
-          .join('\n');
-      // ignore: avoid_print
-      print('材质窗口底差异矩阵（采样点平均绝对亮度差）:\n$matrix');
 
-      for (final entry in pairs.entries) {
-        expect(
-          entry.value,
-          greaterThanOrEqualTo(_kMinDelta),
-          reason: '${entry.key} 的窗口底只差 ${entry.value.toStringAsFixed(3)} '
-              '（判据要求 ≥ $_kMinDelta）—— 这一对材质真机上分不出来。\n'
-              '全部 10 对：\n$matrix',
-        );
+        final pairs = <String, double>{};
+        final mats = WindowMaterial.values;
+        for (var i = 0; i < mats.length; i++) {
+          for (var j = i + 1; j < mats.length; j++) {
+            pairs['${mats[i].id}↔${mats[j].id}'] =
+                meanAbsDiff(luma[mats[i]]!, luma[mats[j]]!);
+          }
+        }
+        // 失败时把整张矩阵带出来，不要只说「有一对没达标」。
+        final matrix = pairs.entries
+            .map((e) => '  ${e.key.padRight(28)} ${e.value.toStringAsFixed(3)}')
+            .join('\n');
+        // ignore: avoid_print
+        print('[${style.id}] 材质窗口底差异矩阵（采样点平均绝对亮度差）:\n$matrix');
+
+        for (final entry in pairs.entries) {
+          expect(
+            entry.value,
+            greaterThanOrEqualTo(_kMinDelta),
+            reason: '${style.id}/${entry.key} 的窗口底只差 '
+                '${entry.value.toStringAsFixed(3)}'
+                '（判据要求 ≥ $_kMinDelta）—— 这一对材质真机上分不出来。\n'
+                '该风格全部 10 对：\n$matrix',
+          );
+        }
       }
     });
 
