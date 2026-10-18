@@ -449,13 +449,18 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('真机事实锚点：Windows/Skia 下探测为 false（isShaderFilterSupported）',
+    testWidgets('测试环境锚点：flutter_tester 的 Skia 软件后端下探测为 false',
         (tester) async {
       await tester.pumpWidget(_surface(child: const SizedBox.expand()));
       await tester.pump();
-      // 本机（Windows/Skia）的真实探测值；测试环境同样默认 Skia。
+      // 这条只描述 **flutter_tester**（Skia 软件后端）的行为，不代表真机：
+      // 2026-10-19 实测 Windows Debug 真机走 Impeller/OpenGLESSDF，
+      // ui.ImageFilter.isShaderFilterSupported == true（探针见
+      // F:\samples\_verify\glass_probe）。真机是否出折射取决于
+      // FragmentProgram.fromAsset('shaders/liquid_glass.frag') 能否加载成功，
+      // 不取决于这一条。
       expect(ui.ImageFilter.isShaderFilterSupported, isFalse);
-      // 由此默认路径必然是 Stage A。
+      // 由此在 tester 里默认路径必然是 Stage A。
       expect(_composeInner(tester), 'matrix');
       expect(tester.takeException(), isNull);
     });
@@ -470,6 +475,46 @@ void main() {
       );
       await tester.pump();
       expect(ui.ImageFilter.isShaderFilterSupported, isFalse);
+      expect(_composeInner(tester), 'matrix');
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('预热（warmUp）', () {
+    test('探测为 false 时不做任何加载尝试（负控制：证明它真的会短路）', () async {
+      var loaderCalls = 0;
+      LiquidGlassSurface.shaderSupported = () => false;
+      LiquidGlassSurface.shaderLoader = () async {
+        loaderCalls++;
+        return _ProbeShader();
+      };
+      addTearDown(() {
+        LiquidGlassSurface.shaderSupported = null;
+        LiquidGlassSurface.shaderLoader = null;
+      });
+
+      await LiquidGlassSurface.warmUp();
+
+      // 探测 false ⇒ 必须一次都不读盘。若哪天有人把这段短路删掉，
+      // 这里会从 0 变成 1，判据立刻变红。
+      expect(loaderCalls, 0);
+    });
+
+    // 注意：这里**不能**用 shaderSupported=true 去跑真 warmUp ——
+    // flutter_tester 里 FragmentProgram.fromAsset 是真实 async I/O，
+    // 会永久挂死到 30s 超时（2026-10-19 实测，两条用例因此假红）。
+    // 项目既有约束也是「testWidgets 禁真实 async 文件/网络 I/O」。
+    // 「探测为 true 且加载失败要静默」这一条由下面那条 widget 级负控制覆盖，
+    // 它注入 fake loader、不碰真资产。
+    testWidgets('探测为 true 但加载失败 → 组件静默回退 Stage A，不崩', (tester) async {
+      await tester.pumpWidget(
+        _surface(
+          shaderSupported: true,
+          loader: () async => throw StateError('boom'),
+          child: const SizedBox.expand(),
+        ),
+      );
+      await tester.pump();
       expect(_composeInner(tester), 'matrix');
       expect(tester.takeException(), isNull);
     });

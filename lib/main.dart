@@ -28,6 +28,7 @@ import 'services/homepage_store.dart';
 import 'services/settings_store.dart';
 import 'services/shutdown_guard.dart';
 import 'services/x_api.dart';
+import 'widgets/liquid_glass.dart';
 
 /// 启动流程：
 ///   1. 读设置（决定主题与材质）
@@ -231,6 +232,10 @@ Future<void> main() async {
   // 内嵌浏览器环境：必须赶在任何 WebviewController 创建之前，
   // 且全局只能初始化一次（用户数据目录定了就不能再改）。
   await prepareDouyinWebViewEnvironment();
+
+  // 液体玻璃 Stage B 的着色器预热：**不 await**，让首帧不等磁盘 I/O。
+  // 预热只填 `_program` 程序缓存，组件侧行为不变；失败静默走 Stage A。
+  unawaited(LiquidGlassSurface.warmUp());
 
   await windowManager.ensureInitialized();
 

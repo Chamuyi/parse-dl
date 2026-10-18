@@ -3,6 +3,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../services/app_logger.dart';
+
 /// 液体玻璃的材质参数（光学数值；内容刻意留在 state 之外）。
 @immutable
 class GlassMaterial {
@@ -114,14 +116,47 @@ class LiquidGlassSurface extends StatefulWidget {
   @visibleForTesting
   static Future<GlassShader> Function()? shaderLoader;
 
+  /// 预热 Stage B 的着色器程序（启动时调一次；**非阻塞**，失败静默）。
+  ///
+  /// 为什么要预热：`initState` 里才懒加载，首个液体玻璃组件要等
+  /// `FragmentProgram.fromAsset` 的磁盘→内存 I/O 完成，期间一直走 Stage A，
+  /// 表现为「刚打开时材质是放大折射，过一下才变玻璃」的跳变。
+  /// 这里提前把**程序**读进缓存，组件侧仍走原加载路径，只是不再等 I/O。
+  ///
+  /// 只预热 program，不缓存 shader 实例：`ui.FragmentShader` 有状态
+  /// （每个组件各自写 uniform），共享一个实例会串参数。
+  ///
+  /// 真机事实（2026-10-19 实测 Windows Debug）：`isShaderFilterSupported`
+  /// 为 true，且该 frag 能成功加载并构造 `ImageFilter.shader`。
+  static Future<void> warmUp() async {
+    // 探测不过就别读盘 —— 后端不支持时加载必然白做，静默跳过。
+    final supported =
+        shaderSupported?.call() ?? ui.ImageFilter.isShaderFilterSupported;
+    final sw = Stopwatch()..start();
+    if (!supported) {
+      AppLogger.log('GLASS', '预热跳过：isShaderFilterSupported=false');
+      return;
+    }
+    try {
+      await glassProgram;
+      AppLogger.log('GLASS', '预热完成 ${sw.elapsedMilliseconds}ms：program 已缓存');
+    } catch (e) {
+      // 资产缺失 / 后端撒谎：留给组件侧原来的静默回退，预热不抛。
+      AppLogger.log('GLASS', '预热失败 ${sw.elapsedMilliseconds}ms（回退 Stage A）：$e');
+    }
+  }
+
   @override
   State<LiquidGlassSurface> createState() => _LiquidGlassSurfaceState();
 }
 
+/// 着色器程序的进程级缓存：预热与组件加载共用同一份，谁先到谁读盘。
+Future<ui.FragmentProgram>? _glassProgramCache;
+Future<ui.FragmentProgram> get glassProgram => _glassProgramCache ??=
+    ui.FragmentProgram.fromAsset(LiquidGlassSurface.shaderAsset);
+
 class _LiquidGlassSurfaceState extends State<LiquidGlassSurface>
     with SingleTickerProviderStateMixin {
-  static Future<ui.FragmentProgram>? _program;
-
   bool _shaderSupported() =>
       LiquidGlassSurface.shaderSupported?.call() ??
       ui.ImageFilter.isShaderFilterSupported;
@@ -207,8 +242,7 @@ class _LiquidGlassSurfaceState extends State<LiquidGlassSurface>
   /// - 后端真的支持 `ImageFilter.shader`（探测说支持但后端撒谎时在这里暴露）；
   /// - SDK 契约「第一个 uniform 是 vec2」（`u_size`）成立，否则抛 `StateError`。
   static Future<GlassShader> _loadDefaultProgramShader() async {
-    final program = await (_program ??=
-        ui.FragmentProgram.fromAsset(LiquidGlassSurface.shaderAsset));
+    final program = await glassProgram;
     final shader = program.fragmentShader();
     ui.ImageFilter.shader(shader);
     return SdkGlassShader(shader);
