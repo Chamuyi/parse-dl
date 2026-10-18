@@ -44,20 +44,6 @@ void main() {
     return Color.fromARGB(255, mix(fg.r, bg.r), mix(fg.g, bg.g), mix(fg.b, bg.b));
   }
 
-  /// 该套色板下，文字压在某面（card / hover / sunken / float）上的**最坏**对比度。
-  double worst(AppStyle style, Brightness b, Color ink, Color Function(AppColors) face) {
-    final c = AppColors.of(style, b);
-    // **必须传风格**：`solidFor` 自 2026-10-16 起按风格取底色，不传就退回
-    // frosted —— 另外两套的底会被算错，判据与生产脱节。
-    final solid = AppColors.solidFor(b, style: style).withValues(alpha: 0.85);
-    var min = double.infinity;
-    for (final wall in [const Color(0xFF000000), const Color(0xFFFFFFFF)]) {
-      final r = ratio(ink, over(face(c), over(solid, wall)));
-      if (r < min) min = r;
-    }
-    return min;
-  }
-
   /// 24 个槽位逐一列出 —— 这是「24 个」这个数字的机器可核版本。
   List<Color> slots(AppColors c) => [
         c.surfaceBase,

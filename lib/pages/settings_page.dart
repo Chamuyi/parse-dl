@@ -14,11 +14,11 @@ import '../widgets/background_picker.dart';
 import '../widgets/bili_section.dart';
 import '../widgets/download_section.dart';
 import '../widgets/douyin_section.dart';
+import '../widgets/material_picker.dart';
 import '../widgets/nav_layout_picker.dart';
 import '../widgets/proxy_section.dart';
 import '../widgets/section_card.dart';
 import '../widgets/accent_picker.dart';
-import '../widgets/style_picker.dart';
 import '../widgets/sub_section.dart';
 import '../widgets/tint_picker.dart';
 import '../widgets/app_toast.dart';
@@ -151,9 +151,24 @@ class SettingsPage extends StatelessWidget {
                   onChanged: (l) => store.setAppearance((a) => a.locale = l),
                 ),
               ),
-              // 2026-10-19：窗口材质与界面风格两个选择器都已删除。
-              // 材质只剩 Mica（官方给长驻窗口的唯一选择），风格只剩 WinUI ——
-              // 留一个只有一个选项的下拉框只会让人以为坏了。
+              // 2026-10-19：窗口材质选择格按图吧工具箱「窗口材质」卡重建
+              // （`SettingsPage.xaml:500-583`，2×2 四格）。上一轮把这档删掉
+              // 是判断失误 —— 参照物证明 WinUI3 应用可以做 4 档材质，而且
+              // 它的做法比原下拉框更完整（预览块逐档不同）。
+              // 点击后：写设置 → 立刻应用原生窗口 → 选中态跟着变。
+              _Field(
+                label: t('窗口材质'),
+                description: t('选择窗口背景的视觉材质效果，并可自定义色调'),
+                child: MaterialPicker(
+                  value: appearance.windowMaterial,
+                  onChanged: (m) {
+                    store.setAppearance((a) => a.windowMaterial = m);
+                    onMaterialChanged(m);
+                  },
+                ),
+              ),
+              // 「界面风格」仍不设选择器：`AppStyle` 只剩 WinUI 一个值，
+              // 留一个只有一项的下拉框只会让人以为坏了。
               // 强调色只在 WinUI 风格下可选 —— 另三套风格各有自己的强调色
               // 令牌，显示一个不起作用的选择器会让人以为坏了（2026-10-19）。
               if (appearance.visualStyle == AppStyle.winui)
@@ -177,10 +192,33 @@ class SettingsPage extends StatelessWidget {
                       store.setAppearance((a) => a.customTint = v),
                 ),
                 child: appearance.customTint
-                    ? TintPicker(
-                        value: appearance.tintColor,
-                        onChanged: (hex) =>
-                            store.setAppearance((a) => a.tintColor = hex),
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          TintPicker(
+                            value: appearance.tintColor,
+                            onChanged: (hex) =>
+                                store.setAppearance((a) => a.tintColor = hex),
+                          ),
+                          // 图吧工具箱「自定义色调」展开后的第二、三行：
+                          // 色调不透明度 / 明度不透明度，范围 0..1，右侧百分比整数。
+                          const SizedBox(height: 16),
+                          _TintSliderRow(
+                            label: t('色调不透明度'),
+                            value: appearance.tintOpacity,
+                            onChanged: (v) => store.setAppearance(
+                              (a) => a.tintOpacity = v,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          _TintSliderRow(
+                            label: t('明度不透明度'),
+                            value: appearance.tintLuminosityOpacity,
+                            onChanged: (v) => store.setAppearance(
+                              (a) => a.tintLuminosityOpacity = v,
+                            ),
+                          ),
+                        ],
                       )
                     : const SizedBox.shrink(),
               ),
@@ -372,6 +410,74 @@ const List<_ModuleSettingsEntryData> _kModuleSettingsEntries = [
 // ────────────────────────────────────────────────────────────
 // 以下为通用布局组件，Section / Item
 // ────────────────────────────────────────────────────────────
+
+/// 色调滑块行：标签 + Slider(0..1) + 右侧百分比整数。
+///
+/// 形态照抄图吧工具箱「自定义色调」展开面板的第二、三行：标签在左、
+/// 轨道占中间剩余宽度、百分比靠右对齐；范围 0..1，显示为 `xx%`。
+///
+/// 轨道样式与 [BackgroundPicker] 里的不透明度滑块保持一致（3px 轨、
+/// 6px 滑块），两处滑块在同一页上不至于像两套控件。
+class _TintSliderRow extends StatelessWidget {
+  final String label;
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  const _TintSliderRow({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppTheme.colorsOf(context);
+    // 旧配置 / 手改配置可能越界；Slider 的 value 必须落在 min..max 内，
+    // 否则断言直接抛，整页白屏。
+    final v = value.isFinite ? value.clamp(0.0, 1.0).toDouble() : 0.0;
+
+    return Row(
+      children: [
+        SizedBox(
+          width: 96,
+          child: Text(
+            label,
+            style: TextStyle(fontSize: 12.5, color: c.textMuted),
+          ),
+        ),
+        Expanded(
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+            ),
+            child: Slider(
+              min: 0,
+              max: 1,
+              value: v,
+              activeColor: c.accent,
+              inactiveColor: c.line,
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 38,
+          child: Text(
+            '${(v * 100).round()}%',
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              fontSize: 12,
+              color: c.textFaint,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 class _Field extends StatelessWidget {
   final String label;

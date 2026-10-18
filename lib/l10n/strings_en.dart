@@ -42,8 +42,17 @@ const Map<String, String> kStringsEn = {
   '全局设置': 'General Settings',
   '抖音解析下载设置': 'Douyin Download Settings',
   '外观': 'Appearance',
-  // 2026-10-19：'窗口材质' / '界面风格' 两个设置项连同描述一起删除
-  //（五档材质与三套风格都不存在了），对应的英文条目一并移除。
+  // 窗口材质 2×2 选择格（widgets/material_picker.dart，照抄图吧工具箱）。
+  // 档位名与副标题：枚举的 label 是纯英文（l10n_test 扫它），副标题在 UI 层
+  // 用 t() 表达，所以这里要单独给一份英文。
+  '窗口材质': 'Window material',
+  '选择窗口背景的视觉材质效果，并可自定义色调':
+      'Pick the visual material of the window backdrop; the tint can be customised',
+  '柔和云母': 'Soft mica',
+  '层次云母': 'Layered mica',
+  '磨砂玻璃': 'Frosted glass',
+  '更透亮的磨砂': 'Clearer frost',
+  // 「界面风格」仍不设选择器（AppStyle 只剩 WinUI 一个值），故无对应条目。
   // 「总览」是首个导航项（置顶，不属于三个模块），也是标题栏文案。
   '总览': 'Overview',
   // 总览页（dashboard_page.dart）的文案。
@@ -101,6 +110,8 @@ const Map<String, String> kStringsEn = {
   '开启后用选定颜色给窗口底色染色，让材质效果更明显。需要先选择「云母」或「亚克力」材质。':
       'Tints the window background with the chosen color so the material effect '
       'shows through. Requires the Mica or acrylic material.',
+  '色调不透明度': 'Tint opacity',
+  '明度不透明度': 'Luminosity opacity',
   '导航形态': 'Navigation style',
   '选择主界面用哪种导航：底部悬浮 Dock，或左侧常规侧边栏。两者展示完全相同的页面与顺序，切换后立即生效，并在下次启动时保留。':
       'Pick the main navigation: a floating Dock at the bottom, or a regular '

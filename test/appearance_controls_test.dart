@@ -13,7 +13,6 @@ import 'package:parse_dl/services/douyin_store.dart';
 import 'package:parse_dl/services/settings_store.dart';
 import 'package:parse_dl/theme/app_style.dart';
 import 'package:parse_dl/theme/app_theme.dart';
-import 'package:parse_dl/theme/window_material.dart';
 import 'package:parse_dl/widgets/nav_items.dart';
 import 'package:parse_dl/widgets/section_card.dart';
 
