@@ -73,8 +73,11 @@ class HeroBanner extends StatelessWidget {
     final style = t.style;
     final brightness = t.brightness;
 
+    // WinUI3 的徽标块是**直角**（或极小圆角），不是 14/15px 的大圆角 ——
+    // WinUI 的圆角体系里只有 4（控件）/ 8（容器）两档，14 那档不存在。
+    final winui = style == AppStyle.winui;
     final avSize = large ? 54.0 : 52.0;
-    final avRadius = large ? 15.0 : 14.0;
+    final avRadius = winui ? 4.0 : (large ? 15.0 : 14.0);
     final titleSize = large ? 19.0 : 15.0;
     final subSize = large ? 12.0 : 11.5;
 

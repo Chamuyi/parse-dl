@@ -140,7 +140,7 @@ class AppearanceSettings {
     this.navLayout = NavLayout.dock,
     this.navGroupExpanded = const {},
     this.locale = AppLocale.system,
-    this.visualStyle = AppStyle.frosted,
+    this.visualStyle = AppStyle.winui,
     this.winUiAccent = WinUiAccent.windows,
   });
 

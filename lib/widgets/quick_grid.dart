@@ -107,24 +107,33 @@ class _QuickTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AppTheme.colorsOf(context);
+    final winui = AppTheme.of(context).style == AppStyle.winui;
 
     final card = AppCard(
       // `.qc` 圆角 12，与 `.stat` / `.hero2` 同档（CSS `:805`）
       radius: AppRadius.hero2,
-      padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+      padding: winui
+          ? const EdgeInsets.fromLTRB(16, 12, 14, 12)
+          : const EdgeInsets.fromLTRB(14, 13, 14, 13),
       child: Row(
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: c.accentSoft,
-              borderRadius: BorderRadius.circular(10),
+          // WinUI3 的入口是**线性小图标**，没有彩色底块：底块是「卡片套卡片」
+          // 的视觉语言（用一块有色的面把图标包起来）。WinUI 让图标本身的
+          // 强调色承担识别，背景一律留白。
+          if (winui)
+            Icon(cell.icon, size: 20, color: c.accent)
+          else
+            Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: c.accentSoft,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(cell.icon, size: 17, color: c.accent),
             ),
-            child: Icon(cell.icon, size: 17, color: c.accent),
-          ),
-          const SizedBox(width: 11),
+          SizedBox(width: winui ? 14 : 11),
           Expanded(
             child: Column(
               mainAxisSize: MainAxisSize.min,

@@ -10,6 +10,7 @@ import '../services/aria2_coordinator.dart';
 import '../services/creation_task_store.dart';
 import '../services/download_store.dart';
 import '../services/homepage_store.dart';
+import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_toast.dart';
@@ -166,7 +167,14 @@ class _HomepagePageState extends State<HomepagePage> {
 
     return ListView(
       controller: _pageCtrl,
-      padding: const EdgeInsets.fromLTRB(0, 16, 0, 16),
+      // WinUI：页面上留白 8（标题贴近顶部）、底部 24（滚动余量更足）。
+      // 另三套保持 16/16。
+      padding: EdgeInsets.fromLTRB(
+        0,
+        AppTheme.of(context).style == AppStyle.winui ? 8 : 16,
+        0,
+        AppTheme.of(context).style == AppStyle.winui ? 24 : 16,
+      ),
       children: [
         // 页头：共享 [PageHeader]（预览稿 `.head h1 .sub`），副题照
         // `PAGES.home.s` = 「下载某个 X 用户的全部媒体」。这一页原本没有

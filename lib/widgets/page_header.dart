@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 
 /// 全页统一的**纯文字页头** —— 预览稿 `.head h1 .sub` 的 Flutter 对应物。
@@ -56,11 +57,15 @@ class PageHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = AppTheme.colorsOf(context);
     final sub = subtitle;
+    // WinUI3 的页头是「Title + 次要说明」，**字重更重、无字距**，且上下留白
+    // 更紧（WinUI 页面顶部直接贴标题，不像预览稿那样让标题探出 3px 去对齐）。
+    final winui = AppTheme.of(context).style == AppStyle.winui;
 
     return Padding(
       // 3px 左移是预览稿 `.head { padding: 0 3px }` 的产物：页面内容缩在
       // 16px 边距里，标题往左探出 3px 正好与侧边栏文字对齐。
-      padding: const EdgeInsets.symmetric(horizontal: 3),
+      // WinUI 不做这个探出 —— 它的标题与内容左缘对齐。
+      padding: EdgeInsets.symmetric(horizontal: winui ? 0 : 3),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -80,8 +85,11 @@ class PageHeader extends StatelessWidget {
                     // 只有整百常量（w550 这种东西是编译期错误），仓库既有 79 处
                     // 字重也全部只用整百。规则取向下整百：650→w600。
                     // 取重一档（w700）会让中文标题发糊，与卡头 w600 也分不开了。
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.1,
+                    //
+                    // WinUI3 例外：它的 Title 是 w700 且**无字距**（Segoe UI
+                    // Variable 的标题层级本就靠字重分层），取 w700 正是官方观感。
+                    fontWeight: winui ? FontWeight.w700 : FontWeight.w600,
+                    letterSpacing: winui ? 0 : 0.1,
                     color: c.textStrong,
                   ),
                 ),

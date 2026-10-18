@@ -170,7 +170,7 @@ BoxDecoration navItemDecoration(
   AppColors c, {
   required bool active,
   bool focused = false,
-  AppStyle style = AppStyle.frosted,
+  AppStyle style = AppStyle.winui,
   Brightness brightness = Brightness.light,
 }) {
   if (focused) {
@@ -241,9 +241,7 @@ BoxDecoration _activeDecorationFor(
       border: Border.all(color: Colors.transparent, width: 1),
     );
   }
-  if (style == AppStyle.frosted) {
-    return selectedDecoration(c, radius: rowRadius);
-  }
+
   final t = style.navActiveOf(brightness);
   final radius = BorderRadius.circular(rowRadius);
   final glow =
@@ -352,16 +350,20 @@ class NavActiveBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AppTheme.colorsOf(context);
+    final th = AppTheme.of(context);
+    // WinUI3 的 NavigationView 指示条是**贴左边缘的直条**（高约 16px、
+    // 无圆角），另三套是悬浮的 3×15 圆角胶囊。位置差异见调用点。
+    final winui = th.style == AppStyle.winui;
 
     return AnimatedOpacity(
       opacity: active ? 1 : 0,
       duration: const Duration(milliseconds: 160),
       child: Container(
         width: 3,
-        height: 15,
+        height: winui ? 16 : 15,
         decoration: BoxDecoration(
           color: c.accent,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(winui ? 1.5 : 999),
         ),
       ),
     );

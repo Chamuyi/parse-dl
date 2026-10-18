@@ -61,28 +61,16 @@ class SidebarNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final th = AppTheme.of(context);
     final side = th.style.sidebarOf(th.brightness);
+    // WinUI3 的 NavigationView 是**贴边通栏**：侧栏从标题栏底一直铺到窗口底，
+    // 没有外边距、没有圆角、没有模糊、没有投影。它是一块「窗口的组成部分」，
+    // 不是浮在壁纸上的卡片。
+    //
+    // 另三套沿用改造前的「悬浮玻璃卡」（AppFloat：16px 圆角 + 30px 模糊 +
+    // 50% 黑影）。这是 2026-10-19 用户指出「这不像 WinUI」之后修的 ——
+    // 只改色板与圆角数值、留着悬浮骨架，等于换皮没换骨。
+    final flush = th.style == AppStyle.winui;
 
-    return SizedBox(
-      width: width,
-      child: DecoratedBox(
-        // 侧边栏底色随风格（S5，CSS `.side`）：包在 AppFloat 外面铺该风格的
-        // `.side` 底 —— AppFloat 的浮层材质（模糊/阴影/圆角）原样保留，
-        // 只在它背后垫风格底色。frosted/clay 是实色，liquid 是渐变；
-        // frosted/clay 另有右分隔线（CSS `border-right: 1px solid var(--ln)`）。
-        decoration: BoxDecoration(
-          color: side.gradient == null ? side.color : null,
-          gradient: side.gradient,
-          border: side.borderRight
-              ? Border(
-                  right: BorderSide(color: th.colors.line, width: 1),
-                )
-              : null,
-        ),
-        child: AppFloat(
-          radius: 16,
-          // 与 Dock 同一套内边距语言
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Column(
+    final column = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Logo —— 与 Dock 的第一个元素同源、同尺寸
@@ -164,7 +152,50 @@ class SidebarNav extends StatelessWidget {
               ),
             ),
           ],
+        );
+
+    // 贴边通栏（WinUI）：底色 + 右侧 1px 分隔线直接铺满，无圆角/模糊/投影。
+    if (flush) {
+      return SizedBox(
+        width: width,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: side.gradient == null ? side.color : null,
+            gradient: side.gradient,
+            border: Border(
+              right: BorderSide(color: th.colors.line, width: 1),
+            ),
+          ),
+          child: Padding(
+            // WinUI NavigationView 的内容内边距：左右 4、上下 4
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: column,
+          ),
         ),
+      );
+    }
+
+    return SizedBox(
+      width: width,
+      child: DecoratedBox(
+        // 侧边栏底色随风格（S5，CSS `.side`）：包在 AppFloat 外面铺该风格的
+        // `.side` 底 —— AppFloat 的浮层材质（模糊/阴影/圆角）原样保留，
+        // 只在它背后垫风格底色。frosted/clay 是实色，liquid 是渐变；
+        // frosted/clay 另有右分隔线（CSS `border-right: 1px solid var(--ln)`）。
+        decoration: BoxDecoration(
+          color: side.gradient == null ? side.color : null,
+          gradient: side.gradient,
+          border: side.borderRight
+              ? Border(
+                  right: BorderSide(color: th.colors.line, width: 1),
+                )
+              : null,
+        ),
+        child: AppFloat(
+          radius: 16,
+          // 与 Dock 同一套内边距语言
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: column,
         ),
       ),
     );
@@ -429,9 +460,13 @@ class _SidebarNavRowState extends State<_SidebarNavRow> {
 
                 // 左侧激活竖条（CSS `:288-292`/`:359-363`/`:422-426` 三套逐字节
                 // 相同的 3×15px 胶囊，规格一致不是风格区分点，但不许丢）。
-                // 锚定 left:11px：行 padding 非缩进为 8，竖条画在行框内左缘。
+                //
+                // 位置随风格：WinUI3 的 NavigationView 指示条**贴侧栏左缘**
+                // （left:0，压在行的最外侧），另三套是画在行框内左缘的悬浮胶囊
+                // （left:11，行 padding 非缩进为 8）。这条差异是「贴边分栏」
+                // 与「悬浮卡片」两种骨架的直接体现，不只是配色。
                 Positioned(
-                  left: 11,
+                  left: AppTheme.of(context).style == AppStyle.winui ? 0 : 11,
                   top: 0,
                   bottom: 0,
                   child: Center(child: NavActiveBar(active: widget.active)),

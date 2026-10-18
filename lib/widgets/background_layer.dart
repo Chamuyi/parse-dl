@@ -43,6 +43,23 @@ class BackgroundLayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // WinUI3 的窗口底是 **Mica —— 不透明材质**。
+    //
+    // 微软官方文档（learn.microsoft.com/windows/apps/design/style/mica）原文：
+    //   "Mica is an **opaque**, dynamic material that incorporates theme and
+    //    desktop wallpaper to paint the background of long-lived windows …
+    //    it only samples the desktop wallpaper **once**"
+    //
+    // 也就是说：它**不是**半透明玻璃，壁纸不会被"透"上来，而是被取样一次
+    // 混进底色。所以这里既不铺用户壁纸、也不画渐变光晕 —— 只铺一层不透明底。
+    // 用户想换壁纸效果时，WinUI 语义下应由 Mica 自己随系统壁纸变化。
+    // 但**自定义色调仍然要生效**：那是用户的显式选择，不该被风格吞掉。
+    if (_styleOf(context) == AppStyle.winui && !appearance.customTint) {
+      return ColoredBox(
+        color: AppColors.solidFor(brightness, style: AppStyle.winui),
+      );
+    }
+
     final tint = _resolveTint(context);
 
     return Stack(

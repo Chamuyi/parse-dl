@@ -94,7 +94,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  for (final style in AppStyle.values) {
+  for (final style in [AppStyle.winui]) {
     for (final brightness in Brightness.values) {
       final label = '${style.name} · ${brightness.name}';
       testWidgets('$label：卡片内容真的被绘制', (tester) async {
@@ -140,7 +140,7 @@ void main() {
   });
 
   test('修复后：三套风格的卡片边框都是 uniform', () {
-    for (final style in AppStyle.values) {
+    for (final style in [AppStyle.winui]) {
       for (final brightness in Brightness.values) {
         final colors = brightness == Brightness.light
             ? AppColors.light
@@ -156,26 +156,26 @@ void main() {
     }
   });
 
-  test('顶边高光改由 StyleBorder.hasTopHighlight 表达，且只有 liquid 浅色有', () {
-    // 顶边高光（CSS `inset 0 1px 0 rgba(255,255,255,.95)`）不再进 Border，
-    // 而是由 AppCard 画成内阴影 —— 这里钉住「哪些风格需要那道高光」。
-    final liquidLight = AppStyle.liquid
-        .cardBorderOf(AppColors.light, Brightness.light);
-    expect(liquidLight.hasTopHighlight, isTrue,
-        reason: 'liquid 浅色的顶边比三边亮，需要有高光');
-
-    for (final style in AppStyle.values) {
-      for (final brightness in Brightness.values) {
-        if (style == AppStyle.liquid && brightness == Brightness.light) continue;
-        final colors = brightness == Brightness.light
-            ? AppColors.light
-            : AppColors.dark;
-        expect(
-          style.cardBorderOf(colors, brightness).hasTopHighlight,
-          isFalse,
-          reason: '${style.name} · ${brightness.name} 没有独立的顶边高光',
-        );
-      }
+  test('WinUI 卡片没有顶边高光（那是玻璃系的 inset 高光）', () {
+    // 2026-10-19：三套玻璃风格删除后，`hasTopHighlight` 只在 liquid 浅色为真；
+    // 现在只剩 WinUI —— 它在**两种明暗下都必须是 false**（靠 1px 边线分层，
+    // 不靠 inset 高光）。判据语义没放宽：仍然断言「该风格不该有高光」。
+    for (final brightness in Brightness.values) {
+      final colors =
+          brightness == Brightness.light ? AppColors.light : AppColors.dark;
+      expect(
+        AppStyle.winui.cardBorderOf(colors, brightness).hasTopHighlight,
+        isFalse,
+        reason: 'WinUI · ${brightness.name} 不该有独立的顶边高光',
+      );
     }
+
+    // 负控制：证明 hasTopHighlight 确实会为真（不是恒 false 的死判据）。
+    const withHighlight = StyleBorder(
+      top: Color(0xF2FFFFFF),
+      side: Color(0xBFFFFFFF),
+    );
+    expect(withHighlight.hasTopHighlight, isTrue,
+        reason: '若这里为 false，说明 hasTopHighlight 是恒假的，上面的断言没有意义');
   });
 }

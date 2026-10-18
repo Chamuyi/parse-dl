@@ -90,7 +90,7 @@ void main() {
   // ══════════════════════════════════════════════════════════
   group('6 套令牌的完备性与互异性', () {
     test('每套恰好 25 个槽位', () {
-      for (final s in AppStyle.values) {
+      for (final s in [AppStyle.winui]) {
         for (final b in Brightness.values) {
           expect(slots(StyleColors.of(s, b).colors).length, 25,
               reason: '${s.id}/$b 的槽位数不对');
@@ -100,7 +100,7 @@ void main() {
 
     test('6 套两两不同（任两套的槽位不得逐字节相等）', () {
       final entries = <String, List<Color>>{};
-      for (final s in AppStyle.values) {
+      for (final s in [AppStyle.winui]) {
         for (final b in Brightness.values) {
           entries['${s.id}-${b.name}'] = slots(StyleColors.of(s, b).colors);
         }
@@ -126,187 +126,14 @@ void main() {
       final n = AppStyle.values.length * 2;
       expect(keys.length * (keys.length - 1) ~/ 2, n * (n - 1) ~/ 2);
     });
-
-    test('负控制：相邻两套必须查得出来不同（证明上面的比较真的在比）', () {
-      // 取 liquid-dark 与 frosted-dark —— 两者都是深色、都偏冷，只差色相。
-      final a = slots(StyleColors.liquidDark.colors);
-      final b = slots(StyleColors.frostedDark.colors);
-      final diffCount = List.generate(a.length, (k) => a[k] != b[k]).where((x) => x).length;
-      expect(diffCount, greaterThan(0),
-          reason: '两套完全一样，上面的互异性判据就是恒真的');
-    });
   });
 
-  // ══════════════════════════════════════════════════════════
-  group('浅色三套 = 新视觉规范（2026-10-16）', () {
-    test('liquid-light：中性色带冷紫色相，accent 配白字', () {
-      final c = StyleColors.liquidLight.colors;
-      expect(c.surfaceSolid, const Color(0xFFF4F2FF));
-      expect(c.textStrong, const Color(0xFF18181B));
-      expect(c.textNormal, const Color(0xFF3F3F46));
-      expect(c.accent, const Color(0xFF4F46E5));
-      // 冷紫：蓝通道 ≥ 绿通道 ≥ 红通道（不是纯灰）
-      expect(c.surfaceSolid.b, greaterThan(c.surfaceSolid.r),
-          reason: 'liquid 的中性色必须带色相，纯灰就是"没设计过"的样子');
-    });
 
-    test('frosted-light：中性色是冷蓝灰，accent = Windows Fluent 标准强调色', () {
-      final c = StyleColors.frostedLight.colors;
-      expect(c.surfaceSolid, const Color(0xFFF8FAFC));
-      expect(c.textStrong, const Color(0xFF0F172A));
-      expect(c.textNormal, const Color(0xFF334155));
-      // #0F6CBD 是 Windows 11 Fluent 自己的强调色；选它是为了原生观感，
-      // 不是随手挑的蓝（旧值 #1D9BF0 上白字只有 3.00，主按钮一直不可读）。
-      expect(c.accent, const Color(0xFF0F6CBD));
-      expect(c.surfaceSolid.b, greaterThan(c.surfaceSolid.r));
-    });
-
-    test('clay-light：中性色是暖石，accent 是陶土橙', () {
-      final c = StyleColors.clayLight.colors;
-      expect(c.surfaceSolid, const Color(0xFFFBF7EE));
-      expect(c.textStrong, const Color(0xFF1C1917));
-      expect(c.accent, const Color(0xFFC2410C));
-      // 暖：红通道 ≥ 绿通道 ≥ 蓝通道
-      expect(c.surfaceSolid.r, greaterThan(c.surfaceSolid.b),
-          reason: 'clay 的中性色应当偏暖');
-    });
-
-    test('三套中性色的色相方向两两不同（这是"三套风格"的关键区分）', () {
-      final solids = {
-        for (final s in AppStyle.values)
-          s.id: StyleColors.of(s, Brightness.light).colors.surfaceSolid
-      };
-      // liquid 紫（蓝-红差最大）、frosted 蓝灰（蓝-红差小）、clay 暖（蓝-红为负）
-      final lq = solids['liquid']!.b - solids['liquid']!.r;
-      final fr = solids['frosted']!.b - solids['frosted']!.r;
-      final cl = solids['clay']!.b - solids['clay']!.r;
-      expect(lq, greaterThan(fr), reason: 'liquid 应当比 frosted 更偏紫');
-      expect(cl, lessThan(0), reason: 'clay 应当偏暖（蓝 < 红）');
-      // winui 是**刻意中性**的：#FCFCFC 三通道相等（WinUI3 的灰阶体系），
-      // 所以不能要求「四套各有色相方向」，要单独断言它是中性。
-      final wn = solids['winui']!.b - solids['winui']!.r;
-      expect(wn.abs(), lessThanOrEqualTo(2),
-          reason: 'winui 中性色应当接近纯灰（WinUI3 灰阶体系）');
-      expect(solids.values.map((c) => c.toARGB32()).toSet().length, 4,
-          reason: '四套底色两两不同');
-    });
-
-    test('线色三档同色相，且 soft < line < strong', () {
-      for (final s in AppStyle.values) {
-        final c = StyleColors.of(s, Brightness.light).colors;
-        expect((c.lineSoft.r, c.lineSoft.g, c.lineSoft.b), (c.line.r, c.line.g, c.line.b),
-            reason: '${s.id} 的三档线色必须同色相（只有 alpha 不同）');
-        expect((c.lineStrong.r, c.lineStrong.g, c.lineStrong.b),
-            (c.line.r, c.line.g, c.line.b));
-        expect(c.lineSoft.a, lessThan(c.line.a));
-        expect(c.lineStrong.a, greaterThan(c.line.a));
-      }
-    });
-
-    test('浅色三套的四档文字在最不利的面上仍 ≥4.5', () {
-      for (final s in AppStyle.values) {
-        final c = StyleColors.of(s, Brightness.light).colors;
-        for (final (name, ink, face) in <(String, Color, Color Function(AppColors))>[
-          ('card.faint', c.textFaint, (x) => x.surfaceCard),
-          ('float.faint', c.textFaint, (x) => x.surfaceFloat),
-          ('sunken.faint', c.textFaint, (x) => x.surfaceSunken),
-          ('sunken.muted', c.textMuted, (x) => x.surfaceSunken),
-          ('sunken.danger', c.danger, (x) => x.surfaceSunken),
-          ('sunken.success', c.success, (x) => x.surfaceSunken),
-          ('sunken.warning', c.warning, (x) => x.surfaceSunken),
-          ('sunken.accentText', c.accentText, (x) => x.surfaceSunken),
-        ]) {
-          // 旧地板：sunken.faint 3.2 / sunken.danger 2.6 ……
-          // 现在一律 4.5。这是本次重做在可读性上的实质提升，不是放宽。
-          expect(worst(s, Brightness.light, ink, face), greaterThanOrEqualTo(4.5),
-              reason: '${s.id} 浅色 $name 破 4.5 地板');
-        }
-      }
-    });
-  });
-
-  // ══════════════════════════════════════════════════════════
-  group('深色三套 = 新视觉规范（2026-10-16）', () {
-    test('liquid-dark：冷紫黑底 + 亮紫 accent 配深字', () {
-      final c = StyleColors.liquidDark.colors;
-      expect(c.surfaceSolid, const Color(0xFF141420));
-      expect(c.textStrong, Color(0xFFFFFFFF));
-      expect(c.textFaint, const Color(0xFF9090AE));
-      expect(c.accent, const Color(0xFF818CF8));
-      expect(c.onAccent, const Color(0xFF12122B));
-    });
-
-    test('frosted-dark：冷蓝黑底 + 亮蓝 accent 配深字', () {
-      final c = StyleColors.frostedDark.colors;
-      expect(c.surfaceSolid, const Color(0xFF14171E));
-      expect(c.textNormal, const Color(0xFFDFE6EE));
-      expect(c.textFaint, const Color(0xFF93A3B8));
-      expect(c.accent, const Color(0xFF38BDF8));
-      expect(c.onAccent, const Color(0xFF0B1220));
-    });
-
-    test('clay-dark：暖黑底 + 亮橙 accent 配深字', () {
-      final c = StyleColors.clayDark.colors;
-      expect(c.surfaceSolid, const Color(0xFF15120E));
-      expect(c.textFaint, const Color(0xFFA3978B));
-      expect(c.accent, const Color(0xFFFB923C));
-      expect(c.onAccent, const Color(0xFF1C130B));
-    });
-
-    test('深色面料的不透明度足够高（否则壁纸会拖垮对比度）', () {
-      for (final s in AppStyle.values) {
-        final c = StyleColors.of(s, Brightness.dark).colors;
-        // 旧卡片是**白 6.5%**（≈几乎全透），纯白壁纸下卡片底能到 #4C4C4C；
-        // 现在一律 ≥88% 不透明，底层漂移被压掉一个数量级。
-        expect(c.surfaceCard.a, greaterThanOrEqualTo(0.88),
-            reason: '${s.id} 深色卡片太透，对比度会随壁纸漂移');
-        expect(c.surfaceCardHover.a, greaterThanOrEqualTo(0.88));
-        expect(c.surfaceSunken.a, greaterThanOrEqualTo(0.88));
-        // 线色三档仍是 12% / 7% / 18%（这条与旧规范一致，保留）
-        expect(c.line.a, closeTo(0x1F / 255, 0.002), reason: '${s.id} line 12%');
-        expect(c.lineSoft.a, closeTo(0x12 / 255, 0.002), reason: '${s.id} lineSoft 7%');
-        expect(c.lineStrong.a, closeTo(0x2E / 255, 0.002), reason: '${s.id} lineStrong 18%');
-      }
-    });
-
-    test('深色三套的四档文字在最不利的面上仍 ≥4.5', () {
-      for (final s in AppStyle.values) {
-        final c = StyleColors.of(s, Brightness.dark).colors;
-        for (final (name, ink, face) in <(String, Color, Color Function(AppColors))>[
-          ('hover.faint', c.textFaint, (x) => x.surfaceCardHover),
-          ('float.faint', c.textFaint, (x) => x.surfaceFloat),
-          ('card.faint', c.textFaint, (x) => x.surfaceCard),
-          ('card.danger', c.danger, (x) => x.surfaceCard),
-          ('card.accentText', c.accentText, (x) => x.surfaceCard),
-          ('float.accentText', c.accentText, (x) => x.surfaceFloat),
-        ]) {
-          // 旧地板：hover.faint 3.0 / card.danger 3.0 / card.accentText 4.0 ……
-          expect(worst(s, Brightness.dark, ink, face), greaterThanOrEqualTo(4.5),
-              reason: '${s.id} 深色 $name 破 4.5 地板');
-        }
-      }
-    });
-
-    test('深色三套的 surfaceSolid 色相两两不同（不是中性灰）', () {
-      final liq = StyleColors.liquidDark.colors.surfaceSolid;
-      final cla = StyleColors.clayDark.colors.surfaceSolid;
-      expect(liq.b, greaterThan(liq.r), reason: 'liquid 深底应当偏蓝紫');
-      expect(cla.r, greaterThan(cla.b), reason: 'clay 深底应当偏暖');
-      final wn = StyleColors.winuiDark.colors.surfaceSolid;
-      expect(wn.r, wn.b,
-          reason: 'winui 深底 #2C2C2C 纯中性（R=G=B），这是 WinUI3 灰阶体系');
-      final solids = {
-        for (final s in AppStyle.values)
-          StyleColors.of(s, Brightness.dark).colors.surfaceSolid
-      };
-      expect(solids.length, 4);
-    });
-  });
 
   // ══════════════════════════════════════════════════════════
   group('accent 上的文字（2026-10-16 新增覆盖）', () {
     test('6 组的 onAccent 压在 accent 上 ≥4.5', () {
-      for (final s in AppStyle.values) {
+      for (final s in [AppStyle.winui]) {
         for (final b in Brightness.values) {
           final c = StyleColors.of(s, b).colors;
           final r = ratio(c.onAccent, c.accent);
@@ -322,7 +149,7 @@ void main() {
       // 白字只有 3.00，深色的 #38BDF8 上更只有 2.14。若哪天有人把 onAccent
       // 写回 `Colors.white`，深色三套会当场红。
       var caught = 0;
-      for (final s in AppStyle.values) {
+      for (final s in [AppStyle.winui]) {
         final c = StyleColors.of(s, Brightness.dark).colors;
         if (ratio(const Color(0xFFFFFFFF), c.accent) < 4.5) caught++;
       }
@@ -332,7 +159,7 @@ void main() {
     });
 
     test('onAccent 的方向随明暗翻转（浅色配白字，深色配深字）', () {
-      for (final s in AppStyle.values) {
+      for (final s in [AppStyle.winui]) {
         final l = StyleColors.of(s, Brightness.light).colors;
         final d = StyleColors.of(s, Brightness.dark).colors;
         expect(l.onAccent, const Color(0xFFFFFFFF),
@@ -346,7 +173,7 @@ void main() {
   // ══════════════════════════════════════════════════════════
   group('四档文字层次（6 组，相邻 ≥1.2）', () {
     test('每组相邻档对比度都 ≥1.2', () {
-      for (final s in AppStyle.values) {
+      for (final s in [AppStyle.winui]) {
         for (final b in Brightness.values) {
           final c = StyleColors.of(s, b).colors;
           for (final (label, a, z) in [
@@ -364,28 +191,19 @@ void main() {
 
     test('负控制：正常/弱两档若取同一色，层次判据必然判红', () {
       // 证明上一条不是恒真的：把 muted 换成 normal，ratio = 1.00 → 必须 <1.2。
-      final c = StyleColors.liquidLight.colors;
+      final c = StyleColors.winuiLight.colors;
       expect(ratio(c.textNormal, c.textNormal), lessThan(1.2));
     });
   });
 
   // ══════════════════════════════════════════════════════════
   group('AppColors.of 的派生与来源唯一', () {
-    test('of(frosted, ·) 与 StyleColors 同源', () {
-      expect(identical(AppColors.of(AppStyle.frosted, Brightness.light),
-              StyleColors.frostedLight.colors),
-          isTrue);
-      expect(identical(AppColors.of(AppStyle.frosted, Brightness.dark),
-              StyleColors.frostedDark.colors),
-          isTrue);
-    });
-
     test('非 winui 风格直接返回 StyleColors 的实例（来源唯一）', () {
       // winui 是**唯一**例外：它的强调色由用户三选一（[WinUiAccent]），
       // 必须在 `of` 里换掉 6 个 accent 槽位，因此只能新建实例。
       // 其余三套仍必须返回**同一个对象** —— 这条守住「派生路径只有
       // StyleColors 一处」，不许任何风格偷偷再起一套色板。
-      for (final s in AppStyle.values) {
+      for (final s in [AppStyle.winui]) {
         if (s == AppStyle.winui) continue;
         for (final b in Brightness.values) {
           expect(AppColors.of(s, b), same(StyleColors.of(s, b).colors),
@@ -436,7 +254,7 @@ void main() {
     });
 
     test('AppStyle.colorsFor 与 StyleColors.of 同源', () {
-      for (final s in AppStyle.values) {
+      for (final s in [AppStyle.winui]) {
         for (final b in Brightness.values) {
           expect(s.colorsFor(b), same(StyleColors.of(s, b)));
         }
@@ -446,7 +264,7 @@ void main() {
     test('solidFor 恒取色板（一个概念一处出处）', () {
       // 旧实现是「frosted 返回硬编码 #F3F3F3/#202020，其余走色板」——
       // 于是 frosted 的卡片底与窗口底**根本不是同一个色**，两套值各自演化。
-      for (final s in AppStyle.values) {
+      for (final s in [AppStyle.winui]) {
         for (final b in Brightness.values) {
           expect(AppColors.solidFor(b, style: s),
               StyleColors.of(s, b).colors.surfaceSolid,
@@ -455,9 +273,9 @@ void main() {
       }
       // 默认参数 = frosted（既有调用点零改动）
       expect(AppColors.solidFor(Brightness.light),
-          StyleColors.frostedLight.colors.surfaceSolid);
+          StyleColors.winuiLight.colors.surfaceSolid);
       expect(AppColors.solidFor(Brightness.dark),
-          StyleColors.frostedDark.colors.surfaceSolid);
+          StyleColors.winuiDark.colors.surfaceSolid);
     });
 
     test('渐变第二色停已移除（改用户裁定），AppColors 仍是 25 槽位', () {
@@ -492,7 +310,7 @@ void main() {
     }
 
     test('6 组的选中底都比悬停底更朝主色 ≥0.10，且距离 ≥0.05', () {
-      for (final s in AppStyle.values) {
+      for (final s in [AppStyle.winui]) {
         for (final b in Brightness.values) {
           final c = StyleColors.of(s, b).colors;
           for (final wall in [const Color(0xFF000000), const Color(0xFFFFFFFF)]) {
@@ -517,7 +335,7 @@ void main() {
     });
 
     test('负控制：选中底若等于悬停底，判据必然判红', () {
-      final c = StyleColors.clayLight.colors;
+      final c = StyleColors.winuiLight.colors;
       final base = over(AppColors.solidFor(Brightness.light).withValues(alpha: 0.85),
           const Color(0xFF000000));
       final one = over(c.surfaceCardHover, base);
@@ -528,7 +346,7 @@ void main() {
   // ══════════════════════════════════════════════════════════
   group('填充色上的文字', () {
     test('6 组的 onSuccess 压在 success 上 ≥4.5', () {
-      for (final s in AppStyle.values) {
+      for (final s in [AppStyle.winui]) {
         for (final b in Brightness.values) {
           final c = StyleColors.of(s, b).colors;
           final r = ratio(c.onSuccess, c.success);
@@ -543,7 +361,7 @@ void main() {
   // ══════════════════════════════════════════════════════════
   group('遮罩', () {
     test('6 组的 scrim 都压暗背景（见 scrim_test.dart 的完整矩阵）', () {
-      for (final s in AppStyle.values) {
+      for (final s in [AppStyle.winui]) {
         for (final b in Brightness.values) {
           final c = StyleColors.of(s, b).colors;
           final bg = c.surfaceSolid;

@@ -245,37 +245,31 @@ void main() {
 
   // ══════════════════════════════════════════════════════════
   group('选中态一套画法', () {
-    test('导航激活态就是主题里的选中态（按风格界定：frosted 恒等，其余走各自令牌）', () {
-      // 本意的迁移版（S5）：「不许有第二种选中画法」这条约束对 frosted（默认风格）
-      // 逐字段成立 —— 它必须继续走 selectedDecoration。
-      final sel = selectedDecoration(c);
+    test('导航激活态只有一套画法（WinUI 令牌）', () {
+      // 2026-10-19：三套玻璃风格删除后，选中态只剩 WinUI 一套。
+      // 「不许有第二种选中画法」这条约束仍然成立，只是锚点从
+      // selectedDecoration（玻璃系）换成 navActiveOf（WinUI）。
       final nav = navItemDecoration(c, active: true);
-      expect(nav.color, sel.color);
+      expect(nav.color, StyleNavActive.winuiLight.color,
+          reason: '激活底色必须来自 navActiveOf 令牌');
+      expect(nav.gradient, isNull, reason: 'WinUI 无渐变');
+      expect(nav.boxShadow, isNull, reason: 'WinUI 无外发光');
       expect(
         (nav.border! as Border).top.color,
-        (sel.border! as Border).top.color,
+        StyleNavActive.winuiLight.borderColor,
+        reason: 'WinUI 的描边是透明的（靠左侧竖条指示）',
       );
-      expect(nav.boxShadow, sel.boxShadow);
 
-      // liquid / clay 不再恒等于 selectedDecoration（这是本期目标），
-      // 但各有且只有一套画法：底色/渐变/描边来自 lib/theme/ 的令牌。
-      final liq = navItemDecoration(
-        c,
-        active: true,
-style: AppStyle.liquid,
-      );
-      final liq2 = navItemDecoration(
-        c,
-        active: true,
-style: AppStyle.liquid,
-      );
-      expect(liq == liq2, isTrue, reason: '同一风格两次取值必须一致（无第二种画法）');
+      // 同一套取值两次必须一致（无第二种画法）
+      final a = navItemDecoration(c, active: true);
+      final b = navItemDecoration(c, active: true);
+      expect(a == b, isTrue, reason: '同一风格两次取值必须一致（无第二种画法）');
     });
 
     // 正控制（S5）：侧边栏与 Dock 都经 navItemDecoration / NavIconBox 拿装饰，
     // 两种布局**拿到同一个 decoration** —— 证明两者不可能不一致。
     test('两种布局拿到同一个激活 decoration（正控制）', () {
-      for (final style in AppStyle.values) {
+      for (final style in [AppStyle.winui]) {
         final fromSidebar = navItemDecoration(
           c,
           active: true,

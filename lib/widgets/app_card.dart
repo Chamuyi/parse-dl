@@ -62,10 +62,26 @@ class AppCard extends StatelessWidget {
     final style = t.style;
     final brightness = t.brightness;
 
+    // WinUI3 的卡片依据**微软官方 Acrylic 文档**（learn.microsoft.com/
+    // windows/apps/design/style/acrylic）：
+    //
+    //   "Avoid **layering multiple acrylic surfaces**: multiple layers of
+    //    background acrylic can create distracting optical illusions."
+    //   "Use background acrylic for **transient** UI elements."
+    //
+    // 即：**卡片不能用 Acrylic**（它就是被明确禁止的"多层叠加"），
+    // Acrylic 只留给浮层/菜单。卡片按官方 Layering and Elevation 的做法：
+    // **实色面 + 1px 边线 + 4/8px 圆角**，靠边线与色差分层。
+    //
+    // 所以这里：blur 强制 0（不套 BackdropFilter）、圆角回到官方 4/8px、
+    // 底色取**不透明**的 surfaceCard。
+    final winui = style == AppStyle.winui;
     final r = style.radiusOf(radius);
-    final b = blur ?? s.blur;
-    final baseColor =
-        overrideColor ?? s.resolveCardColor(c.surfaceCard, c.surfaceSolid);
+    final b = winui ? 0.0 : (blur ?? s.blur);
+    final baseColor = overrideColor ??
+        (winui
+            ? c.surfaceCard
+            : s.resolveCardColor(c.surfaceCard, c.surfaceSolid));
     final cardColor =
         hovered ? Color.alphaBlend(style.hoverColor(brightness), baseColor) : baseColor;
 
@@ -75,9 +91,12 @@ class AppCard extends StatelessWidget {
     // 颜色的 `Border` 会让 `isUniform=false`，带圆角时子内容整片消失）。
     // [glow] 仍能把三边换成强调色描边（老调用点的语义）。
     final rim = style.cardBorderOf(c, brightness);
-    final border = glow
-        ? Border.all(color: c.accentLine, width: 1)
-        : rim.toBorder();
+    // WinUI 的卡片**必须**有 1px 边线：它不靠投影、不靠圆角，全靠这条线
+    // 把卡片从内容区底上勾出来。2026-10-19 一度去掉它，结果卡片与内容区
+    // 同色、整屏一片死灰 —— 用户当场判「不对」。边线是 WinUI 分层的本体。
+    final border = winui
+        ? Border.all(color: c.line, width: 1)
+        : (glow ? Border.all(color: c.accentLine, width: 1) : rim.toBorder());
 
     // 顶边 1px 高光：内阴影（`inset 0 1px 0`）在 Flutter 里没有直接对应物，
     // 用「紧贴顶边、只向下扩散 1px 的浅色内描边」近似 —— 画在内容**下面**，
@@ -106,7 +125,9 @@ class AppCard extends StatelessWidget {
             : null,
         borderRadius: BorderRadius.circular(r),
         border: border,
-        boxShadow: [...topHighlight, ...style.cardShadows(brightness)],
+        boxShadow: winui
+            ? null
+            : [...topHighlight, ...style.cardShadows(brightness)],
       ),
       child: child,
     );
@@ -141,7 +162,35 @@ class AppFloat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = AppTheme.colorsOf(context);
+    final th = AppTheme.of(context);
+    final c = th.colors;
+    // WinUI3：浮层也**不叠第二层亚克力** —— 官方原文
+    // "Avoid layering multiple acrylic surfaces … can create distracting
+    //  optical illusions"。窗口底已经是 Mica（一层），浮层再用 Acrylic 就是
+    // 第二层。官方做法是实色浮层 + 8px 圆角 + 极淡投影。
+    final winui = th.style == AppStyle.winui;
+    final r = winui ? 8.0 : radius;
+
+    if (winui) {
+      return Container(
+        padding: padding,
+        decoration: BoxDecoration(
+          color: c.surfaceFloat,
+          borderRadius: BorderRadius.circular(r),
+          border: Border.all(color: c.line, width: 1),
+          // 投影取色板的 scrim（近黑）而不是写死色值 —— 色板棘轮盯着
+          // lib/theme/ 之外的十六进制颜色字面量。
+          boxShadow: [
+            BoxShadow(
+              color: c.scrim.withValues(alpha: 0.30),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: child,
+      );
+    }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),

@@ -110,9 +110,12 @@ void main() {
     );
 
     expect(got, isNull, reason: '还没点，不该有回调');
-    await tester.tap(find.byType(Switch));
+    // 2026-10-19：WinUI3 的开关是**自绘的 40x20 轨道**，不是 Material 的
+    // Switch（后者 52x32，比例对不上）。所以这里改为点整行 —— 整行热区
+    // 本来就在父级 InkWell 上（点文字也能切），语义没变，只是定位方式换了。
+    await tester.tap(find.text('自动更新'));
     await tester.pump();
-    expect(got, isTrue);
+    expect(got, isTrue, reason: '点文字也必须能切换（整行热区）');
   });
 
   // ── OptGrid ─────────────────────────────────────────────────────────────

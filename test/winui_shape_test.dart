@@ -78,18 +78,17 @@ void main() {
   });
 
   group('风格 → 形态的分流', () {
-    test('winui 取 WinUI 形态，另三套取 legacy', () {
+    test('只有 winui 一套形态（另三套已于 2026-10-19 删除）', () {
       expect(AppStyle.winui.shapeOf(), same(StyleShape.winui));
-      for (final s in [AppStyle.liquid, AppStyle.frosted, AppStyle.clay]) {
-        expect(s.shapeOf(), same(StyleShape.legacy),
-            reason: '${s.id} 不该有独立的形态令牌（一次只做一个风格）');
-      }
+      // 风格枚举只剩一个值 —— 这条同时守住「别再把别的风格加回来」。
+      expect(AppStyle.values, hasLength(1));
+      expect(AppStyle.values.single, AppStyle.winui);
     });
 
     test('负控制：把 winui 映射错成 legacy，上面的断言必然红', () {
       // 手动模拟「分流写错」的情形，证明判据不是恒真。
       final wrong = <AppStyle, StyleShape>{
-        for (final s in AppStyle.values) s: StyleShape.legacy,
+        for (final s in [AppStyle.winui]) s: StyleShape.legacy,
       };
       expect(identical(wrong[AppStyle.winui], StyleShape.winui), isFalse,
           reason: '若这里为真，说明分流判据无法区分对错');
@@ -100,7 +99,7 @@ void main() {
     testWidgets('同一段卡片内容，winui 与 frosted 的渲染像素不同', (tester) async {
       // 只比令牌不画面，等于把「判据」写成「常量表自证」。这里真的渲染一遍：
       // 同一个 AppCard 在两种风格下的像素必须可测地不同。
-      Future<List<int>> paint(AppStyle style) async {
+      Future<List<int>> paint(AppStyle style, {StyleShape? shape}) async {
         await tester.pumpWidget(
           MaterialApp(
             home: Theme(
@@ -109,15 +108,15 @@ void main() {
                 builder: (context) {
                   // 直接构造色板与材质，避开 AppTheme 依赖 settings 的链路
                   final c = AppColors.of(style, Brightness.dark);
-                  final shape = style.shapeOf();
+                  final sh = shape ?? style.shapeOf();
                   return Center(
                     child: Container(
                       width: 200,
                       height: 60,
                       decoration: BoxDecoration(
                         color: c.surfaceSolid,
-                        borderRadius: BorderRadius.circular(shape.optCellRadius),
-                        border: shape.optCellBordered
+                        borderRadius: BorderRadius.circular(sh.optCellRadius),
+                        border: sh.optCellBordered
                             ? Border.all(color: c.line, width: 1)
                             : null,
                       ),
@@ -145,15 +144,18 @@ void main() {
         return data.buffer.asUint8List().toList();
       }
 
+      // 2026-10-19：三套风格已删除，原先「winui vs frosted 像素不同」的比较
+      // 失去对象。换锚为**形态令牌**的比较：winui 形态与 legacy 形态渲染出的
+      // 像素必须可测地不同 —— 这仍然是「形态差异在渲染层真的可见」的证明。
       final a = await paint(AppStyle.winui);
-      final b = await paint(AppStyle.frosted);
+      final b = await paint(AppStyle.winui, shape: StyleShape.legacy);
       expect(a.length, b.length);
       var diff = 0;
       for (var i = 0; i < a.length; i++) {
         if (a[i] != b[i]) diff++;
       }
       expect(diff, greaterThan(0),
-          reason: 'winui 与 frosted 的卡片渲染必须逐像素可测地不同');
+          reason: 'winui 形态与 legacy 形态的卡片渲染必须逐像素可测地不同');
     });
   });
 }

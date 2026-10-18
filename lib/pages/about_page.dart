@@ -7,6 +7,7 @@ import '../l10n/l10n.dart';
 import '../widgets/app_toast.dart';
 import '../services/app_paths.dart';
 import '../services/webview2_version.dart';
+import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
 import '../widgets/page_header.dart';
@@ -42,7 +43,14 @@ class AboutPage extends StatelessWidget {
     final c = AppTheme.colorsOf(context);
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(0, 16, 0, 16),
+      // WinUI：页面上留白 8（标题贴近顶部）、底部 24（滚动余量更足）。
+      // 另三套保持 16/16。
+      padding: EdgeInsets.fromLTRB(
+        0,
+        AppTheme.of(context).style == AppStyle.winui ? 8 : 16,
+        0,
+        AppTheme.of(context).style == AppStyle.winui ? 24 : 16,
+      ),
       children: [
         // 页头：共享 [PageHeader]（预览稿 `.head h1 .sub`）。这一页原本
         // 没有页头，标识区自己就是「Logo + 大标题」，现在按预览稿 `about`

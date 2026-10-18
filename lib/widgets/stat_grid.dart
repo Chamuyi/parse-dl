@@ -48,10 +48,12 @@ class StatGrid extends StatelessWidget {
       // 同一处问题）。原来 `childAspectRatio: 2.0` 按栏宽算高度：整页宽
       // （约 980px）下每格 245，高 122 —— 比内容（k 行 16 + 5 + 数字行 26 +
       // 3 + sub 行 14 + 上下 padding 26 ≈ 90）高出 30 多像素，四格显得空。
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 4,
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
+        // WinUI 的格子间距略大（12 vs 10）：它的分层靠留白，不靠圆角与投影，
+        // 间距太小会让四格糊成一片。
+        mainAxisSpacing: AppTheme.of(context).style == AppStyle.winui ? 12 : 10,
+        crossAxisSpacing: AppTheme.of(context).style == AppStyle.winui ? 12 : 10,
         // 内容实测约 93px（含 sub 小注那格：k 行 16 + 5 + 数字行 26 + 3 +
         // sub 行 14 + 上下 padding 26 = 90，加上文字行高取整到 93）；
         // 给 96 留 3px 余量。曾按 92 设过，实测溢出 1px（判据当场报红）。

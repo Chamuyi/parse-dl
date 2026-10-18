@@ -304,11 +304,14 @@ void main() {
         matching: find.byType(SwitchRow),
       );
       expect(sw, findsOneWidget);
-      expect(tester.widget<Switch>(find.descendant(of: sw, matching: find.byType(Switch))).value, isTrue);
+      // 2026-10-19：WinUI3 的开关是自绘 40x20 轨道，不再是 Material 的
+      // Switch。定位方式从「找 Switch 的 value」换成「读 SwitchRow 的 value」
+      // —— 判据本身没放宽：仍然断言初值为真。
+      expect(tester.widget<SwitchRow>(sw).value, isTrue);
 
       await tester.tap(find.text('启用保存文件夹'));
       await tester.pumpAndSettle();
-      expect(tester.widget<Switch>(find.descendant(of: sw, matching: find.byType(Switch))).value, isFalse);
+      expect(tester.widget<SwitchRow>(sw).value, isFalse);
     });
 
     testWidgets('启用模版下拉默认停在「按作者分文件夹」', (tester) async {

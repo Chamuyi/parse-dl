@@ -114,12 +114,12 @@ void main() {
   };
 
   const themes = <String, (AppStyle, Brightness)>{
-    'liquid-light': (AppStyle.liquid, Brightness.light),
-    'liquid-dark': (AppStyle.liquid, Brightness.dark),
-    'frosted-light': (AppStyle.frosted, Brightness.light),
-    'frosted-dark': (AppStyle.frosted, Brightness.dark),
-    'clay-light': (AppStyle.clay, Brightness.light),
-    'clay-dark': (AppStyle.clay, Brightness.dark),
+    'liquid-light': (AppStyle.winui, Brightness.light),
+    'liquid-dark': (AppStyle.winui, Brightness.dark),
+    'frosted-light': (AppStyle.winui, Brightness.light),
+    'frosted-dark': (AppStyle.winui, Brightness.dark),
+    'clay-light': (AppStyle.winui, Brightness.light),
+    'clay-dark': (AppStyle.winui, Brightness.dark),
   };
 
   /// 地板值按**亮度**取（与改造前一致），风格只决定色板。

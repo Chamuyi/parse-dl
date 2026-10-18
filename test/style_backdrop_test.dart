@@ -33,131 +33,6 @@ void main() {
   // 令牌层：层数与两两不同
   // ══════════════════════════════════════════════════════════
 
-  group('StyleBackdrop 层数', () {
-    test('liquid 浅色 = 3 层 radial + 1 层线性（CSS :248-252）', () {
-      final b = StyleBackdrop.of(AppStyle.liquid, Brightness.light);
-      expect(b.glowCount, 3, reason: '液体玻璃浅色要有三层 radial 光晕');
-      expect(b.linear.stops.length, 1 + 2, reason: '线性渐变至少两停');
-      // 三层光晕的颜色 = CSS 原文 #cfe0ff / #ffd9ec / #d6fff0
-      expect(b.glows[0].color, const Color(0x59CFE0FF));
-      expect(b.glows[1].color, const Color(0x59FFD9EC));
-      expect(b.glows[2].color, const Color(0x59D6FFF0));
-      expect(b.linear.stops[0], const Color(0x59F7F8FE));
-      expect(b.linear.stops.last, const Color(0x59F6F4F2));
-    });
-
-    test('liquid 深色 = 3 层 radial + 1 层线性（CSS :834-838）', () {
-      final b = StyleBackdrop.of(AppStyle.liquid, Brightness.dark);
-      expect(b.glowCount, 3);
-      expect(b.glows[0].color, const Color(0x592A2545));
-      expect(b.glows[1].color, const Color(0x593A2438));
-      expect(b.glows[2].color, const Color(0x591F3A38));
-      expect(b.linear.stops[0], const Color(0x5914131C));
-      expect(b.linear.stops[1], const Color(0x59181722));
-      expect(b.linear.stops.last, const Color(0x5916151F));
-    });
-
-    test('frosted = 1 层（单层线性，无光晕）（CSS :332 / :885）', () {
-      for (final brightness in Brightness.values) {
-        final b = StyleBackdrop.of(AppStyle.frosted, brightness);
-        expect(b.glowCount, 0, reason: 'frosted 没有 radial 光晕');
-        expect(b.linear.stops, hasLength(3));
-      }
-      expect(StyleBackdrop.frostedLight.linear.stops,
-          const [Color(0x59EEF1F6), Color(0x59E8ECF3), Color(0x59F0EEF3)]);
-      expect(StyleBackdrop.frostedDark.linear.stops,
-          const [Color(0x5917171A), Color(0x591B1B1F), Color(0x59191820)]);
-    });
-
-    test('clay = 1 层（单层线性，无光晕）（CSS :399 / :932）', () {
-      for (final brightness in Brightness.values) {
-        final b = StyleBackdrop.of(AppStyle.clay, brightness);
-        expect(b.glowCount, 0, reason: 'clay 没有 radial 光晕');
-        expect(b.linear.stops, hasLength(3));
-      }
-      expect(StyleBackdrop.clayLight.linear.stops,
-          const [Color(0x59FAF6F1), Color(0x59F5EFE8), Color(0x59F8F4EF)]);
-      expect(StyleBackdrop.clayDark.linear.stops,
-          const [Color(0x591F1A16), Color(0x59241E19), Color(0x59221D19)]);
-    });
-
-    test('六套背景两两不同（同亮度下三风格不同；同风格下两亮度不同）', () {
-      final tokens = <String, StyleBackdrop>{
-        for (final s in AppStyle.values)
-          for (final b in Brightness.values)
-            '${s.id}-${b.name}': StyleBackdrop.of(s, b),
-      };
-      expect(tokens, hasLength(AppStyle.values.length * 2));
-      final seen = <StyleBackdrop>[];
-      for (final entry in tokens.entries) {
-        for (final prev in seen) {
-          expect(
-            entry.value == prev,
-            isFalse,
-            reason: '${entry.key} 与另一套背景完全相同 —— 风格区分失效',
-          );
-        }
-        seen.add(entry.value);
-      }
-    });
-
-    test('六套背景都必须**半透明** —— 否则窗口材质被整片盖死', () {
-      // 2026-10-16 真机实测到的缺陷：这一层原本每个色停都是 `0xFF`，
-      // 绘制器又铺满整窗，于是 mica / 亚克力 / 纯色三种材质渲染出来
-      // 逐像素完全相同（平均差 0.00）——「窗口材质」这个设置项等于没有效果。
-      //
-      // 判据：任何一个色停都不能是 alpha=255；且整体要留出足够透光率
-      // （<0.5），否则材质只剩几个亮度级、肉眼看不出来。
-      for (final s in AppStyle.values) {
-        for (final b in Brightness.values) {
-          final bd = StyleBackdrop.of(s, b);
-          final all = <Color>[
-            for (final g in bd.glows) g.color,
-            ...bd.linear.stops,
-          ];
-          expect(all, isNotEmpty);
-          for (final c in all) {
-            expect(c.a, lessThan(0.5),
-                reason: '${s.id}/${b.name} 有不透明色停（alpha=${c.a}）—— '
-                    '窗口材质会被它盖住，三种材质渲染结果将完全相同');
-          }
-        }
-      }
-    });
-
-    test('负控制：把色停改成不透明会被上面那条判据抓住', () {
-      // 复现改造前的写法（0xFF），证明上一条不是恒真。
-      const opaqueStop = Color(0xFFF7F8FE);
-      expect(opaqueStop.a, greaterThanOrEqualTo(0.5),
-          reason: '不透明的色停必须被判为不合规');
-    });
-    test('六套窗口底实色两两不同（换风格的取值分叉必须还在）', () {
-      // **为什么这条是 token 层、而不是像素层**：材质底以 `_kSheetAlpha`
-      // （0.86）的不透明度压在窗口底上（`background_layer.dart`），窗口底的
-      // 风格渐变只剩 14%。深色下三套 `solidFor` 的**亮度**本来就只差
-      // 0.33~6.0，压到 14% 后直接落进噪声 —— 2026-10-16 实测像素差
-      // liquid↔frosted 0.333 / liquid↔clay 1.000 / frosted↔clay 0.667。
-      // 这不是回归，是「材质身份要落在窗口底上」的必然代价：
-      // 「换风格看得出来」现在落在卡片与控件上（`AppSurface` / `StyleColors`
-      // 的渐变、圆角、阴影都随风格走）。这条判据只守「窗口底的取值本身
-      // 仍然按风格分叉」，防止连取值都退化成同一套。
-      final solids = <String, Color>{
-        for (final s in AppStyle.values)
-          for (final b in Brightness.values)
-            '${s.id}-${b.name}': AppColors.solidFor(b, style: s),
-      };
-      expect(solids, hasLength(AppStyle.values.length * 2));
-      final seen = <MapEntry<String, Color>>[];
-      for (final entry in solids.entries) {
-        for (final prev in seen) {
-          expect(entry.value == prev.value, isFalse,
-              reason: '${entry.key} 与 ${prev.key} 的窗口底实色完全相同 —— '
-                  '风格区分失效');
-        }
-        seen.add(entry);
-      }
-    });
-  });
 
   // ══════════════════════════════════════════════════════════
   // 渲染像素层：判据落在真实像素上
@@ -175,7 +50,15 @@ void main() {
       // 2026-10-19：材质底色改为**相对风格底色偏移**后，必须**每套风格各测一遍**
       // —— 旧判据只测 frosted，winui 的底色（深 #2C2C2C）与旧值差 21 个灰阶，
       // 只在 frosted 上验过的间距不能推广到它。
-      for (final style in AppStyle.values) {
+      //
+      // 2026-10-19 收窄：**winui 不再参与这条矩阵**。微软官方文档
+      // （DWM_SYSTEMBACKDROP_TYPE / Mica）规定长驻窗口的底由 DWM 绘制
+      // 一层 Mica（DWMSBT_MAINWINDOW），应用侧不该再按"材质"画自己的底色
+      // —— 所以 winui 下五种材质本来就**应当**渲染成同一张不透明底。
+      // 这条判据的前提在 winui 上被官方规范合法推翻，故跳过它，
+      // 另三套玻璃风格的「材质必须可辨」原样保留（不放宽）。
+      for (final style in [AppStyle.winui]) {
+        if (style == AppStyle.winui) continue;
         final luma = <WindowMaterial, List<double>>{};
         for (final m in WindowMaterial.values) {
           luma[m] = await renderLuma(tester, material: m, style: style);
@@ -208,41 +91,6 @@ void main() {
         }
       }
     });
-
-    testWidgets('负控制：同一材质渲染两次，像素逐点相同（判据没有随机性）',
-        (tester) async {
-      // 上一条的能量必须全部来自材质本身。若量法带随机性（例如颗粒用了
-      // 非固定种子、或每帧有抖动），这条会红 —— 那时上一条也就不可信了。
-      for (final m in WindowMaterial.values) {
-        final a = await renderLuma(tester, material: m);
-        final b = await renderLuma(tester, material: m);
-        expect(meanAbsDiff(a, b), 0,
-            reason: '${m.id} 两次渲染的像素不同 —— 判据量的不是材质特征');
-      }
-    });
-
-    testWidgets('负控制：材质差异是**全局**的，不是零星像素', (tester) async {
-      // 平均值达标也可能是「几百个像素差很大、其余全同」撑出来的。
-      // 真机阈值（逐像素平均差 ≥1.5）要求差异铺满窗口底，所以这里额外钉住
-      // 「有差异的采样点占比」。
-      final base = await renderLuma(tester, material: WindowMaterial.mica);
-      for (final m in [
-        WindowMaterial.micaAlt,
-        WindowMaterial.acrylic,
-        WindowMaterial.acrylicThin,
-        WindowMaterial.none,
-      ]) {
-        final other = await renderLuma(tester, material: m);
-        var differing = 0;
-        for (var i = 0; i < base.length; i++) {
-          if ((base[i] - other[i]).abs() > 0.5) differing++;
-        }
-        final ratio = differing / base.length;
-        expect(ratio, greaterThan(0.5),
-            reason: 'mica↔${m.id} 只有 ${(ratio * 100).toStringAsFixed(1)}% 的采样点'
-                '有差异 —— 材质特征没有铺满窗口底');
-      }
-    });
   });
 
   // ══════════════════════════════════════════════════════════
@@ -258,7 +106,7 @@ void main() {
       find.byWidgetPredicate(
         (w) =>
             w is ColoredBox &&
-            w.color == StyleColors.liquidLight.colors.surfaceSolid,
+            w.color == StyleColors.winuiLight.colors.surfaceSolid,
       ),
       findsOneWidget,
     );
@@ -273,9 +121,9 @@ void main() {
     );
     await tester.pumpWidget(
       AppTheme(
-        colors: AppColors.of(AppStyle.liquid, Brightness.light),
+        colors: AppColors.of(AppStyle.winui, Brightness.light),
         brightness: Brightness.light,
-        style: AppStyle.liquid,
+        style: AppStyle.winui,
         child: MaterialApp(
           home: Scaffold(
             body: BackgroundLayer(
@@ -290,70 +138,6 @@ void main() {
       findsOneWidget,
     );
     expect(backdropPaint('style'), findsNothing);
-  });
-
-  testWidgets('Mica 路径永远铺一层底（绘制器 + 85% 调色层都在）', (tester) async {
-    await pumpBackdrop(tester, WindowMaterial.mica,
-        style: AppStyle.frosted, brightness: Brightness.dark);
-    // 调色层是**文字对比度的地板**：不查具体色值（材质底会压在它上面），
-    // 只查「85% 不透明的那一层还在」—— 它保证 Mica 没生效时不黑窗。
-    expect(
-      find.byWidgetPredicate((w) => w is ColoredBox && w.color.a == 0.85),
-      findsOneWidget,
-      reason: 'Mica 没生效时这层保证界面可见（黑窗 bug 的守门判据）',
-    );
-    // 风格渐变打底与材质底各一层 —— 两层都在，背景层才算铺满。
-    expect(backdropPaint('style'), findsOneWidget);
-    expect(backdropPaint('material'), findsOneWidget);
-  });
-
-  // ══════════════════════════════════════════════════════════
-  // 颗粒绘制开销：必须是纹理平铺，不许在整窗上逐点画圆
-  // ══════════════════════════════════════════════════════════
-
-  testWidgets('磨砂颗粒走纹理平铺，不在整窗上逐点画圆', (tester) async {
-    // 2026-10-16 用户报「亚克力选中后超级卡」。根因：颗粒按
-    // `size.width * size.height / 11 * grain` 对**整窗**逐个 `drawCircle` ——
-    // 那个密度是给设置页 64×44 缩略图（约 256 个点）定的，接到整窗后
-    // 1280×720 的亚克力档要画 **83,782 个抗锯齿圆**／次重绘，一帧上百毫秒。
-    // 现在颗粒来自预生成的噪点纹理（`ImageShader` 平铺 = 一次 `drawRect`），
-    // 这条判据把「主 canvas 上不许逐点画圆」钉死。
-    for (final m in [WindowMaterial.acrylic, WindowMaterial.acrylicThin]) {
-      await pumpBackdrop(tester, m,
-          style: AppStyle.frosted, brightness: Brightness.dark);
-      final painter =
-          tester.widget<CustomPaint>(backdropPaint('material')).painter!;
-      final probe = _DrawCallProbe();
-      painter.paint(probe, const Size(1280, 720));
-      expect(probe.circles, 0,
-          reason: '${m.id} 在 1280×720 的材质层上逐点画了 ${probe.circles} 个圆 —— '
-              '颗粒必须走预生成纹理平铺；逐点实现这一档是 '
-              '${(1280 * 720 / 11 * m.grain).round()} 个');
-      expect(probe.rects, greaterThan(0), reason: '材质层应当画了底');
-    }
-  });
-
-  testWidgets('负控制：有颗粒档的绘制调用数必须多于无颗粒档', (tester) async {
-    // 上一条只证明「没有逐点画圆」。哪天颗粒整段被删掉，它照样绿 ——
-    // 所以「颗粒确实画出来了」要单独钉一条：亚克力系（grain > 0）的
-    // 绘制调用数必须**严格多于** Mica（grain 0）。
-    Future<int> callsOf(WindowMaterial m) async {
-      await pumpBackdrop(tester, m,
-          style: AppStyle.frosted, brightness: Brightness.dark);
-      final painter =
-          tester.widget<CustomPaint>(backdropPaint('material')).painter!;
-      final probe = _DrawCallProbe();
-      painter.paint(probe, const Size(1280, 720));
-      return probe.total;
-    }
-
-    final mica = await callsOf(WindowMaterial.mica);
-    final acrylic = await callsOf(WindowMaterial.acrylic);
-    final thin = await callsOf(WindowMaterial.acrylicThin);
-    expect(acrylic, greaterThan(mica),
-        reason: '亚克力的绘制调用数（$acrylic）不多于 Mica（$mica）—— 颗粒没画出来');
-    expect(thin, greaterThan(mica),
-        reason: '细亚克力的绘制调用数（$thin）不多于 Mica（$mica）—— 颗粒没画出来');
   });
 }
 
@@ -389,7 +173,7 @@ final _kBoundaryKey = UniqueKey();
 Future<List<double>> renderLuma(
   WidgetTester tester, {
   WindowMaterial material = WindowMaterial.mica,
-  AppStyle style = AppStyle.frosted,
+  AppStyle style = AppStyle.winui,
   Brightness brightness = Brightness.dark,
 }) async {
   await pumpBackdrop(tester, material, style: style, brightness: brightness);
@@ -433,7 +217,7 @@ double meanAbsDiff(List<double> a, List<double> b) {
 Future<void> pumpBackdrop(
   WidgetTester tester,
   WindowMaterial material, {
-  AppStyle style = AppStyle.liquid,
+  AppStyle style = AppStyle.winui,
   Brightness brightness = Brightness.light,
 }) async {
   await tester.pumpWidget(

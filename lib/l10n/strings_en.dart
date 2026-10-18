@@ -102,15 +102,7 @@ const Map<String, String> kStringsEn = {
   'WinUI3 观感：暖灰底、单色强调、细边线、克制阴影':
       'WinUI3 look: warm grey surfaces, a single accent colour, hairline borders '
       'and restrained shadows',
-  '液体玻璃': 'Liquid glass',
-  '多层渐变加内缘亮环，模糊最轻、透光最强':
-      'Layered gradients and a bright inner rim — lightest blur, most light through',
-  '磨砂清晰': 'Frosted',
-  '单层磨砂，模糊与不透明度取中，文字最清楚':
-      'A single frosted layer, medium blur and opacity — the clearest text',
-  '陶土柔和': 'Clay',
-  '实心面配更重的软阴影，完全不透明，性能最好':
-      'A solid surface with a heavier soft shadow, fully opaque and the cheapest to draw',
+  // 2026-10-19：三套风格（液体玻璃 / 磨砂清晰 / 陶土柔和）已删除，
   '自定义色调': 'Custom tint',
   '开启后用选定颜色给窗口底色染色，让材质效果更明显。需要先选择「云母」或「亚克力」材质。':
       'Tints the window background with the chosen color so the material effect '

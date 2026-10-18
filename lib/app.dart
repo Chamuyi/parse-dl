@@ -44,7 +44,11 @@ import 'widgets/title_bar.dart';
 ///
 /// 用模块级变量而不是实例字段：`XDownloaderApp` 是 `StatelessWidget`。
 /// 初值 null = 「还没下发过」，保证首帧一定会应用一次。
-Brightness? _lastAppliedDark;
+/// 上一次应用过的「材质/明暗」组合键（材质id/亮度名）。
+///
+/// 2026-10-19 从纯 Brightness 改成组合键：WinUI 风格会强制材质为 Mica，
+/// 切风格时必须重新应用一次，否则窗口底还停在旧材质上。
+String? _lastAppliedDark;
 
 /// 应用版本号。
 ///
@@ -163,11 +167,19 @@ class XDownloaderApp extends StatelessWidget {
           // 只在变化时调用，避免每帧都打一次原生通道。用模块级变量而不是
           // 实例字段：`XDownloaderApp` 是 `StatelessWidget`（见类定义），
           // 存不了可变状态。
-          if (_lastAppliedDark != brightness) {
-            _lastAppliedDark = brightness;
+          // WinUI3 风格下窗口底**固定用 Mica**：这是微软官方给长驻窗口的
+          // 材质（DWM_SYSTEMBACKDROP_TYPE = DWMSBT_MAINWINDOW）。用户在设置里
+          // 选的五档材质只对另三套玻璃风格有意义 —— WinUI 的观感来自
+          // 「一层 Mica + 不透明内容面」，自己叠材质反而不像。
+          final effectiveMaterial = appearance.visualStyle == AppStyle.winui
+              ? WindowMaterial.mica
+              : s.settings.appearance.windowMaterial;
+          final materialKey = '${effectiveMaterial.id}/${brightness.name}';
+          if (_lastAppliedDark != materialKey) {
+            _lastAppliedDark = materialKey;
             WidgetsBinding.instance.addPostFrameCallback((_) {
               applyWindowMaterial(
-                s.settings.appearance.windowMaterial,
+                effectiveMaterial,
                 dark: brightness == Brightness.dark,
               );
             });
@@ -396,6 +408,14 @@ class _AppShellState extends State<_AppShell> {
     // 所以「切换后界面即时生效」是天然成立的，不需要额外通知机制。
     final useSidebar = appearance.navLayout == NavLayout.sidebar;
 
+    // WinUI3 是**不透明应用面**：内容区铺满实色，壁纸/材质只在窗口边缘
+    // （标题栏与侧栏之外的 chrome）可见。另三套是「玻璃浮在壁纸上」，
+    // 内容区透出背景图正是它们的设计意图。
+    //
+    // 2026-10-19 修：之前内容区一直透明，只是被侧栏的悬浮卡挡住了看不出来；
+    // 侧栏一贴边，右侧与底部就露出壁纸 —— 那不是 WinUI。
+    final opaqueShell = AppTheme.of(context).style == AppStyle.winui;
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Stack(
@@ -434,7 +454,11 @@ class _AppShellState extends State<_AppShell> {
                       children: [
                         if (useSidebar)
                           Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 14, 0, 16),
+                            // WinUI：侧栏贴边通栏（从标题栏底铺到窗口底）；
+                            // 另三套是浮在壁纸上的玻璃卡，四周留白。
+                            padding: AppTheme.of(context).style == AppStyle.winui
+                                ? EdgeInsets.zero
+                                : const EdgeInsets.fromLTRB(16, 14, 0, 16),
                             child: SidebarNav(
                               currentRouteId: _routeId,
                               onSelect: _setRoute,
@@ -444,7 +468,19 @@ class _AppShellState extends State<_AppShell> {
                               taskRunning: taskRunning,
                             ),
                           ),
-                        Expanded(child: _buildContent(context, useSidebar)),
+                        Expanded(
+                          child: opaqueShell
+                              // WinUI：内容区是一块不透明实色面（Mica 的
+                              // 「内容层」色），壁纸不会透上来。
+                              ? ColoredBox(
+                                  color: AppColors.solidFor(
+                                    widget.brightness,
+                                    style: AppTheme.of(context).style,
+                                  ),
+                                  child: _buildContent(context, useSidebar),
+                                )
+                              : _buildContent(context, useSidebar),
+                        ),
                       ],
                     ),
 
@@ -500,14 +536,17 @@ class _AppShellState extends State<_AppShell> {
   /// 否则最后一屏内容会被 Dock 压住；侧边栏是**占位**布局，不遮挡内容，
   /// 所以底部只需常规留白。
   Widget _buildContent(BuildContext context, bool useSidebar) {
+    // WinUI3 的内容区是**纯平面**：贴着侧栏分隔线开始，只有内容内边距，
+    // 没有「浮在壁纸上的大卡片」那层留白。另三套保留改造前的 24/32 边距。
+    final winui = AppTheme.of(context).style == AppStyle.winui;
     return ClipRect(
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1440),
           child: Padding(
             padding: EdgeInsets.fromLTRB(
-              useSidebar ? 24 : 32,
-              0,
+              useSidebar ? (winui ? 28 : 24) : 32,
+              winui ? 8 : 0,
               32,
               useSidebar ? 32 : 104,
             ),

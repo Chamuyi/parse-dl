@@ -8,6 +8,7 @@ import '../services/bili_ledger.dart';
 import '../services/download_store.dart';
 import '../services/douyin_store.dart';
 import '../services/settings_store.dart';
+import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
 import '../widgets/hero_banner.dart';
@@ -107,7 +108,14 @@ class DashboardPage extends StatelessWidget {
     final ledgerTotal = bili.count + douyin.count;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(0, 16, 0, 16),
+      // WinUI：页面上留白 8（标题贴近顶部）、底部 24（滚动余量更足）。
+      // 另三套保持 16/16。
+      padding: EdgeInsets.fromLTRB(
+        0,
+        AppTheme.of(context).style == AppStyle.winui ? 8 : 16,
+        0,
+        AppTheme.of(context).style == AppStyle.winui ? 24 : 16,
+      ),
       children: [
         // 页头：共享 [PageHeader]（预览稿 `.head h1 .sub`）。预览稿 `dashboard`
         // 复用 HOME 的头，副题是「总览 · 快捷入口 · 最近活动」。这一页原本

@@ -277,11 +277,7 @@ class AppColors {
           .colors
           .withAccent(accent.colorsFor(brightness), brightness);
     }
-    return switch ((style, brightness)) {
-      (AppStyle.frosted, Brightness.light) => StyleColors.frostedLight.colors,
-      (AppStyle.frosted, Brightness.dark) => StyleColors.frostedDark.colors,
-      _ => StyleColors.of(style, brightness).colors,
-    };
+    return StyleColors.of(style, brightness).colors;
   }
 
   /// 按「强调色 + 明暗」算出一个合适的底色调。
@@ -319,7 +315,7 @@ class AppColors {
   /// `theme_contrast_test.dart`、`nav_keyboard_test.dart`）零改动。
   static Color solidFor(
     Brightness brightness, {
-    AppStyle style = AppStyle.frosted,
+    AppStyle style = AppStyle.winui,
   }) =>
       of(style, brightness).surfaceSolid;
 }
@@ -350,7 +346,7 @@ class AppTheme extends InheritedWidget {
     super.key,
     required this.colors,
     required this.brightness,
-    this.style = AppStyle.frosted,
+    this.style = AppStyle.winui,
     required super.child,
   });
 
@@ -392,7 +388,7 @@ class AppTheme extends InheritedWidget {
 ThemeData buildAppTheme(
   AppColors c,
   Brightness brightness, {
-  AppStyle style = AppStyle.frosted,
+  AppStyle style = AppStyle.winui,
 }) {
   final StyleButton button = style.buttonOf(brightness);
   // 43 处原生按钮（FilledButton / FilledButton.tonal* / TextButton / OutlinedButton）
@@ -406,7 +402,7 @@ ThemeData buildAppTheme(
   //     （普通按钮：StyleButton.color 半透面 + 该套 --ink2 字色；
   //     liquid 浅色的半透白 0xB3 不满足 SDK 的 disabled/onPrimary 压字前提，
   //     压实成白面板底再保留 18% 通透 —— 偏差如实记录）
-  final Color tonalSurface = style == AppStyle.liquid &&
+  final Color tonalSurface = false &&
           brightness == Brightness.light
       ? Color.lerp(button.color, c.surfaceSolid, 0.18)!
       : button.color;

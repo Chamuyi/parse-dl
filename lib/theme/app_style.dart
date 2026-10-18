@@ -18,17 +18,21 @@ const List<Color> kPreviewWallpaper = [
 ///
 /// 存进配置文件的 id 定下就不能改（同 [WindowMaterial.id] 的约定）。
 ///
-/// 三套风格是**同一套界面**的三种材质表达，不是三套皮肤：页面结构、语义色、
-/// 布局全部共用，差别只落在卡片的模糊 / 透明度 / 半径 / 渐变 / 描边 / 阴影上。
-/// 所以它跟 [AppColors]（管「用什么颜色」）正交，由 [AppSurface] 表达。
+/// ### 2026-10-19 只保留一套风格（用户裁定「你去把其他的删了」）
+///
+/// 曾经有 liquid / frosted / clay / winui 四套。用户连续多轮判定「不对」之后
+/// 明确要求删掉其余三套，只留 Windows 原生。删掉的好处不只是少代码：
+/// 所有「按风格分流」的 switch 都塌缩成单值，改观感时不必再考虑会不会
+/// 影响另三套，可以放心按 WinUI3 规范调。
+///
+/// 仍然保留 enum（而不是直接删掉类型）的原因：settings.json 里的
+/// appearance.visualStyle 字段要能读到旧值并迁移，AppTheme.style 也还在
+/// 被大量组件引用。等迁移稳定后再考虑是否连类型一起去掉。
 enum AppStyle {
-  /// Windows 原生（WinUI3）。色板与材质取自 `bdlukaa/fluent_ui`（BSD-3-Clause）：
-  /// 22 级中性灰、暖灰深色底 `#2C2C2C`、单色强调、4/8px 圆角、1px 边线。
-  winui('winui', 'Windows 原生', 'WinUI3 观感：暖灰底、单色强调、细边线、克制阴影'),
-
-  liquid('liquid', '液体玻璃', '多层渐变加内缘亮环，模糊最轻、透光最强'),
-  frosted('frosted', '磨砂清晰', '单层磨砂，模糊与不透明度取中，文字最清楚'),
-  clay('clay', '陶土柔和', '实心面配更重的软阴影，完全不透明，性能最好');
+  /// Windows 原生（WinUI3）。色板与材质取自微软官方规范 +
+  /// bdlukaa/fluent_ui（BSD-3-Clause）：22 级中性灰、暖灰底、单色强调、
+  /// 4/8px 圆角、1px 边线、Mica 窗口底。
+  winui('winui', 'Windows 原生', 'WinUI3 观感：暖灰底、单色强调、细边线、克制阴影');
 
   const AppStyle(this.id, this.label, this.description);
 
@@ -37,12 +41,13 @@ enum AppStyle {
   final String label;
   final String description;
 
-  /// 缺字段 / 坏值一律回退 [AppStyle.frosted]。
+  /// 缺字段 / 坏值 / 旧的三套风格 id 一律回退 [AppStyle.winui]。
   ///
-  /// 旧配置里没有这个字段 → 升级后拿到默认风格，观感与改造前一致。
+  /// 迁移：老配置里可能存着 liquid / frosted / clay，那些风格已经删除，
+  /// 读到就落到 winui，不报错、不黑屏。
   static AppStyle fromId(String? id) => AppStyle.values.firstWhere(
         (s) => s.id == id,
-        orElse: () => AppStyle.frosted,
+        orElse: () => AppStyle.winui,
       );
 
   /// 这套风格的色彩令牌。
@@ -152,12 +157,7 @@ class AppSurface {
     shadowOpacity: 0.08,
   );
 
-  static AppSurface of(AppStyle s) => switch (s) {
-        AppStyle.winui => winui,
-        AppStyle.liquid => liquid,
-        AppStyle.frosted => frosted,
-        AppStyle.clay => clay,
-      };
+  static AppSurface of(AppStyle s) => winui;
 
   /// 卡片实际底色。
   ///
@@ -225,25 +225,12 @@ enum AppRadius {
 
 /// 圆角分档表：`(风格, 档位) → 半径`。
 extension AppStyleRadiusTokens on AppStyle {
-  double radiusOf(AppRadius slot) => switch ((this, slot)) {
+  double radiusOf(AppRadius slot) => switch (slot) {
         // WinUI3 规范：卡片/浮层 8px，控件 4px。
-        // 档位映射：card/hero2 = 8（容器），qi/field = 4（控件）。
-        (AppStyle.winui, AppRadius.card) => 8,
-        (AppStyle.winui, AppRadius.qi) => 4,
-        (AppStyle.winui, AppRadius.field) => 4,
-        (AppStyle.winui, AppRadius.hero2) => 8,
-        (AppStyle.liquid, AppRadius.card) => 20,
-        (AppStyle.frosted, AppRadius.card) => 14,
-        (AppStyle.clay, AppRadius.card) => 16,
-        (AppStyle.liquid, AppRadius.qi) => 11,
-        (AppStyle.frosted, AppRadius.qi) => 10,
-        (AppStyle.clay, AppRadius.qi) => 12,
-        (AppStyle.liquid, AppRadius.field) => 9,
-        (AppStyle.frosted, AppRadius.field) => 8,
-        (AppStyle.clay, AppRadius.field) => 10,
-        (AppStyle.liquid, AppRadius.hero2) => 14,
-        (AppStyle.frosted, AppRadius.hero2) => 12,
-        (AppStyle.clay, AppRadius.hero2) => 14,
+        AppRadius.card => 8,
+        AppRadius.qi => 4,
+        AppRadius.field => 4,
+        AppRadius.hero2 => 8,
       };
 }
 
@@ -306,35 +293,8 @@ class StyleBorder {
 /// 卡片边框随风格变。
 extension AppStyleBorderTokens on AppStyle {
   StyleBorder cardBorderOf(AppColors c, Brightness brightness) =>
-      switch ((this, brightness)) {
-        // `:259` `border: 1px solid var(--rim)`，`--rim` = `rgba(255,255,255,.75)`
-        // （`:247`）；`:260` `inset 0 1px 0 rgba(255,255,255,.95)`。
-        (AppStyle.liquid, Brightness.light) => const StyleBorder(
-              top: Color(0xF2FFFFFF),
-              side: Color(0xBFFFFFFF),
-            ),
-        // 深色 `--rim` = `rgba(255,255,255,.14)`（`:833`）。CSS 深色**未给**
-        // `.card` 的顶部高光（只有 `::after` 内缘环，`:843`），所以这里不编造，
-        // 顶边与三边同色。
-        (AppStyle.liquid, Brightness.dark) =>
-          const StyleBorder.uniform(Color(0x24FFFFFF)),
-        // `:341` `border: 1px solid rgba(255,255,255,.9)`；`:891` 深色 `.10`。
-        (AppStyle.frosted, Brightness.light) =>
-          const StyleBorder.uniform(Color(0xE6FFFFFF)),
-        (AppStyle.frosted, Brightness.dark) =>
-          const StyleBorder.uniform(Color(0x1AFFFFFF)),
-        // `:405` / `:939` 两处都是 `border: 1px solid var(--ln)`，
-        // 而 `--ln` 已逐字节进了色板（`StyleColors` 的 `line`），所以取色板而不是
-        // 在这里再写一个值 —— 分隔线只有一处出处。
-        (AppStyle.clay, Brightness.light) ||
-        (AppStyle.clay, Brightness.dark) =>
-          StyleBorder.uniform(c.line),
-        // WinUI3：卡片靠 **1px 边线**分层，没有顶部高光。
-        // 浅色用 c.line（#E1DFDD 附近），深色同色板，取色板单出处。
-        (AppStyle.winui, Brightness.light) ||
-        (AppStyle.winui, Brightness.dark) =>
-          StyleBorder.uniform(c.line),
-      };
+      // WinUI3：卡片靠 1px 边线分层，没有顶部高光。取色板 line 单出处。
+      StyleBorder.uniform(c.line);
 }
 
 /// 卡片投影随风格变 —— **每套是两条**（磨砂与陶土是 CSS 的双层影，
@@ -343,99 +303,16 @@ extension AppStyleBorderTokens on AppStyle {
 /// 返回值**不是常量**，调用方不该缓存；它只是把 CSS 的 `box-shadow` 列表
 /// 逐条翻成 [BoxShadow]。
 extension AppStyleShadowTokens on AppStyle {
-  List<BoxShadow> cardShadows(Brightness brightness) =>
-      switch ((this, brightness)) {
-        // `:262` `0 10px 30px -12px rgba(38,38,80,.20)`。
-        (AppStyle.liquid, Brightness.light) => const [
-            BoxShadow(
-              color: Color(0x33362650),
-              offset: Offset(0, 10),
-              blurRadius: 30,
-              spreadRadius: -12,
-            ),
-          ],
-        // CSS 深色 `#v-a` 没给 `.card` 的投影（`:828` 起只有变量与 `::after`）。
-        // 深色底上需要比浅色更重的影才看得出层次，取同一几何、黑影 35%。
-        (AppStyle.liquid, Brightness.dark) => const [
-            BoxShadow(
-              color: Color(0x59000000),
-              offset: Offset(0, 10),
-              blurRadius: 30,
-              spreadRadius: -12,
-            ),
-          ],
-        // `:342` `0 1px 2px rgba(16,16,20,.05), 0 8px 24px -14px rgba(16,16,20,.22)`。
-        (AppStyle.frosted, Brightness.light) => const [
-            BoxShadow(
-              color: Color(0x0D101014),
-              offset: Offset(0, 1),
-              blurRadius: 2,
-            ),
-            BoxShadow(
-              color: Color(0x38101014),
-              offset: Offset(0, 8),
-              blurRadius: 24,
-              spreadRadius: -14,
-            ),
-          ],
-        // `:892` `0 1px 2px rgba(0,0,0,.30), 0 8px 24px -14px rgba(0,0,0,.50)`。
-        (AppStyle.frosted, Brightness.dark) => const [
-            BoxShadow(
-              color: Color(0x4D000000),
-              offset: Offset(0, 1),
-              blurRadius: 2,
-            ),
-            BoxShadow(
-              color: Color(0x80000000),
-              offset: Offset(0, 8),
-              blurRadius: 24,
-              spreadRadius: -14,
-            ),
-          ],
-        // `:406` `0 2px 4px rgba(87,78,70,.05), 0 12px 28px -18px rgba(87,78,70,.35)`。
-        (AppStyle.clay, Brightness.light) => const [
-            BoxShadow(
-              color: Color(0x0D574E46),
-              offset: Offset(0, 2),
-              blurRadius: 4,
-            ),
-            BoxShadow(
-              color: Color(0x59574E46),
-              offset: Offset(0, 12),
-              blurRadius: 28,
-              spreadRadius: -18,
-            ),
-          ],
-        // `:940` `0 2px 4px rgba(0,0,0,.28), 0 12px 28px -18px rgba(0,0,0,.55)`。
-        (AppStyle.clay, Brightness.dark) => const [
-            BoxShadow(
-              color: Color(0x47000000),
-              offset: Offset(0, 2),
-              blurRadius: 4,
-            ),
-            BoxShadow(
-              color: Color(0x8C000000),
-              offset: Offset(0, 12),
-              blurRadius: 28,
-              spreadRadius: -18,
-            ),
-          ],
-        // WinUI3：浮起感靠 1px 边线，投影只有极淡一层（官方 Card 几乎看不见影）。
-        (AppStyle.winui, Brightness.light) => const [
-            BoxShadow(
-              color: Color(0x0A000000),
-              offset: Offset(0, 1),
-              blurRadius: 4,
-            ),
-          ],
-        (AppStyle.winui, Brightness.dark) => const [
-            BoxShadow(
-              color: Color(0x1F000000),
-              offset: Offset(0, 1),
-              blurRadius: 4,
-            ),
-          ],
-      };
+  List<BoxShadow> cardShadows(Brightness brightness) => [
+        // WinUI3：浮起感靠边线，投影只有极淡一层（官方 Card 几乎看不见影）。
+        BoxShadow(
+          color: brightness == Brightness.dark
+              ? const Color(0x1F000000)
+              : const Color(0x0A000000),
+          offset: const Offset(0, 1),
+          blurRadius: 4,
+        ),
+      ];
 }
 
 /// 悬停底色随风格变。
@@ -447,23 +324,11 @@ extension AppStyleShadowTokens on AppStyle {
 /// 浅色三套的 hover 都是**往亮里加**：[AppColors.surfaceCard] 本身是半透明白，
 /// 再叠一层更亮的白 → 压在卡片上的文字对比度只会升高，不会跌地板。
 extension AppStyleHoverTokens on AppStyle {
-  Color hoverColor(Brightness brightness) => switch ((this, brightness)) {
-        // `:280` `.grp > .hd:hover { background: rgba(255,255,255,.44) }`。
-        (AppStyle.liquid, Brightness.light) => const Color(0x70FFFFFF),
-        // `:846` `body.dark #v-a .grp > .hd:hover { … .07 }`。
-        (AppStyle.liquid, Brightness.dark) => const Color(0x12FFFFFF),
-        // `:352` `#v-b .grp > .hd:hover { background: rgba(16,16,20,.05) }`。
-        (AppStyle.frosted, Brightness.light) => const Color(0x0D101014),
-        // `:895` `body.dark #v-b .grp > .hd:hover { … .06 }`。
-        (AppStyle.frosted, Brightness.dark) => const Color(0x0FFFFFFF),
-        // `:415` `#v-c .grp > .hd:hover { background: rgba(43,38,34,.05) }`。
-        (AppStyle.clay, Brightness.light) => const Color(0x0D2B2622),
-        // `:942` `body.dark #v-c .grp > .hd:hover { … rgba(245,240,235,.06) }`。
-        (AppStyle.clay, Brightness.dark) => const Color(0x0FF5F0EB),
-        // WinUI3 的 hover 是"表层提亮一档"：浅色叠极淡黑，深色叠极淡白。
-        (AppStyle.winui, Brightness.light) => const Color(0x0A000000),
-        (AppStyle.winui, Brightness.dark) => const Color(0x0FFFFFFF),
-      };
+  Color hoverColor(Brightness brightness) =>
+      // WinUI3 的 hover 是"表层提亮一档"：浅色叠极淡黑，深色叠极淡白。
+      brightness == Brightness.dark
+          ? const Color(0x0FFFFFFF)
+          : const Color(0x0A000000);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -507,16 +372,21 @@ class StyleNavActive {
     this.glow,
   });
 
-  /// WinUI3 · 浅色。选中底 = 强调色 10%，描边 = 强调色 40%，无发光。
+  /// WinUI3 · 浅色。选中底 = 强调色 **10%**，**无描边、无发光**。
+  ///
+  /// 2026-10-19 修正：原先这里还带一圈 40% 的强调色描边，那是「玻璃卡」
+  /// 的设计语言（用描边把卡片从背景里勾出来）。WinUI3 的 NavigationView
+  /// 选中项**只有一层极淡底色**，指示靠左侧竖条 —— 描边会把行变成「小卡片」，
+  /// 正是用户说「这不像 WinUI」的观感来源之一。
   static const winuiLight = StyleNavActive(
     color: Color(0x1A0078D4),
-    borderColor: Color(0x660078D4),
+    borderColor: Color(0x00000000),
   );
 
-  /// WinUI3 · 深色。深色下强调色亮一档（#4CC2FF）。
+  /// WinUI3 · 深色。深色下强调色亮一档（#4CC2FF），同样无描边。
   static const winuiDark = StyleNavActive(
     color: Color(0x264CC2FF),
-    borderColor: Color(0x804CC2FF),
+    borderColor: Color(0x00000000),
   );
 
   /// liquid · 浅色。CSS `:284-286`：
@@ -581,17 +451,9 @@ extension AppStyleNavTokens on AppStyle {
   /// （选中底色唯一出处，`appearance_controls_test` 源码层检查着）；
   /// 这个入口只服务 liquid / clay 两套新增画法。
   StyleNavActive navActiveOf(Brightness brightness) =>
-      switch ((this, brightness)) {
-        // WinUI3 NavigationView：选中项是**极淡的强调底 + 左侧竖条**，
-        // 没有渐变、没有外发光。竖条由 NavActiveBar 画（与另三套共用）。
-        (AppStyle.winui, Brightness.light) => StyleNavActive.winuiLight,
-        (AppStyle.winui, Brightness.dark) => StyleNavActive.winuiDark,
-        (AppStyle.liquid, Brightness.light) => StyleNavActive.liquidLight,
-        (AppStyle.liquid, Brightness.dark) => StyleNavActive.liquidDark,
-        (AppStyle.clay, Brightness.light) => StyleNavActive.clayLight,
-        (AppStyle.clay, Brightness.dark) => StyleNavActive.clayDark,
-        _ => StyleNavActive.frosted, // 不可达：frosted 在调用点走 selectedDecoration
-      };
+      brightness == Brightness.dark
+          ? StyleNavActive.winuiDark
+          : StyleNavActive.winuiLight;
 }
 
 /// 侧边栏底色（CSS `.side`，含右分隔线随风格的有无）。
@@ -676,18 +538,9 @@ class StyleSidebar {
 /// 侧边栏底色令牌入口。
 extension AppStyleSidebarTokens on AppStyle {
   StyleSidebar sidebarOf(Brightness brightness) =>
-      switch ((this, brightness)) {
-        // WinUI3 NavigationView：侧栏是独立表层色，带右侧 1px 分隔线。
-        // 取自 `fluent_ui` theme.dart:469-482（浅 #F9F9F9 / 深 #2C2C2C）。
-        (AppStyle.winui, Brightness.light) => StyleSidebar.winuiLight,
-        (AppStyle.winui, Brightness.dark) => StyleSidebar.winuiDark,
-        (AppStyle.liquid, Brightness.light) => StyleSidebar.liquidLight,
-        (AppStyle.liquid, Brightness.dark) => StyleSidebar.liquidDark,
-        (AppStyle.frosted, Brightness.light) => StyleSidebar.frostedLight,
-        (AppStyle.frosted, Brightness.dark) => StyleSidebar.frostedDark,
-        (AppStyle.clay, Brightness.light) => StyleSidebar.clayLight,
-        (AppStyle.clay, Brightness.dark) => StyleSidebar.clayDark,
-      };
+      brightness == Brightness.dark
+          ? StyleSidebar.winuiDark
+          : StyleSidebar.winuiLight;
 }
 
 /// 按钮装饰随风格变（CSS `.btn` / `.btn.primary`）。
@@ -881,16 +734,10 @@ class StyleButton {
 
 /// 按钮令牌入口。
 extension AppStyleButtonTokens on AppStyle {
-  StyleButton buttonOf(Brightness brightness) => switch ((this, brightness)) {
-        (AppStyle.winui, Brightness.light) => StyleButton.winuiLight,
-        (AppStyle.winui, Brightness.dark) => StyleButton.winuiDark,
-        (AppStyle.liquid, Brightness.light) => StyleButton.liquidLight,
-        (AppStyle.liquid, Brightness.dark) => StyleButton.liquidDark,
-        (AppStyle.frosted, Brightness.light) => StyleButton.frostedLight,
-        (AppStyle.frosted, Brightness.dark) => StyleButton.frostedDark,
-        (AppStyle.clay, Brightness.light) => StyleButton.clayLight,
-        (AppStyle.clay, Brightness.dark) => StyleButton.clayDark,
-      };
+  StyleButton buttonOf(Brightness brightness) =>
+      brightness == Brightness.dark
+          ? StyleButton.winuiDark
+          : StyleButton.winuiLight;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1026,11 +873,5 @@ class StyleShape {
 
 /// 形态令牌入口（AppStyle 的第六组扩展）。
 extension AppStyleShapeTokens on AppStyle {
-  StyleShape shapeOf() => switch (this) {
-        AppStyle.winui => StyleShape.winui,
-        AppStyle.liquid ||
-        AppStyle.frosted ||
-        AppStyle.clay =>
-          StyleShape.legacy,
-      };
+  StyleShape shapeOf() => StyleShape.winui;
 }

@@ -160,9 +160,11 @@ void main() {
     expect(fillOf(focused), Colors.transparent,
         reason: '聚焦元素也不该带悬停底色（该效果已删）');
 
-    // 选中态仍要与其它两态可区分：这是 2026-09-30 那条旧账（"都是深底胶囊，只差一圈描边"）
+    // 选中态仍要与其它两态可区分：这是 2026-09-30 那条旧账（「都是深底胶囊，只差一圈描边」）。
+    // 2026-10-19：WinUI 的选中态**没有柔光**（改为极淡强调底 + 左侧竖条），
+    // 所以这里改为断言「底色不同」——区分手段从发光换成了底色，判据强度不变。
     expect(fillOf(selected), isNot(fillOf(idle)));
-    final ls = selected.boxShadow!.first.color.a;
-    expect(ls, greaterThan(0), reason: '选中态要有柔光，否则与静止只差一圈边');
+    expect(selected.boxShadow, isNull,
+        reason: 'WinUI 选中态无外发光（靠底色与左侧竖条区分）');
   });
 }

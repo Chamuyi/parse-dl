@@ -238,7 +238,7 @@ void main() {
               w is AnimatedContainer &&
               w.decoration is BoxDecoration &&
               (w.decoration! as BoxDecoration).color ==
-                  AppColors.dark.accentSoft,
+                  StyleNavActive.winuiDark.color,
         );
         expect(activeBoxes, findsOneWidget, reason: '$layout：应当只有一个导航项处于激活态');
 
@@ -257,11 +257,17 @@ void main() {
     test('navItemDecoration 是两种布局共用的唯一装饰来源', () {
       const c = AppColors.dark;
 
-      // frosted（默认风格）激活态 = selectedDecoration 的现值（选中底色唯一出处）。
+      // 2026-10-19：只剩 WinUI 一套风格，激活态改锚到 `navActiveOf` 令牌 ——
+      // WinUI3 的 NavigationView 选中项是**极淡强调底 + 无描边 + 无外发光**
+      // （描边与发光是玻璃系的语言）。判据语义没放宽：仍然断言「底色来自
+      // 强调色令牌」，并由下面那条 widget 判据守住「只有当前页带它」。
       final active = navItemDecoration(c, active: true);
-      expect(active.color, c.accentSoft);
-      expect((active.border as Border).top.color, c.accentLine);
-      expect(active.boxShadow, isNotNull, reason: '激活态要发光');
+      // 默认 brightness 是浅色档（navItemDecoration 的默认参数），
+      // 所以取 winuiLight 的底色 —— 这条同时守住「默认档就是官方蓝的淡底」。
+      expect(active.color, StyleNavActive.winuiLight.color,
+          reason: '激活底色必须来自 navActiveOf 令牌');
+      expect(active.gradient, isNull, reason: 'WinUI 无渐变');
+      expect(active.boxShadow, isNull, reason: 'WinUI 无外发光');
 
       // **语义反转**（2026-10-17 用户裁定删除悬停遮罩）：非激活项**恒为透明底**。
       // 原先这里断言「悬停底色 = c.surfaceCardHover」，现改为静止与任何状态都不带
@@ -274,32 +280,27 @@ void main() {
           reason: '静止态是透明描边（宽度恒 1px，避免文字跳格）');
     });
 
-    test('激活态随风格两两不同（frosted=纯色12%无外发光 / liquid=渐变+发光 / clay=纯色10%）', () {
+    test('激活态符合 WinUI3（极淡强调底 / 无渐变 / 无外发光）', () {
       const c = AppColors.dark;
 
-      final frosted =
-          navItemDecoration(c, active: true, style: AppStyle.frosted);
-      final liquid =
-          navItemDecoration(c, active: true, style: AppStyle.liquid);
-      final clay =
-          navItemDecoration(c, active: true, style: AppStyle.clay);
+      // 2026-10-19：三套玻璃风格已删除，原先「三套互不相同」的比较失去对象。
+      // 换锚为「winui 的激活态必须符合官方 NavigationView」：
+      // 极淡强调底 + 无渐变 + 无外发光（指示靠左侧竖条）。
+      final light = navItemDecoration(c,
+          active: true, style: AppStyle.winui, brightness: Brightness.light);
+      final dark = navItemDecoration(c,
+          active: true, style: AppStyle.winui, brightness: Brightness.dark);
 
-      // frosted 仍走 selectedDecoration：底 = accentSoft，有柔光
-      expect(frosted.color, c.accentSoft);
-      expect(frosted.boxShadow, isNotNull, reason: 'frosted 沿用旧画法，要发光');
-      // liquid 是渐变 + 外发光，没有纯色底
-      expect(liquid.gradient, isNotNull);
-      expect(liquid.color, isNull);
-      expect(liquid.boxShadow, isNotNull, reason: 'liquid 有外发光（CSS :286）');
-      // clay 是纯色、无外发光（CSS :420 只有内描边）
-      expect(clay.gradient, isNull);
-      expect(clay.color, isNotNull);
-      expect(clay.boxShadow, isNull, reason: 'clay 无外发光（CSS :420）');
+      expect(light.color, StyleNavActive.winuiLight.color);
+      expect(dark.color, StyleNavActive.winuiDark.color);
+      expect(light.gradient, isNull, reason: 'WinUI 无渐变');
+      expect(dark.gradient, isNull, reason: 'WinUI 无渐变');
+      expect(light.boxShadow, isNull, reason: 'WinUI 无外发光');
+      expect(dark.boxShadow, isNull, reason: 'WinUI 无外发光');
+      // 负控制：深浅两档必须真的不同，否则上面两条可能恒真
+      expect(light.color, isNot(dark.color));
 
-      // 两两不同（逐字段比较 BoxDecoration）
-      expect(frosted == liquid, isFalse);
-      expect(frosted == clay, isFalse);
-      expect(liquid == clay, isFalse);
+      // 深浅两档逐字段不同（负控制：证明上面的断言不是在比同一个值）
     });
 
     test('navIconColor 是两种布局共用的唯一取色来源', () {
