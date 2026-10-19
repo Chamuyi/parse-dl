@@ -540,20 +540,26 @@ class _AppShellState extends State<_AppShell> {
                               taskRunning: taskRunning,
                             ),
                           ),
-                        // 内容区铺 `surfaceBase` = 官方
-                        // `solidBackgroundFillColorBase`（深 #202020 / 浅 #F3F3F3）。
+                        // **内容区在材质可用时必须透明**（2026-10-19 真机取证）。
                         //
-                        // WinUI 里这一层由 **Mica** 提供，应用内容区透明叠上去。
-                        // Flutter 侧没有 Mica，只能铺同名令牌兜底 —— 它同时是
-                        // 卡片（半透明提亮膜）赖以成型的底。
+                        // 这里原先无条件铺 `surfaceBase`（深 #202020 / 浅 #F3F3F3，
+                        // 完全不透明）。后果：`material_matrix.ps1` 实测四档材质
+                        // **两两像素差全为 0** —— 四张一模一样的图，因为不透明底
+                        // 把 DWM 画的材质整个盖住了。参照物正是因此把
+                        // `NavigationViewContentBackground` 显式设为 `Transparent`
+                        // （`MainWindow.xaml:279-281`）。
                         //
-                        // 与已删除的 `opaqueShell` 的区别：那个是**额外**再铺一层
-                        // 不透明实色把材质全盖住；这里是**唯一**的底，且用的就是
-                        // 官方给"窗口底"的令牌，DWM 材质仍从它后面参与合成。
+                        // 材质不可用（旧系统 / 合成器异常）时才铺回不透明兜底色，
+                        // 否则文字没有底、读不清。
                         Expanded(
-                          child: ColoredBox(
-                            color: AppTheme.of(context).colors.surfaceBase,
-                            child: _buildContent(context, useSidebar),
+                          child: ValueListenableBuilder<bool>(
+                            valueListenable: windowMaterialAvailable,
+                            builder: (context, matOk, _) => ColoredBox(
+                              color: matOk
+                                  ? Colors.transparent
+                                  : AppTheme.of(context).colors.surfaceBase,
+                              child: _buildContent(context, useSidebar),
+                            ),
                           ),
                         ),
                       ],
