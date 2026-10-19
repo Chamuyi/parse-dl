@@ -49,10 +49,24 @@ import '../theme/window_material.dart';
 /// ### 失焦变灰（照抄 WinUI3 的 `IsInputActive` 行为）
 ///
 /// 底透明之后，失焦**不能再靠「改底色」**（底色已经没有颜色可改）。
-/// 改成叠一层半透明覆盖层：聚焦时不叠任何东西（[windowInactiveOverlay]
-/// 返回全透明），失焦时叠一层灰纱把材质压暗 —— 那正是 WinUI 失焦的观感。
 ///
-/// 覆盖层压在材质与背景图**之上**，所以两者一起变灰。
+/// **2026-10-19 改：材质可用时不再自己叠灰纱。**
+///
+/// 材质改由 WinUI 3 的合成控制器画（`MicaController` /
+/// `DesktopAcrylicController`，见 `services/system_backdrop.dart`），
+/// 它们自己读 `IsInputActive` 把材质切成不活跃档 —— 系统已经做了，
+/// Flutter 再叠一层就是双重压暗，而且那层纱会盖住材质本身。
+///
+/// | 材质 | 失焦覆盖层 |
+/// |---|---|
+/// | 可用 | **不叠**（系统按 `IsInputActive` 处理） |
+/// | 不可用 | 保留灰纱（[windowInactiveOverlay]） |
+///
+/// 后者必须保留：材质挂不上时窗口底是不透明回退色，没有任何系统材质可看，
+/// 失焦不给视觉反馈的话用户分不清窗口在不在前台。
+///
+/// [windowInactiveOverlay] / [windowBackdropColor] 两个纯函数本身**保留**
+/// 且签名不变（`test/window_focus_test.dart` 钉着它们）。
 class BackgroundLayer extends StatelessWidget {
   final AppearanceSettings appearance;
   final Brightness brightness;
@@ -96,6 +110,25 @@ class BackgroundLayer extends StatelessWidget {
           ),
         ),
 
+        // ①-b 细亚克力的通透膜（只有这一档非 null）。
+        //
+        // DWM 只有一档亚克力，细亚克力靠这层膜与普通亚克力区分开。
+        // 见 backdropVeilOf 的注释：这是「材质差异做在调色层之上的可见层」
+        // 那条架构结论的落地。
+        //
+        // 只在材质可用时叠：材质不可用时底色已是不透明回退色，再叠膜没有
+        // 意义，还会让回退色偏离主题。
+        ValueListenableBuilder<bool>(
+          valueListenable: materialListenable,
+          builder: (_, available, _) {
+            if (!available) return const SizedBox.shrink();
+            final veil = backdropVeilOf(appearance.windowMaterial, brightness);
+            return veil == null
+                ? const SizedBox.shrink()
+                : IgnorePointer(child: ColoredBox(color: veil));
+          },
+        ),
+
         // ② 用户导入的背景图
         if (appearance.backgroundImage.isNotEmpty)
           Opacity(
@@ -103,16 +136,31 @@ class BackgroundLayer extends StatelessWidget {
             child: _BackgroundImage(path: appearance.backgroundImage),
           ),
 
-        // ③ 失焦覆盖层：聚焦时是 Colors.transparent（不叠任何东西），
-        //    失焦时叠一层灰纱把材质压暗。必须放在**最上面** —— 它要同时
-        //    盖住材质与背景图，才是 WinUI 那个「整窗变不活跃」的观感。
+        // ③ 失焦覆盖层。**只在材质不可用时叠**（2026-10-19 改）。
+        //
+        // 材质可用时失焦压暗由系统负责：WinUI 3 的 MicaController /
+        // DesktopAcrylicController 读 IsInputActive 自己把材质切成不活跃档
+        // （去饱和 + 压亮度）。我方再叠一层灰纱就是**双重压暗**，而且那层
+        // 纱会盖住合成控制器画出来的材质 —— 正是本轮要消掉的东西。
+        //
+        // 材质不可用时保留原样：窗口底是不透明回退色，没有任何系统材质
+        // 可看，失焦不给点视觉反馈的话用户分不清窗口在不在前台。
+        //
+        // 两个纯函数（windowInactiveOverlay / windowBackdropColor）都**保留**
+        // 且签名不变 —— test/window_focus_test.dart 钉着它们。
         ValueListenableBuilder<bool>(
-          valueListenable: focusListenable,
-          builder: (_, focused, _) => IgnorePointer(
-            child: ColoredBox(
-              color: windowInactiveOverlay(_baseColor(t), focused: focused),
-            ),
-          ),
+          valueListenable: materialListenable,
+          builder: (_, available, _) => available
+              ? const SizedBox.shrink()
+              : ValueListenableBuilder<bool>(
+                  valueListenable: focusListenable,
+                  builder: (_, focused, _) => IgnorePointer(
+                    child: ColoredBox(
+                      color:
+                          windowInactiveOverlay(_baseColor(t), focused: focused),
+                    ),
+                  ),
+                ),
         ),
       ],
     );

@@ -1,120 +1,114 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_acrylic/flutter_acrylic.dart' as acrylic;
 
-import 'win32_acrylic.dart';
-
 import '../theme/window_material.dart';
+import 'system_backdrop.dart';
 
-/// 材质 → 原生窗口效果的映射。
+/// 材质 → 原生窗口效果的映射。**遗留函数：运行时路径已不再经过它。**
 ///
-/// **抽成公开纯函数是为了能测**：`applyWindowMaterial` 要走原生通道，
-/// widget 测试里跑不了；而「哪种材质落到哪个效果」是纯查表，单独测它
-/// 就能把映射钉住（`test/window_effect_test.dart`）。
+/// ### ⚠️ 这不是当前生效的映射
 ///
-/// 2026-10-15 加这条判据的原因：`dark` 参数曾被写成按材质猜
-/// （`material == mica || material == micaAlt`），浅色+Mica 与深色+亚克力
-/// 两种组合都传反 —— 而这件事**零测试覆盖**，所以错了很久没人发现。
+/// 窗口材质的实际应用已经改由 [SystemBackdrop] → Windows App SDK 的
+/// **合成控制器**（`MicaController` / `DesktopAcrylicController`）完成，
+/// 生效的映射表是 [backdropTypeOf]。
 ///
-/// ### 映射表（2026-10-19 恢复 4 档，照抄图吧工具箱的 BackdropService）
+/// 保留本函数的两个理由：
+///   1. `test/window_effect_test.dart` 以它为判据锚点，签名与逐档映射
+///      被钉死，删了会让那组判据失效；
+///   2. `flutter_acrylic` 依赖本轮**暂不摘除**（摘它要连带改
+///      `main.dart` 与 `test/window_effect_test.dart`，另开一轮），
+///      所以这仍是「DWM 那条老路会得到什么」的对照表。
 ///
-/// | 材质 | 效果 | 原生 `SYSTEMBACKDROP_TYPE` |
+/// ### 为什么这里 `acrylicThin` 仍然映射到 `acrylic`（别改错地方）
+///
+/// 这是**旧通路的能力边界**，不是 bug：DWM 的 `SYSTEMBACKDROP_TYPE` 只有
+/// 五档（自动 / 无 / Mica / 亚克力 / MicaAlt），**没有「细亚克力」**。
+/// 新通路改用合成控制器，那里有 `DesktopAcrylicKind.Thin`，所以
+/// [backdropTypeOf] 把细亚克力映射成 `'acrylic-thin'`。
+///
+/// **后来人注意**：看到「代码里写着 acrylicThin→acrylic，怎么细亚克力能
+/// 工作」，不要来改这里 —— 要改的是 [backdropTypeOf]。改这里只会让
+/// `test/window_effect_test.dart` 变红，而运行时毫无变化。
+///
+/// | 材质 | DWM 效果（旧通路，本函数） | 合成控制器（现通路，[backdropTypeOf]） |
 /// |---|---|---|
-/// | [WindowMaterial.mica]        | `mica`     | 2 = `DWMSBT_MAINWINDOW` |
-/// | [WindowMaterial.micaAlt]     | `tabbed`   | 4 = `DWMSBT_TABBEDWINDOW`（官方 Mica Alt） |
-/// | [WindowMaterial.acrylic]     | `acrylic`  | 3 = `DWMSBT_TRANSIENTWINDOW` |
-/// | [WindowMaterial.acrylicThin] | `acrylic`  | 3（同上，见下） |
+/// | mica         | `mica`   | `mica` |
+/// | mica-alt     | `tabbed` | `mica-alt` |
+/// | acrylic      | `acrylic`| `acrylic` |
+/// | acrylic-thin | `acrylic`| `acrylic-thin`（只有合成控制器有这一档） |
 ///
-/// ### 细亚克力落到亚克力是**能力边界**，不是没生效
+/// ### 历史：2026-10-15 加这条判据的原因
 ///
-/// `flutter_acrylic` 1.1.4 的 `WindowEffect` 在 Windows 上只有
-/// disabled / solid / transparent / aero / acrylic / mica / tabbed 七个值，
-/// **没有「细亚克力」这一档**；其 `windows/flutter_acrylic_plugin.cpp` 也只
-/// 把 mica→2、tabbed→4、acrylic→3 三档写进 `SYSTEMBACKDROP_TYPE`。
-///
-/// 参照物能做到 `DesktopAcrylicKind.Thin`，是因为它直接持有
-/// `DesktopAcrylicController`（WinUI3 的合成控制器）；本项目的
-/// `flutter_acrylic` 没有暴露这个开关，所以 [WindowMaterial.acrylicThin]
-/// **只能**落到 `acrylic`。真机对照时这两档截图会一模一样 —— 预期行为。
+/// `dark` 参数曾被写成按材质猜（mica 与 mica-alt 判真），浅色+Mica 与
+/// 深色+亚克力两种组合都传反 —— 而这件事**零测试覆盖**，错了很久没人发现。
 acrylic.WindowEffect windowEffectOf(WindowMaterial material) =>
     switch (material) {
       WindowMaterial.mica => acrylic.WindowEffect.mica,
       WindowMaterial.micaAlt => acrylic.WindowEffect.tabbed,
       WindowMaterial.acrylic => acrylic.WindowEffect.acrylic,
-      // 能力边界：没有「细亚克力」这个原生效果，只能落到普通亚克力。
+      // 能力边界：DWM 没有「细亚克力」这个效果，只能落到普通亚克力。
       WindowMaterial.acrylicThin => acrylic.WindowEffect.acrylic,
     };
 
 /// 把设置里的材质应用到原生窗口。
 ///
-/// 说明：Windows 有一个**全局**的「透明效果」开关
-/// （设置 → 个性化 → 颜色 → 透明效果）。关掉它之后，
-/// 所有应用的 Mica / 亚克力都不会渲染 —— 这不受程序控制。
-/// 所以这里失败时不做静默处理，而是把结果抛出去由界面提示用户。
+/// ### 2026-10-19：改走 [SystemBackdrop]（WinUI 3 合成控制器）
 ///
-/// 关于 Win11 24H2/25H2：社区反馈（window-vibrancy issue #183）
-/// 显示 Mica 在较新的 Windows 上可能被改坏，而亚克力仍可用。
-/// 若用户反馈「Mica 没效果」，优先建议改用亚克力。
+/// 旧实现走 `flutter_acrylic` → `DwmSetWindowAttribute`，亚克力档在真机上
+/// 是死灰（实测三点全是 `(211,211,211)`），且细亚克力根本不存在。
+/// 现在整条链路交给原生侧（`windows/` 下的插件），Flutter 只负责传参：
+///
+/// ```
+/// applyWindowMaterial(material, dark: …, active: …)
+///   └─ SystemBackdrop.apply → MethodChannel('parse_dl/system_backdrop')
+///        └─ setBackdrop({type, dark, active}) → bool
+/// ```
 ///
 /// ### [dark] 必须传**应用当前的明暗**，不是按材质猜（2026-10-15 修）
 ///
-/// 原来这里写的是 `dark: material == mica || material == micaAlt` ——
-/// 拿「材质类型」当「窗口明暗」用。`flutter_acrylic` 的 `dark` 参数描述的是
-/// **窗口外观是深色还是浅色**（用于系统绘制的标题栏/边框），与选哪种材质
-/// 无关。原写法在浅色模式下选 Mica 会传 `dark: true`、深色模式下选亚克力会
-/// 传 `dark: false`，两处都反了。
+/// 原来这里按「材质是不是 mica」推断明暗。`dark` 描述的是**窗口外观是
+/// 深色还是浅色**（系统绘制的标题栏/边框），与选哪种材质无关。
 ///
-/// ### 细亚克力与亚克力在原生层是同一个效果（能力边界，如实记录）
+/// ### [active] 窗口是否聚焦
 ///
-/// `flutter_acrylic` 在 Windows 上只有 `acrylic` / `mica` / `tabbed` 三个
-/// 材质效果，**没有「细亚克力」这一档**，所以 [WindowMaterial.acrylicThin]
-/// 只能落到 `acrylic`（见 [windowEffectOf] 的映射表）。真机对照时这两张
-/// 截图会一模一样，是预期行为，不是没生效。
+/// 失焦压暗交给合成控制器自己处理（WinUI 的 `IsInputActive` 行为）。
+/// 焦点变化时由调用方重调本函数，不必（也不该）在 Flutter 侧再叠灰纱 ——
+/// 那层纱会把材质盖住（见 `widgets/background_layer.dart` 的应用条件）。
+///
+/// ### 失败不再抛异常
+///
+/// 旧实现「失败时把结果抛出去由界面提示用户」。现在 [SystemBackdrop] 把
+/// 三类失败（非 Windows / `MissingPluginException` / `PlatformException`）
+/// 统一折成 `false` —— 材质挂不上不能让界面崩。调用方读 `ok` 决定窗口底
+/// 走透明还是不透明回退。
 Future<MaterialApplyResult> applyWindowMaterial(
   WindowMaterial material, {
   required bool dark,
+  bool active = true,
 }) async {
-  if (!Platform.isWindows) {
+  // 非 Windows 单独给一句准确的文案：这时不是「系统拒绝」，而是压根没有
+  // 这套材质（Linux/macOS 上窗口由窗口管理器画）。
+  if (!SystemBackdrop.isPlatformSupported) {
     return const MaterialApplyResult(
       ok: false,
       message: '窗口材质仅在 Windows 上可用',
     );
   }
 
-  // **细亚克力走自己的通路**（2026-10-19）：DWM 的 `SYSTEMBACKDROP_TYPE`
-  // 只有五档（自动/无/Mica/Acrylic/MicaAlt），没有「细亚克力」；
-  // `flutter_acrylic` 因此把 acrylicThin 落成普通亚克力，真机上两档像素差为 0。
-  // 这里改用 `SetWindowCompositionAttribute` + `ACCENT_ENABLE_ACRYLICBLURBEHIND`，
-  // 把不透明度从 0xB3 压到 0x60 —— 与参照物 `DesktopAcrylicKind.Thin` 同向。
-  if (material == WindowMaterial.acrylicThin) {
-    final applied = Win32Acrylic.instance.apply(thin: true, dark: dark);
-    if (applied) {
-      return MaterialApplyResult(ok: true, message: '${material.label} 已应用');
-    }
-    // 拿不到 `SetWindowCompositionAttribute`（个别系统没有）→ 回退普通亚克力。
-    debugPrint('细亚克力不可用（SetWindowCompositionAttribute 缺失），回退普通亚克力');
-  } else {
-    // 其它三档走 DWM；切过去之前必须先清掉 Win10 那层模糊，否则会叠成双层。
-    Win32Acrylic.instance.clear();
-  }
+  final applied = await SystemBackdrop.apply(
+    material,
+    dark: dark,
+    active: active,
+  );
 
-  final effect = windowEffectOf(material);
-
-  try {
-    await acrylic.Window.setEffect(effect: effect, dark: dark);
-    return MaterialApplyResult(
-      ok: true,
-      // 四档材质都会落到某个系统效果上，「关闭材质」这个分支没有对象。
-      message: '${material.label} 已应用',
-    );
-  } catch (e) {
-    debugPrint('应用窗口材质失败: $e');
-    return MaterialApplyResult(
-      ok: false,
-      message: '系统拒绝了该材质（$e）',
-    );
-  }
+  return MaterialApplyResult(
+    ok: applied,
+    message: applied
+        ? '${material.label} 已应用'
+        // 合成控制器没挂上：系统版本太低、关掉了「透明效果」、
+        // 或原生插件没编进产物。具体原因在原生侧的 debugPrint 里。
+        : '系统不支持该材质（${material.label}）',
+  );
 }
 
 /// 材质应用结果

@@ -458,21 +458,31 @@ void main() {
       });
     }
 
-    /// **真机路径**：材质可用 ⇒ 底透明，覆盖层叠在「窗口后面的材质」上。
+    /// **真机路径**：材质可用 ⇒ 底透明，Flutter 侧**不再叠灰纱**。
     ///
-    /// 测试里用一块**模拟材质**（WinUI 浅色 Mica ≈ #F3F3F3 / 深色 ≈ #202020）
-    /// 垫在透明底下面 —— 那正是 DWM 在真机上画的东西。覆盖层要能把它压暗，
-    /// 否则真机上「失焦」这件事看不见。
+    /// ### 2026-10-19 语义反转（本轮）
+    ///
+    /// 旧版这条判据要求「材质可用时失焦必须暗 ≥ 10 阶」，靠的是 Flutter
+    /// 自己叠覆盖层。现在材质改由 WinUI 3 合成控制器画（MicaController /
+    /// DesktopAcrylicController），失焦压暗由它们读 `IsInputActive` 完成 ——
+    /// Flutter 再叠一层就是**双重压暗**，而且那层纱会盖住材质本身。
+    ///
+    /// 反转只作用于「材质可用」这一支：材质不可用那一支的像素判据
+    /// （上面两条）**原样保留** —— 那时窗口底是不透明回退色、没有任何
+    /// 系统材质可看，灰纱必须还在。
+    ///
+    /// 测试里仍垫一块**模拟材质**（WinUI 浅色 Mica ≈ #F3F3F3 / 深色 ≈
+    /// #202020），因为真机上底透明后看到的就是它 —— 判据要证明的是
+    /// 「这一层在两档焦点下**逐像素相同**」。
     //
     // 明暗必须**配对**：深色主题配深色 Mica（#202020）、浅色主题配浅色 Mica
-    // （#F3F3F3）。覆盖层颜色是从当前色板算出来的，跨明暗配对（深色主题 +
-    // 浅色材质）在真机上不会出现，量出来的差也没有意义。
+    // （#F3F3F3）。跨明暗配对在真机上不会出现，量出来的差也没有意义。
     for (final (brightness, materialBase) in [
       (Brightness.dark, const Color(0xFF202020)),
       (Brightness.light, const Color(0xFFF3F3F3)),
     ]) {
       final tag = brightness == Brightness.dark ? '深色材质' : '浅色材质';
-      testWidgets('$tag（透明底 + 模拟 DWM 材质）：失焦比聚焦暗 ≥ ${_kMinPixelDelta.toInt()} 阶',
+      testWidgets('$tag（透明底 + 模拟合成控制器材质）：聚焦/失焦**逐像素相同**',
           (tester) async {
         final active = await renderBackdropLuma(
           tester,
@@ -488,16 +498,35 @@ void main() {
           materialAvailable: true,
           underlay: materialBase,
         );
-        final delta = meanOf(active) - meanOf(inactive);
+        final delta = meanAbsDiff(active, inactive);
         // ignore: avoid_print
         print('[$tag] 聚焦 ${meanOf(active).toStringAsFixed(2)} / '
-            '失焦 ${meanOf(inactive).toStringAsFixed(2)} / 差 ${delta.toStringAsFixed(2)}');
+            '失焦 ${meanOf(inactive).toStringAsFixed(2)} / 逐像素差 ${delta.toStringAsFixed(3)}');
         expect(
           delta,
-          greaterThanOrEqualTo(_kMinPixelDelta),
-          reason: '$tag 上失焦只暗了 ${delta.toStringAsFixed(2)} 阶 —— '
-              '覆盖层若太透（alpha 太低）或压暗幅度太小，这里会红。'
-              '这是真机路径：底透明，覆盖层叠在 DWM 材质上',
+          lessThan(0.5),
+          reason: '$tag 上两档焦点渲染出了不同画面（差 ${delta.toStringAsFixed(3)}）—— '
+              '说明 Flutter 侧还在叠灰纱，会盖住合成控制器画的材质。'
+              '失焦压暗应由原生 IsInputActive 负责',
+        );
+
+        // 负控制：同一组断言在**材质不可用**时必须红（那时灰纱必须还在，
+        // 两档画面必须不同）。若这句不抛，说明上面「逐像素相同」是恒真的。
+        final uActive = await renderBackdropLuma(tester,
+            brightness: brightness,
+            focused: true,
+            materialAvailable: false,
+            underlay: materialBase);
+        final uInactive = await renderBackdropLuma(tester,
+            brightness: brightness,
+            focused: false,
+            materialAvailable: false,
+            underlay: materialBase);
+        expect(
+          () => expect(meanAbsDiff(uActive, uInactive), lessThan(0.5)),
+          throwsA(isA<TestFailure>()),
+          reason: '材质不可用时灰纱必须还在（两档画面不同）—— '
+              '这条负控制证明上面那条真的抓得到「灰纱被误删」',
         );
       });
     }
@@ -541,6 +570,85 @@ void main() {
         reason: '覆盖层不生效时 delta 就是 0，判据必须红 —— 证明阈值'
             '（$_kMinPixelDelta）不是「随便写个数都能过」',
       );
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════
+  // 五之二、材质可用 ⇒ **不再自己叠灰纱**（2026-10-19 行为反转）
+  // ══════════════════════════════════════════════════════════
+  //
+  // 材质改由 WinUI 3 的合成控制器画（MicaController /
+  // DesktopAcrylicController），它们自己读 IsInputActive 切不活跃档。
+  // Flutter 侧再叠一层灰纱就是双重压暗，而且那层纱会盖住材质本身 ——
+  // 这正是本轮要消掉的东西。
+  //
+  // 下面两条是**行为反转的正判据**：旧行为（材质可用也叠灰纱）会让它们红。
+
+  group('材质可用 ⇒ 背景层不再自己叠灰纱', () {
+    for (final brightness in [Brightness.dark, Brightness.light]) {
+      final name = brightness == Brightness.dark ? '深色' : '浅色';
+      testWidgets('$name：材质可用时，聚焦/失焦渲染出的 ColoredBox 集合完全相同',
+          (tester) async {
+        Future<List<Color>> boxesFor(bool focused) async {
+          final focusN = ValueNotifier<bool>(focused);
+          final materialN = ValueNotifier<bool>(true);
+          addTearDown(focusN.dispose);
+          addTearDown(materialN.dispose);
+          await pumpBackdrop(tester,
+              brightness: brightness,
+              focus: focusN,
+              materialAvailable: materialN);
+          return backdropBoxColors(tester);
+        }
+
+        final focusedBoxes = await boxesFor(true);
+        final blurredBoxes = await boxesFor(false);
+
+        expect(blurredBoxes, equals(focusedBoxes),
+            reason: '材质可用时焦点不该改变 Flutter 画的任何一层 —— '
+                '失焦压暗由合成控制器的 IsInputActive 负责。'
+                '若这里两档不同，说明灰纱还在叠，材质会被盖住');
+
+        // 负控制：同一组断言在**材质不可用**时必须红（那时灰纱必须还在）。
+        Future<List<Color>> unavailableFor(bool focused) async {
+          final focusN = ValueNotifier<bool>(focused);
+          final materialN = ValueNotifier<bool>(false);
+          addTearDown(focusN.dispose);
+          addTearDown(materialN.dispose);
+          await pumpBackdrop(tester,
+              brightness: brightness,
+              focus: focusN,
+              materialAvailable: materialN);
+          return backdropBoxColors(tester);
+        }
+
+        final uFocused = await unavailableFor(true);
+        final uBlurred = await unavailableFor(false);
+        expect(
+          () => expect(uBlurred, equals(uFocused)),
+          throwsA(isA<TestFailure>()),
+          reason: '材质不可用时灰纱必须还在（两档 ColoredBox 集合不同）—— '
+              '若这句不抛，说明上面「两档相同」是恒真的，判据没有区分力',
+        );
+      });
+    }
+
+    testWidgets('负控制：把「材质可用也叠灰纱」的旧实现喂进同一断言，会红',
+        (tester) async {
+      // 复刻旧行为：无条件叠覆盖层（不看 materialAvailable）。
+      // 用纯函数算出两档颜色，直接跑上面那条相等断言。
+      final base = AppColors.solidFor(Brightness.dark, style: AppStyle.winui);
+      final oldFocused = windowInactiveOverlay(base, focused: true);
+      final oldBlurred = windowInactiveOverlay(base, focused: false);
+
+      expect(
+        () => expect(<Color>[oldBlurred], equals(<Color>[oldFocused])),
+        throwsA(isA<TestFailure>()),
+        reason: '旧实现（材质可用也叠灰纱）下两档颜色不同 —— '
+            '这条证明上面那条相等断言真的抓得到行为回退',
+      );
+      // 前提：两个纯函数本身确实对焦点敏感，否则负控制没有对象。
+      expect(oldBlurred, isNot(equals(oldFocused)));
     });
   });
 

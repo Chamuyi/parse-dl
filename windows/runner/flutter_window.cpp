@@ -4,6 +4,11 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
+// Backdrop material plugin (windows/system_backdrop): drives the DWM system
+// backdrop for the four material tiers. It is not a pub plugin, so it is
+// absent from generated_plugin_registrant and is registered by hand below.
+#include <system_backdrop/system_backdrop_plugin.h>
+
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
 
@@ -25,6 +30,12 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+
+  // Backdrop material: must come after RegisterPlugins -- this needs the
+  // registrar messenger to create the channel, and the native window must
+  // already exist (GetNativeWindow is only valid from here on).
+  system_backdrop::SystemBackdropPlugin::RegisterWithEngine(
+      flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {

@@ -234,6 +234,40 @@ MaterialPreviewSpec materialPreviewSpecOf(WindowMaterial material) =>
       WindowMaterial.acrylicThin => kAcrylicThinPreview,
     };
 
+/// 窗口背景层要叠的**通透膜**颜色（null = 不叠）。
+///
+/// DWM 的 `DWMWA_SYSTEMBACKDROP_TYPE` 只有一档亚克力（值 3），没有细亚克力。
+/// WinAppSDK 的 `DesktopAcrylicKind.Thin` 能表达它，但那条路在 Flutter 的
+/// Win32 窗口上必崩：材质一旦真正合成，窗口第一次状态变化（移动 / 改 Z 序 /
+/// 最小化）就 0xC000027B（STOWED_EXCEPTION，coremessaging.dll）。已试过
+/// 7 种线程模型全部复现，不是队列问题。
+///
+/// 所以细亚克力的可辨差异改在 Flutter 层做 —— 符合本仓已固化的架构结论：
+/// 材质差异必须做在调色层之上的可见层。
+///
+/// 只有 acrylicThin 非 null：其余三档的差异由 DWM 自己表达，再叠膜是画蛇添足。
+///
+/// ### 透明度取值的实测依据（2026-10-20）
+///
+/// 第一版用了 5%（`0x0D`），真机截图**两档肉眼完全一样** —— 逐像素比较
+/// 平均通道差只有 1.7，远低于可辨阈值。原因是背景层在卡片**之下**，
+/// 可视区大部分被不透明卡片盖住，剩下那点背景面积上 5% 的膜几乎不可见。
+///
+/// 参照物的差距比这大得多：两档亚克力预览块在真机上是一深一浅
+/// （普通亚克力亮、细亚克力明显更暗）。这里按同一方向取**能看见**的幅度：
+/// 深色压暗 22%、浅色压暗 18% —— 仍然只作用在背景层（卡片不透明，
+/// 文字压在卡片上），不牺牲任何可读性。
+Color? backdropVeilOf(WindowMaterial material, Brightness brightness) =>
+    switch (material) {
+      WindowMaterial.acrylicThin =>
+        brightness == Brightness.dark
+            // 深色：0x38 ≈ 22%，把材质压到明显更暗的一档
+            ? const Color(0x38000000)
+            // 浅色：0x2E ≈ 18%，浅底上表现为更实的雾面
+            : const Color(0x2E000000),
+      _ => null,
+    };
+
 /// 主题模式。对应设置里的 `themeMode`。
 ///
 /// 2026-10-19 注：这个枚举与 [NavLayout] 一直住在本文件里（历史原因：

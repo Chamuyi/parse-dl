@@ -34,6 +34,9 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
+# 窗口材质插件（windows/system_backdrop）。走系统 dwmapi，
+# 不再需要 Windows App SDK 的元数据、导入库与引导 DLL。
+target_link_libraries(${BINARY_NAME} PRIVATE system_backdrop)
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

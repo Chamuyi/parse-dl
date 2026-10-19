@@ -29,6 +29,7 @@ import 'services/douyin_store.dart';
 import 'services/homepage_store.dart';
 import 'services/settings_store.dart';
 import 'services/window_effect.dart';
+import 'services/window_focus.dart';
 import 'services/window_material_state.dart';
 import 'theme/app_scroll_behavior.dart';
 import 'theme/app_style.dart';
@@ -50,6 +51,14 @@ import 'widgets/title_bar.dart';
 /// 2026-10-19 从纯 Brightness 改成组合键：WinUI 风格会强制材质为 Mica，
 /// 切风格时必须重新应用一次，否则窗口底还停在旧材质上。
 String? _lastAppliedDark;
+
+/// 最近一次**真正下发**到原生窗口的材质与明暗。
+///
+/// 焦点变化时要重调一次（只改 `active`，材质与明暗不变），而焦点回调
+/// 里不适合再读 `BuildContext`（可能已 unmounted）—— 所以在下发点
+/// 顺手记下来，回调直接读这两个变量。
+WindowMaterial? _lastMaterial;
+bool _lastDark = false;
 
 /// 应用版本号。
 ///
@@ -187,11 +196,18 @@ class XDownloaderApp extends StatelessWidget {
             WidgetsBinding.instance.addPostFrameCallback((_) async {
               final r = await applyWindowMaterial(
                 effectiveMaterial,
+                // `dark` 描述窗口外观的明暗，来自 `_resolveBrightness` 算出的
+                // **实际明暗**，不按材质猜（2026-10-15 修过的真 bug）。
                 dark: brightness == Brightness.dark,
+                // 焦点：冷启动时窗口是激活的。失焦后由 `_onWindowFocusChanged`
+                // 重调一次（只改这个参数），材质才不会一直停在启动档。
+                active: windowFocus.isFocused,
               );
+              _lastMaterial = effectiveMaterial;
+              _lastDark = brightness == Brightness.dark;
               // 材质**是否真的挂上了**决定窗口底该透明还是该铺不透明回退色
-              // （见 `BackgroundLayer`）。这里必须回写：系统关掉「透明效果」
-              // 时 `DwmSetWindowAttribute` 会失败，此时底若还透明，桌面就
+              // （见 `BackgroundLayer`）。这里必须回写：系统不支持 / 关掉
+              // 「透明效果」时合成控制器挂不上，此时底若还透明，桌面就
               // 从窗口里透出来。
               windowMaterialAvailable.value = r.ok;
             });
@@ -405,6 +421,16 @@ class _AppShellState extends State<_AppShell> {
   @override
   void initState() {
     super.initState();
+    // 焦点变化 → 把 `active` 重新下发给原生合成控制器。
+    //
+    // WinUI 3 的 MicaController / DesktopAcrylicController 靠这个开关把材质
+    // 切成「不活跃」档（去饱和 + 压亮度）。不接的话材质会一直停在启动时
+    // 那一档，失焦与聚焦长得一模一样。
+    //
+    // **不走 setState**：焦点变化只影响原生窗口，与 widget 树无关 ——
+    // setState 会把整棵外壳（含三个常驻 WebView）白白重建一遍。
+    windowFocus.focused.addListener(_onWindowFocusChanged);
+
     // 启动即落到指定页（`--page=<id>`）。只改**初值**：之后用户点导航
     // 照样走 `_setRoute`，两者不冲突。
     // 只在参数**真的**指向别处时才动初值，默认路径一个字节都不碰。
@@ -419,8 +445,27 @@ class _AppShellState extends State<_AppShell> {
 
   @override
   void dispose() {
+    windowFocus.focused.removeListener(_onWindowFocusChanged);
     _douyinOverlay?.removeListener(_onDouyinOverlayChanged);
     super.dispose();
+  }
+
+  /// 焦点变了就重下发一次材质（材质与明暗沿用上一次真正应用过的值）。
+  ///
+  /// [_lastMaterial] 为 null 表示启动路径那一次还没落地（首帧之后的
+  /// post-frame 回调还没跑）—— 那时不重下发：启动路径会用当时的焦点值
+  /// 自己应用一次，这里再打一发就是重复。
+  ///
+  /// 竞态：两次下发可能重叠（用户快速连点窗口）。原生侧按调用顺序串行
+  /// 执行，最后一次的值生效 —— 与焦点状态一致，不需要额外加锁。
+  void _onWindowFocusChanged() {
+    final material = _lastMaterial;
+    if (material == null) return;
+    applyWindowMaterial(
+      material,
+      dark: _lastDark,
+      active: windowFocus.isFocused,
+    ).then((r) => windowMaterialAvailable.value = r.ok);
   }
 
   void _setRoute(String id) {
@@ -762,10 +807,16 @@ class _AppShellState extends State<_AppShell> {
   /// 2026-10-15 之前这里按「材质是不是 mica」猜明暗，浅色+Mica 与
   /// 深色+亚克力两种组合都传反了。
   Future<void> _applyMaterial(WindowMaterial m) async {
+    final isDark = AppTheme.of(context).brightness == Brightness.dark;
     final r = await applyWindowMaterial(
       m,
-      dark: AppTheme.of(context).brightness == Brightness.dark,
+      dark: isDark,
+      active: windowFocus.isFocused,
     );
+    // 记下这次真正下发的组合：之后焦点变化要沿用同一份材质与明暗重调
+    // （只改 active），否则会退回启动时那一档。
+    _lastMaterial = m;
+    _lastDark = isDark;
     // 窗口底按这个值在「透明（材质透出）」与「不透明回退色」之间二选一。
     windowMaterialAvailable.value = r.ok;
     if (!r.ok && mounted) {

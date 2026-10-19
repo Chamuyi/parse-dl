@@ -64,6 +64,10 @@ endfunction()
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 
+# 窗口材质插件（DWM 系统背景，四档 Mica / 亚克力）。
+# 必须写在 runner 之前：runner 的 CMakeLists 里 target_link_libraries 会引用它。
+add_subdirectory("system_backdrop")
+
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
