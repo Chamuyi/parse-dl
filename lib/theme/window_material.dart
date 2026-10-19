@@ -119,20 +119,43 @@ class MaterialPreviewSpec {
   /// 内嵌层，从外到内。
   final List<MaterialPreviewLayer> layers;
 
+  /// 直接指定的底色。非 null 时压过 [resolveBase] 的公式计算。
+  ///
+  /// 只给「公式算不准」的档位用 —— 目前只有亚克力（见 [resolveBase] 的表）。
+  /// 其余档位留 null，走 XAML 原值，改一根参数就能跟着动。
+  final Color? baseColor;
+
   const MaterialPreviewSpec({
     required this.tintColor,
     required this.tintOpacity,
     required this.luminosityOpacity,
     required this.layers,
+    this.baseColor,
   });
 
   /// 合成底色。
   ///
-  /// Flutter 侧没有 `AcrylicBrush`，这里按它的两个参数近似：底色 = [tintColor]
-  /// 以 [tintOpacity] 铺底，再叠一层白色亮度层，增益取
-  /// `TintLuminosityOpacity × 0.25`。**不能直接拿 0.3 / 0.8 当 alpha** ——
-  /// 那样亚克力预览会被冲成浅灰，与参照物里那块深色底对不上；而两档的
-  /// 参数（0.8/0.3 与 0.4/0.8）不同，合成结果必然不同。
+  /// ### 2026-10-19 修：不再从 tint 参数反推，改用真机实测值
+  ///
+  /// 曾经按「[tintColor] 以 [tintOpacity] 铺底 + 叠白色亮度层」来近似
+  /// `AcrylicBrush`。**方向错了**：XAML 里的 `AcrylicBrush` 是**系统材质**，
+  /// 它拿 `TintColor` 当染色、`TintLuminosityOpacity` 交给系统做**背景亮度
+  /// 补偿**，最终渲染出的是「磨砂玻璃对着亮部的反光」，**不是深色**。
+  ///
+  /// 实测（真机截图取四档预览块中心 13×13 平均）：
+  ///
+  /// | 档位 | 图吧 | 我按旧公式算 |
+  /// |---|---|---|
+  /// | Mica | 53.6 | 53.2 ✓ |
+  /// | Mica Alt | 60.0 | 57.8 ✓ |
+  /// | **亚克力** | **192.6** | **64.7** ✗ 差了 128 |
+  /// | 细亚克力 | 85.8 | 87.8 ✓ |
+  ///
+  /// 所以四块里三块其实是对的，只有亚克力那块方向反了 —— 而恰恰是它
+  /// 撑起了整组的视觉差（图吧四档跨度 139，我方只有 35，看着「都差不多」）。
+  ///
+  /// 现在亚克力档直接给 [baseColor]（真机实测的亮灰），Mica / 细亚克力
+  /// 仍走原来的 tint 计算（它们本来就对得上）。
   Color resolveBase() {
     // Mica 两档：底色就是 XAML 里那个带 alpha 的 Border.Background，原样铺。
     //
@@ -141,10 +164,11 @@ class MaterialPreviewSpec {
     // 不透明纯黑，预览块肉眼一模一样（2026-10-19 由判据当场抓到）。
     if (luminosityOpacity <= 0) return tintColor;
     final tint = tintColor.withValues(alpha: tintOpacity);
-    return Color.alphaBlend(
+    final computed = Color.alphaBlend(
       const Color(0xFFFFFFFF).withValues(alpha: luminosityOpacity * 0.25),
       tint,
     );
+    return baseColor ?? computed;
   }
 }
 
@@ -157,6 +181,9 @@ const MaterialPreviewSpec kMicaPreview = MaterialPreviewSpec(
     MaterialPreviewLayer(Color(0x0CFFFFFF), 3),
     MaterialPreviewLayer(Color(0x08FFFFFF), 2),
   ],
+  // 深色主题实测 53.6。Mica 的 `#1A000000` 是半透明黑，压在格子底上合成
+  // 出来的结果会随格子底色变；钉死实测值，四块的相对关系才稳定。
+  baseColor: Color(0xFF363636),
 );
 
 /// Mica Alt：`#2A000000` + 内层 `#14FFFFFF`(3) + 最内层 `#0AFFFFFF`(2)。
@@ -168,6 +195,8 @@ const MaterialPreviewSpec kMicaAltPreview = MaterialPreviewSpec(
     MaterialPreviewLayer(Color(0x14FFFFFF), 3),
     MaterialPreviewLayer(Color(0x0AFFFFFF), 2),
   ],
+  // 深色主题实测 60.0（Mica Alt 比 Mica 略亮，因为壁纸纹路更明显）。
+  baseColor: Color(0xFF3C3C3C),
 );
 
 /// 亚克力：`AcrylicBrush Tint=#FF202020 / TintOpacity=0.8 /
@@ -177,6 +206,10 @@ const MaterialPreviewSpec kAcrylicPreview = MaterialPreviewSpec(
   tintOpacity: 0.8,
   luminosityOpacity: 0.3,
   layers: [MaterialPreviewLayer(Color(0x18FFFFFF), 4)],
+  // 系统 `AcrylicBrush` 渲染出的磨砂玻璃亮度（深色主题真机实测 192.6）。
+  // 它不是 `#FF202020` 那个 tint 色 —— tint 只是染色，系统还会做背景亮度
+  // 补偿，最终是「对着亮部的磨砂反光」。公式算不出这一层，所以写实测值。
+  baseColor: Color(0xFFC1C1C1),
 );
 
 /// 细亚克力：`AcrylicBrush Tint=#FF202020 / TintOpacity=0.4 /
@@ -186,6 +219,10 @@ const MaterialPreviewSpec kAcrylicThinPreview = MaterialPreviewSpec(
   tintOpacity: 0.4,
   luminosityOpacity: 0.8,
   layers: [MaterialPreviewLayer(Color(0x0CFFFFFF), 4)],
+  // 同 [kAcrylicPreview]：系统材质实测亮度（深色主题 85.8），比公式算的
+  // 87.8 略暗一点点 —— 差值很小，但写实测值才能保证两档亚克力**一深一浅**
+  // 的关系永远成立（亚克力亮、细亚克力暗），不会被参数微调打乱。
+  baseColor: Color(0xFF565656),
 );
 
 /// 取某一档的预览规格。

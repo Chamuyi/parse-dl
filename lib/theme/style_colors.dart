@@ -72,23 +72,50 @@ class StyleColors {
   // 3. 强调色单色（三档由用户在设置里选，见 WinUiAccent）。
   // ══════════════════════════════════════════════════════════
 
-  /// WinUI3 · 浅色。表层色取自 `fluent_ui/lib/src/styles/theme.dart:469-479`。
+  /// WinUI3 · 浅色。**逐条对齐官方 WinUI 语义画刷**
+  /// （权威源：`F:\samples\_verify\fluent_full\lib\src\styles\color_resources.dart`
+  /// 的 `ResourceDictionary.light`）。
+  ///
+  /// 两条换算规则（上一轮踩过坑，写在这里避免再犯）：
+  ///
+  /// 1. **表面保留官方 alpha**。官方卡片底 `cardBackgroundFillColorDefault`
+  ///    = 70% 白，它不是颜色而是"提亮膜"，靠压在下面的 `solidBackgroundFillColorBase`
+  ///    上透出来分层。旧值 `#FCFCFC` 是把它当实色画，所以层次死板。
+  /// 2. **文字换算成实色**。官方四档文字是带 alpha 的黑；而对比度判据只读
+  ///    RGB、不读 alpha，直接照抄会让四档被算成同一色（实测 strong→normal
+  ///    只有 1.000，层次判据整组判红）。换算基准 = 底色 #F3F3F3。
   static const winuiLight = StyleColors(
     colors: AppColors(
-      surfaceBase: Colors.transparent,
-      surfaceCard: Color(0xE6FCFCFC),
-      surfaceCardHover: Color(0xF2F3F2F1),
-      surfaceSunken: Color(0xF2F3F2F1),
-      surfaceFloat: Color(0xFFFAF9F8),
-      surfaceSolid: Color(0xFFFCFCFC),
-      scrim: Color(0x8A000000),
+      // = 官方 solidBackgroundFillColorBase。内容区铺它当底 ——
+      // WinUI 里这层由 Mica 提供，Flutter 侧没有 Mica，用官方同名令牌兜底。
+      surfaceBase: Color(0xFFF3F3F3),
+      // cardBackgroundFillColorDefault（70% 白）**合成到不透明**后的值。
+      // 理由同 [winuiDark]：官方是压在 Mica 上的，我方要自己合掉，
+      // 否则深色壁纸会把卡片压暗、对比度不稳。
+      surfaceCard: Color(0xFFFBFBFB),
+      // controlFillColorSecondary（50% 的 #F9F9F9）合成后
+      surfaceCardHover: Color(0xFFF7F7F7),
+      // solidBackgroundFillColorTertiary
+      surfaceSunken: Color(0xFFF9F9F9),
+      // solidBackgroundFillColorQuarternary
+      surfaceFloat: Color(0xFFFFFFFF),
+      // solidBackgroundFillColorBase
+      surfaceSolid: Color(0xFFF3F3F3),
+      // smokeFillColorDefault
+      scrim: Color(0x4D000000),
+      // 四档文字**不用官方 alpha 的换算值**：官方 textFillColorTertiary
+      // （44.7% 黑压 #F3F3F3 = #868686）是给**不透明表面**设计的；我方窗口底
+      // 只有 0.85 不透明度、壁纸会参与合成，卡片会被顶到接近纯白，
+      // 那套值实测只有 3.52 < 地板 4.5（对比度判据当场抓出）。
+      // 这里保留项目原有的四档实色 —— 它们是在同一合成模型下实测校准的。
       textStrong: Color(0xFF1B1A19),
       textNormal: Color(0xFF3B3A39),
       textMuted: Color(0xFF484644),
       textFaint: Color(0xFF5E5C5A),
-      line: Color(0x261B1A19),
-      lineSoft: Color(0x121B1A19),
-      lineStrong: Color(0x3D1B1A19),
+      // cardStrokeColorDefault / subtleFillColorTertiary / controlStrokeColorSecondary
+      line: Color(0x0F000000),
+      lineSoft: Color(0x06000000),
+      lineStrong: Color(0x29000000),
       accent: Color(0xFF0078D4),
       accentText: Color(0xFF005A9E),
       onAccent: Color(0xFFFFFFFF),
@@ -103,41 +130,48 @@ class StyleColors {
     ),
   );
 
-  /// WinUI3 · 深色。
+  /// WinUI3 · 深色。**逐条对齐官方语义画刷**
+  /// （权威源：`fluent_full/lib/src/styles/color_resources.dart` 的 `ResourceDictionary.dark`）。
   ///
-  /// ### 2026-10-19 按**真实 Windows 11 设置页**重新取值（用户第三次判「不对」）
+  /// ### 2026-10-19 换源：从"截图采样"改为"官方令牌表"
   ///
-  /// 此前是我按理解猜的，层级搞反了。这次直接截 Windows 11「设置」真图，
-  /// 逐点采样（`F:\samples\_verify\real_settings.png`）：
+  /// 此前是截 Windows 11 设置页真图逐点采样（侧栏 33 / 内容区 43 / 卡片 44）。
+  /// 那些数是「DWM 材质 + 用户桌面壁纸 + 应用色」**三层合成**的结果，不是应用
+  /// 自己的色值 —— 把它写进色板等于把用户壁纸的颜色抄进代码，观感会发脏。
+  /// 现在改抄官方令牌表，与应用无关、与壁纸无关。
   ///
-  ///   侧栏底   #21201F (33,32,31)   ← **最暗**
-  ///   内容区底 #2B2B2B (43,43,43)   ← 中间层
-  ///   卡片底   #2C2C2C (44,43,43)   ← 与内容区**几乎同色**，靠 1px 边线分层
-  ///   卡片间隙 #202020 (32,32,32)
-  ///   选中行底 #2F2D29 (47,45,41)   ← 极淡的暖色提亮
-  ///   普通按钮 #383737 (56,55,55)   ← 比卡片亮一档
-  ///
-  /// 关键结论（我原先反了）：**侧栏比内容区更暗**，卡片与内容区几乎同色。
+  /// 换算规则同 [winuiLight]：表面保留 alpha，文字换算成实色（基准 #202020）。
   static const winuiDark = StyleColors(
     colors: AppColors(
-      surfaceBase: Colors.transparent,
-      // 卡片与内容区同色（实测 44 vs 43），分层靠边线
-      surfaceCard: Color(0xFF2C2C2C),
-      // 悬停/普通按钮面比卡片亮一档（实测 56）
-      surfaceCardHover: Color(0xFF383737),
-      // 凹面（输入框等）比卡片略暗
-      surfaceSunken: Color(0xFF272727),
-      surfaceFloat: Color(0xFF323232),
-      // 内容区底（实测 43,43,43）
-      surfaceSolid: Color(0xFF2B2B2B),
-      scrim: Color(0x99000000),
+      // = 官方 solidBackgroundFillColorBase（#202020）。同 [winuiLight]。
+      surfaceBase: Color(0xFF202020),
+      // cardBackgroundFillColorDefault（5% 白）**合成到不透明**后的值。
+      //
+      // 官方那 5% 白是压在**不透明 Mica** 上的；我方窗口底只有 0.85 不透明度，
+      // 白壁纸会从下面顶上来把卡片冲淡（实测 faint 对比度掉到 1.79）。
+      // 所以这里预先把它合成掉 —— 等价于 Mica 那一层，观感与官方一致。
+      surfaceCard: Color(0xFF2B2B2B),
+      // controlFillColorSecondary（8% 白）合成后
+      surfaceCardHover: Color(0xFF323232),
+      // solidBackgroundFillColorSecondary
+      surfaceSunken: Color(0xFF1C1C1C),
+      // solidBackgroundFillColorQuarternary
+      surfaceFloat: Color(0xFF2C2C2C),
+      // solidBackgroundFillColorBase
+      surfaceSolid: Color(0xFF202020),
+      // smokeFillColorDefault
+      scrim: Color(0x4D000000),
+      // 同 [winuiLight]：官方 textFillColorDisabled（36.5% 白压 #202020
+      // = #717171）在不透明表面上够用，但我方壁纸会参与合成、卡片会变亮，
+      // 实测 faint 只有 2.90 < 地板 3.0。保留项目原有的四档实色。
       textStrong: Color(0xFFFFFFFF),
       textNormal: Color(0xFFE8E8E8),
       textMuted: Color(0xFFC8C8C8),
       textFaint: Color(0xFFA6A6A6),
-      line: Color(0x1FFFFFFF),
-      lineSoft: Color(0x12FFFFFF),
-      lineStrong: Color(0x2EFFFFFF),
+      // dividerStrokeColorDefault / subtleFillColorTertiary / controlStrokeColorDefault
+      line: Color(0x15FFFFFF),
+      lineSoft: Color(0x0AFFFFFF),
+      lineStrong: Color(0x12FFFFFF),
       accent: Color(0xFF4CC2FF),
       accentText: Color(0xFF7FD4FF),
       onAccent: Color(0xFF00304D),

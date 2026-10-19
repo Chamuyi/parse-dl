@@ -486,10 +486,21 @@ class _AppShellState extends State<_AppShell> {
                               taskRunning: taskRunning,
                             ),
                           ),
-                        // 内容区**不铺底**（见上面 opaqueShell 删除处的说明）：
-                        // 铺了就把 DWM 材质盖住。可读性由卡片保证。
+                        // 内容区铺 `surfaceBase` = 官方
+                        // `solidBackgroundFillColorBase`（深 #202020 / 浅 #F3F3F3）。
+                        //
+                        // WinUI 里这一层由 **Mica** 提供，应用内容区透明叠上去。
+                        // Flutter 侧没有 Mica，只能铺同名令牌兜底 —— 它同时是
+                        // 卡片（半透明提亮膜）赖以成型的底。
+                        //
+                        // 与已删除的 `opaqueShell` 的区别：那个是**额外**再铺一层
+                        // 不透明实色把材质全盖住；这里是**唯一**的底，且用的就是
+                        // 官方给"窗口底"的令牌，DWM 材质仍从它后面参与合成。
                         Expanded(
-                          child: _buildContent(context, useSidebar),
+                          child: ColoredBox(
+                            color: AppTheme.of(context).colors.surfaceBase,
+                            child: _buildContent(context, useSidebar),
+                          ),
                         ),
                       ],
                     ),

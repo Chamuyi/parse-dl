@@ -480,6 +480,74 @@ void main() {
       }
     });
 
+
+    // ── 四档预览的亮度台阶跨度（2026-10-19 加）──────────────────────
+    //
+    // 上面那条「两两不同」**抓不住真问题**：四档取 53/58/65/88 时它们确实
+    // 两两不同，判据全绿，但肉眼看着「四张图差不多」—— 跨度只有 35。
+    // 参照物实测 54 / 60 / **193** / 86，跨度 139，亚克力那一档跳出去一大截。
+    // 所以真正要钉的是**跨度**与**亚克力是最亮档**，不是「不相等」。
+    test('四档亮度跨度 ≥ 100（参照物实测 139，我方留余量取 100）', () {
+      double luma(Color c) => ((c.r + c.g + c.b) / 3) * 255;
+      final ls = [
+        for (final m in WindowMaterial.values)
+          luma(materialPreviewSpecOf(m).resolveBase()),
+      ];
+      final span = ls.reduce((a, b) => a > b ? a : b) -
+          ls.reduce((a, b) => a < b ? a : b);
+      expect(span, greaterThanOrEqualTo(100),
+          reason: '四档挤在一起时肉眼分不出来（参照物跨度 139）。实测：$ls');
+    });
+
+    test('负控制：亚克力改回旧公式的深色会让跨度判据变红', () {
+      double luma(Color c) => ((c.r + c.g + c.b) / 3) * 255;
+      final ls = [
+        for (final m in WindowMaterial.values)
+          luma(materialPreviewSpecOf(m).resolveBase()),
+      ];
+      final idx = WindowMaterial.values.indexOf(WindowMaterial.acrylic);
+      final broken = [...ls];
+      broken[idx] = 64.7; // 旧公式算出来的深灰
+      final span = broken.reduce((a, b) => a > b ? a : b) -
+          broken.reduce((a, b) => a < b ? a : b);
+      expect(span, lessThan(100),
+          reason: '负控制失效：亚克力改回深色后跨度仍 ≥100，说明判据量错了东西');
+    });
+
+    test('亚克力是四档最亮（参照物 192.6 为四档最高）', () {
+      double luma(Color c) => ((c.r + c.g + c.b) / 3) * 255;
+      final ls = [
+        for (final m in WindowMaterial.values)
+          luma(materialPreviewSpecOf(m).resolveBase()),
+      ];
+      final idx = WindowMaterial.values.indexOf(WindowMaterial.acrylic);
+      for (var i = 0; i < ls.length; i++) {
+        if (i == idx) continue;
+        expect(ls[idx], greaterThan(ls[i]),
+            reason: '亚克力应是四档最亮（磨砂玻璃对亮部反光）。实测：$ls');
+      }
+    });
+
+    test('负控制：亚克力压到最暗会让「最亮」判据变红', () {
+      final idx = WindowMaterial.values.indexOf(WindowMaterial.acrylic);
+      // 构造时**把下标算进去**，不要手写数组——手写下标错位过一次，
+      // 结果负控制自己变红（它确实在起作用，但测的不是想测的东西）。
+      final ls = <double>[54.0, 60.0, 88.0, 86.0]..[idx] = 20.0;
+      final isMax = ls[idx] == ls.reduce((a, b) => a > b ? a : b);
+      expect(isMax, isFalse,
+          reason: '负控制失效：亚克力取 20 后仍是最大值，判据没有区分力（$ls）');
+    });
+
+    test('两档亚克力一亮一暗（亚克力必须比细亚克力亮，参照物 192.6 > 85.8）', () {
+      double luma(Color c) => ((c.r + c.g + c.b) / 3) * 255;
+      final a =
+          luma(materialPreviewSpecOf(WindowMaterial.acrylic).resolveBase());
+      final t =
+          luma(materialPreviewSpecOf(WindowMaterial.acrylicThin).resolveBase());
+      expect(a, greaterThan(t),
+          reason: '两档画反了就像同一张图。实测 $a vs $t');
+    });
+
     testWidgets('层数与 margin 逐档对齐参照物（Mica 两层、亚克力一层）', (tester) async {
       // 参照物 XAML 的嵌套层数：Mica / Mica Alt 各两层内嵌，
       // 两个亚克力各一层。层数不同 → 渲染结果必然不同，
