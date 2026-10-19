@@ -20,6 +20,15 @@ import 'package:parse_dl/widgets/sidebar_nav.dart';
 ///   3. 刷新 / 重开后**保留选择**（写进 settings.json）
 ///   4. 两种导航的**布局与交互风格一致**
 void main() {
+  // 视口按**真机逻辑尺寸**（`main.dart` 的 1280×920 → 客户区实测 1267×912）。
+  // Dock 改走参照物 Top 形态后条目变宽（图标格 40 + 条目外边距 4+4），
+  // 自然宽约 911 —— 测试默认的 800×600 会 `RenderFlex overflowed`，
+  // 把「两种导航同序」这条断言变成测不出来。语义不变，只是换了量尺。
+  final view =
+      TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher.views.first;
+  view.physicalSize = const Size(1267, 912);
+  view.devicePixelRatio = 1.0;
+
   // ────────────────────────────────────────────────────────────
   // ① 枚举与持久化
   // ────────────────────────────────────────────────────────────
@@ -198,9 +207,37 @@ void main() {
       final sidebarIcons = _iconsOf(tester);
 
       expect(sidebarIcons, dockIcons, reason: '同一组导航项在两种布局里必须同序同图标');
+      // **负控制（内建）**：图标名会重复（两个「下载管理」共用 download_rounded），
+      // 只比图标等于没比顺序。所以下面那条按 **id** 比 —— id 全局唯一。
     });
 
-    testWidgets('图标格尺寸：Dock 36 方格 / 侧边栏原生 16', (tester) async {
+    // ★ 既有约束的守护判据：**两种导航形态展示完全相同的页面与顺序**。
+    //
+    // 与上面那条的分工：上面比「图标」，两个模块的「下载管理」共用同一个
+    // `download_rounded`、三条「设置」共用 `tune_rounded`，图标序列相等**不能**
+    // 推出页面序列相等（把两个模块的子项对调，图标序列照样相同）。这条按
+    // `NavItem.id`（全局唯一）比，才真正钉住「页面与顺序」。
+    testWidgets('两种导航形态展示完全相同的页面与顺序（按 id，非按图标）', (tester) async {
+      final expectedIds = [for (final i in kNavItems) i.id];
+
+      await tester.pumpWidget(_navHarness(NavLayout.dock));
+      final dockIds = _idsOf(tester);
+      expect(dockIds, expectedIds, reason: 'Dock 的页面 id 序列必须严格等于 kNavItems');
+
+      await tester.pumpWidget(_navHarness(NavLayout.sidebar));
+      final sidebarIds = _idsOf(tester);
+      expect(sidebarIds, expectedIds, reason: '侧边栏的页面 id 序列必须严格等于 kNavItems');
+
+      expect(sidebarIds, dockIds,
+          reason: '两种导航形态必须展示完全相同的页面与顺序（既有约束）');
+
+      // 负控制：id 序列必须真的**互不相同地**一一对应 —— 若 id 有重复，
+      // 上面的「相等」会在实现把两个页面互换时仍然成立。
+      expect(expectedIds.toSet(), hasLength(expectedIds.length),
+          reason: '负控制：kNavItems 的 id 必须唯一，否则顺序断言恒真');
+    });
+
+    testWidgets('图标格尺寸：Dock 40 方格（Top 形态）/ 侧边栏原生 16', (tester) async {
       // **2026-10-19 用户裁定放开「两种布局共用同一图标格常量」**。
       // 原因：参照物 tubatool 用的是原生 `NavigationViewItem`，条目形态是
       // 「16px 图标 + 12 间距 + 文字、行高 40、圆角 4」；Dock 是自绘的悬浮
@@ -209,11 +246,14 @@ void main() {
       //
       // 仍然保留的约束：**同一布局内部必须一致**（下面逐项量）。
 
-      // Dock：图标格本身就是导航项本体，36×36
+      // Dock：图标格本身就是导航项本体。**钉字面量 40**，不写 NavMetrics.iconBox
+      // —— 用常量自比会恒真（负控制实测：把 iconBox 改回 36 判据照样绿），
+      // 而这里要守的正是「照参照物 Top 形态条目 40 高」这条事实。
       await tester.pumpWidget(_navHarness(NavLayout.dock));
       expect(
         tester.getSize(find.byType(NavIconBox).first),
-        const Size(NavMetrics.iconBox, NavMetrics.iconBox),
+        const Size(40, 40),
+        reason: 'Dock 条目 = 参照物 `.win-nav-item` 的 height: 40px',
       );
 
       // 侧边栏：原生条目，图标格 16×16
@@ -224,7 +264,7 @@ void main() {
       );
     });
 
-    testWidgets('图标本体大小：Dock 18 / 侧边栏原生 16', (tester) async {
+    testWidgets('图标本体大小：Dock 16（Top 形态）/ 侧边栏原生 16', (tester) async {
       // 同 ① 的理由：两套形态各用各的常量，但各自必须钉死。
       await tester.pumpWidget(_navHarness(NavLayout.dock));
       final dockIconSize = tester
@@ -236,15 +276,27 @@ void main() {
           .widget<Icon>(find.byIcon(Icons.home_rounded))
           .size;
 
-      expect(dockIconSize, NavMetrics.iconSize);
-      expect(sidebarIconSize, NavMetrics.sidebarIconSize);
+      // 同样钉字面量：两套形态各自照参照物的 16（Dock = Top 形态条目图标
+      // `width: 16px; font-size: 16px`，侧边栏 = Left 形态条目图标 16）。
+      expect(dockIconSize, 16);
+      expect(sidebarIconSize, 16);
     });
 
-    testWidgets('激活态：两种布局都用「主题色底 + 描边 + 发光」且只标记当前页', (tester) async {
+    testWidgets('激活标记：两种形态各一套，且都只标记当前页', (tester) async {
+      // **2026-10-19 T4b 语义反转（形态差异，非判据放宽）**：
+      // 原先断言「两种布局都用主题色底」，那是 Dock 还是自绘方块的年代。
+      // 现在两套形态分别照抄参照物的两个 PaneDisplayMode：
+      //   * Dock = Top 形态 → 选中**无底色**，标记是贴条目底边的 3px 横条
+      //     （`WinNavigationView.vue:3337-3340` + `:3219-3224`）；
+      //   * 侧边栏 = Left 形态 → 选中**有** `SubtleFillColorSecondary` 底色，
+      //     标记是贴左缘的 3×16 竖条（`:3071-3073` + `:3207-3213`）。
+      // 仍然钉死的是：**同一时刻恰好只有一个激活标记，且必须落在当前页上**。
       for (final layout in NavLayout.values) {
         await tester.pumpWidget(_navHarness(layout, route: 'settings'));
 
-        // 全树里吃到「主题色激活底色」的容器有且只有一个
+        final isDock = layout == NavLayout.dock;
+
+        // ① 选中底色：只有侧边栏（Left 形态）才有，且恰好一处
         final activeBoxes = find.byWidgetPredicate(
           (w) =>
               w is AnimatedContainer &&
@@ -252,17 +304,61 @@ void main() {
               (w.decoration! as BoxDecoration).color ==
                   StyleNavActive.winuiDark.color,
         );
-        expect(activeBoxes, findsOneWidget, reason: '$layout：应当只有一个导航项处于激活态');
+        expect(activeBoxes, isDock ? findsNothing : findsOneWidget,
+            reason: isDock
+                ? 'Dock（Top 形态）：选中项 background: transparent，不得有选中底色'
+                : '侧边栏（Left 形态）：恰好一个导航项带选中底色');
 
-        // 而且就是当前页那一项
-        expect(
-          find.ancestor(
-            of: find.byIcon(Icons.settings_rounded),
-            matching: activeBoxes,
-          ),
-          findsOneWidget,
-          reason: '$layout：激活底色必须落在当前页图标上',
+        if (!isDock) {
+          expect(
+            find.ancestor(
+              of: find.byIcon(Icons.settings_rounded),
+              matching: activeBoxes,
+            ),
+            findsOneWidget,
+            reason: '侧边栏：选中底色必须落在当前页图标上',
+          );
+        }
+
+        // ② 指示物：恰好一个激活，且落在当前页上
+        final marker = isDock ? NavIndicatorBar : NavIndicatorDot;
+        final markers = find.byType(marker);
+        expect(markers, findsNWidgets(kNavItems.length),
+            reason: '$layout：每个导航项都挂一个指示物（用透明度切显隐）');
+
+        final visible = <int>[];
+        for (var i = 0; i < markers.evaluate().length; i++) {
+          final w = tester.widget(markers.at(i));
+          if ((w as dynamic).active as bool) visible.add(i);
+        }
+        expect(visible, [kNavItems.indexWhere((e) => e.id == 'settings')],
+            reason: '$layout：只有当前页的指示物可见');
+
+        // ③ 指示物必须**落在当前页那一个条目上**（不是邻居）。
+        //    指示物与图标格是 Stack 里的兄弟节点（不是祖先链），所以按
+        //    几何量：Dock 的横条中心 x、侧边栏的竖条中心 y 必须与当前页
+        //    图标格中心对齐（同一条对齐轴上）。
+        final activeMarker = find.byWidgetPredicate(
+          (w) => w.runtimeType == marker && (w as dynamic).active as bool,
         );
+        expect(activeMarker, findsOneWidget);
+        final cells = find.byType(NavIconContent);
+        final currentIndex = kNavItems.indexWhere((e) => e.id == 'settings');
+        final cellCenter = tester.getCenter(cells.at(currentIndex));
+        final markerCenter = tester.getCenter(activeMarker);
+        final aligned = isDock
+            ? (markerCenter.dx - cellCenter.dx).abs()
+            : (markerCenter.dy - cellCenter.dy).abs();
+        expect(aligned, lessThan(0.51),
+            reason: '$layout：激活指示物必须与当前页条目对齐（横条对 x、竖条对 y）');
+        // 负控制：它不该同时与**别的**条目也对齐，否则上面这条可能恒真
+        final otherIndex = currentIndex == 0 ? 1 : 0;
+        final otherCenter = tester.getCenter(cells.at(otherIndex));
+        final otherDelta = isDock
+            ? (markerCenter.dx - otherCenter.dx).abs()
+            : (markerCenter.dy - otherCenter.dy).abs();
+        expect(otherDelta, greaterThan(10),
+            reason: '$layout：指示物不能落在别的条目上（否则对齐断言测不出错位）');
       }
     });
 
@@ -332,25 +428,45 @@ void main() {
       expect(navIconColor(c, active: false, hover: false), c.textStrong);
     });
 
-    testWidgets('激活指示点两种布局各一个，且当前页才有', (tester) async {
-      for (final layout in NavLayout.values) {
-        await tester.pumpWidget(_navHarness(layout, route: 'auto-task'));
-        final dots = find.byType(NavIndicatorDot);
-        expect(
-          dots,
-          findsNWidgets(kNavItems.length),
-          reason: '$layout：每个导航项都挂一个指示点（用透明度切显隐）',
-        );
+    testWidgets('两种形态的指示物几何各自照参照物（横条 3×2 / 竖条 3×16）', (tester) async {
+      // Dock = Top 形态：贴条目底边 4px 的**横条**，高 3、圆角 2
+      // （`WinNavigationView.vue:3195-3198` + `:3219-3224`）。
+      await tester.pumpWidget(_navHarness(NavLayout.dock, route: 'auto-task'));
+      final bars = find.byType(NavIndicatorBar);
+      expect(bars, findsNWidgets(kNavItems.length));
+      final activeBar = tester.getSize(
+        find.byWidgetPredicate(
+          (w) => w is NavIndicatorBar && w.active,
+        ),
+      );
+      expect(activeBar.height, 3, reason: '横条高 3（NavMetrics.barHeight）');
+      expect(activeBar.width, 40,
+          reason: '横条宽 = 条目宽 40（参照物里 indicator 宽度随条目）');
 
-        final visible = <int>[];
-        for (var i = 0; i < dots.evaluate().length; i++) {
-          final w = tester.widget<NavIndicatorDot>(dots.at(i));
-          if (w.active) visible.add(i);
-        }
-        expect(visible, [
-          kNavItems.indexWhere((e) => e.id == 'auto-task'),
-        ], reason: '$layout：只有当前页的指示点可见');
-      }
+      // **贴底位置**：`.win-nav-top-bar .win-nav-indicator { bottom: 4px }`
+      // （`WinNavigationView.vue:3219-3224`）。只钉尺寸的话，把 bottom 改成 0
+      // 判据照样绿（负控制实测过），所以必须量「横条底边距条目底边 4px」。
+      final barRect = tester.getRect(
+        find.byWidgetPredicate((w) => w is NavIndicatorBar && w.active),
+      );
+      final cellRect = tester.getRect(find.byType(NavIconBox).first);
+      expect(
+        cellRect.bottom - barRect.bottom,
+        closeTo(4, 0.51),
+        reason: '横条必须贴条目底边内侧 4px（参照物 bottom: 4px）',
+      );
+      // 负控制（内建）：横条不能沉到条目之外，也不能悬在中间
+      expect(barRect.top, greaterThan(cellRect.top + 30),
+          reason: '横条必须在条目下半部（否则上面那条位置断言测不出偏移）');
+
+      // 侧边栏 = Left 形态：贴左缘的**竖条**，宽 3、高 16、圆角 1.5
+      // （`:3207-3213`）。
+      await tester.pumpWidget(_navHarness(NavLayout.sidebar, route: 'auto-task'));
+      final sideBar = tester.getSize(
+        find.byWidgetPredicate((w) => w is NavActiveBar && w.active),
+      );
+      expect(sideBar.width, 3);
+      expect(sideBar.height, 16, reason: '侧边栏竖条高 16');
     });
 
     testWidgets('后台任务红点两种布局都只出现在「自动执行」上', (tester) async {
@@ -641,6 +757,18 @@ class _InteractiveSidebarState extends State<_InteractiveSidebar> {
 
 /// kNavItems 的图标顺序，作为「两种布局必须同序」的基准
 final _expectedIconOrder = [for (final i in kNavItems) i.icon];
+
+/// 按**渲染顺序**读出界面上实际画出来的页面 id。
+///
+/// 与 [_iconsOf] 的区别：图标会重复（同一图形被多个页面共用），
+/// id 唯一 —— 只有它能把「页面与顺序」真正钉住。
+List<String> _idsOf(WidgetTester tester) {
+  final cells = find.byType(NavIconContent);
+  return [
+    for (var i = 0; i < cells.evaluate().length; i++)
+      tester.widget<NavIconContent>(cells.at(i)).item.id,
+  ];
+}
 
 /// 按**渲染顺序**读出界面上实际画出来的导航图标。
 ///

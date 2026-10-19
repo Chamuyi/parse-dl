@@ -5,14 +5,20 @@ import '../theme/app_theme.dart';
 import 'app_card.dart';
 import 'nav_items.dart';
 
-/// 底部悬浮 Dock（类 macOS）。
+/// 底部悬浮 Dock —— 形态照抄参照物 `NavigationView` 的 **Top 形态**（水平导航条）。
 ///
-/// 结构：Logo | 分隔线 | 5 个导航图标。
-/// 交互细节：图标悬停放大上浮 + 气泡标签 + 激活态蓝底与下方指示点。
+/// 结构：Logo | 分隔线 | 导航图标（顺序严格等于 `kNavItems`）。
+/// 条目几何逐值取自参照物同一仓库的官方复刻
+/// `tubatool/website-winui3/src/components/WinNavigationView.vue`：
+/// 条目 40 高 / 图标 16 / 圆角 4 / 选中无底色 / 贴底 3×2 强调色横条。
 ///
-/// **导航项、图标格、激活装饰、指示点、分隔线全部来自 `nav_items.dart`**，
-/// 与常规侧边栏（`widgets/sidebar_nav.dart`）共享同一套实现，
-/// 因此两种导航的布局语言与交互反馈天然一致。
+/// **导航项集合与顺序、图标格、激活装饰、分隔线全部来自 `nav_items.dart`**，
+/// 与常规侧边栏（`widgets/sidebar_nav.dart`）共享同一套实现与同一份
+/// `kNavItems` —— 两种导航**展示完全相同的页面与顺序**（既有约束）。
+/// 差异只在**形态**：Dock = 顶部条（贴底横条 + 无选中底色），
+/// 侧边栏 = 左侧栏（贴左缘竖条 + `SubtleFillColorSecondary` 底色）。
+/// 这两套形态在原生的 `NavigationViewPaneDisplayMode` 里就是 `Top` 与 `Left`
+/// （参照物 `MainWindow.xaml.cs:883-885` 在这两者间切换）。
 ///
 /// **布局注意（曾出过 bug）**：
 /// 1. Row 必须 `CrossAxisAlignment.center`。之前用 `.end` 是**底部对齐**，
@@ -38,8 +44,11 @@ class Dock extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppFloat(
       radius: 12,
-      // 底部留 10px：容纳浮在图标下方 7px 的激活指示点（它不占 Row 布局）
-      padding: const EdgeInsets.only(left: 8, right: 8, top: 6, bottom: 10),
+      // 上下各 2 = 参照物条目 `margin: 2px 4px` 的垂直那一半
+      // （`WinNavigationView.vue:3237`）；左右各 8 是浮条自身的内缘留白
+      // （原生 Top 导航条整体 `margin: 0 4px`，但那是通栏条、不是浮条，
+      // 本项无对应值，沿用改造前的 8）。条目的横向 4 由 [_DockIcon] 自己带。
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         // 必须 center —— 见类文档第 1 条（用 end 会让 Logo 沉底）
@@ -69,7 +78,13 @@ class Dock extends StatelessWidget {
             ),
           ),
 
-          const NavDivider(axis: Axis.vertical, length: 24),
+          // 分隔线逐值照参照物 Top 形态 `.win-nav-item-separator`：
+          // 高 24、外边距左 3 右 4（`WinNavigationView.vue:3278-3285`）。
+          const NavDivider(
+            axis: Axis.vertical,
+            length: 24,
+            margin: EdgeInsets.only(left: 3, right: 4),
+          ),
 
           // ⓪ 置顶项（总览）—— 不属于任何模块，软件打开就落在它上面。
           //    Dock 是图标式导航，这里直接平铺在三个模块之前。
@@ -81,7 +96,13 @@ class Dock extends StatelessWidget {
               onTap: () => onSelect(item.id),
             ),
 
-          const NavDivider(axis: Axis.vertical, length: 24),
+          // 分隔线逐值照参照物 Top 形态 `.win-nav-item-separator`：
+          // 高 24、外边距左 3 右 4（`WinNavigationView.vue:3278-3285`）。
+          const NavDivider(
+            axis: Axis.vertical,
+            length: 24,
+            margin: EdgeInsets.only(left: 3, right: 4),
+          ),
 
           // 两个下载模块的图标。Dock 是图标式导航、没有展开层级，
           // 所以直接平铺，靠**组间分隔线** + 每组开头的**单字徽标**
@@ -98,7 +119,13 @@ class Dock extends StatelessWidget {
                 showDot: taskRunning && item.id == 'auto-task',
                 onTap: () => onSelect(item.id),
               ),
-            const NavDivider(axis: Axis.vertical, length: 24),
+            // 分隔线逐值照参照物 Top 形态 `.win-nav-item-separator`：
+            // 高 24、外边距左 3 右 4（`WinNavigationView.vue:3278-3285`）。
+            const NavDivider(
+              axis: Axis.vertical,
+              length: 24,
+              margin: EdgeInsets.only(left: 3, right: 4),
+            ),
           ],
 
           // 全局项（设置 / 关于）—— 不属于任何模块
@@ -139,8 +166,13 @@ class _DockIconState extends State<_DockIcon> {
   Widget build(BuildContext context) {
     final c = AppTheme.colorsOf(context);
 
+    // 条目外边距逐值照参照物 Top 形态：`.win-nav-item` 是
+    // `height: 40px; margin: 2px 4px`（`WinNavigationView.vue:3235-3237`）。
+    // 本 Dock 的条目是纯图标格（无文字），条目宽 = 图标格 40，
+    // 于是条目之间自然得到 4 + 4 = 8px 的横向间距；垂直那 2px 由 Dock 的
+    // 外层 padding 统一承担（首尾条目也一样有）。
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Tooltip(
         message: t(widget.item.label),
         // 悬停即可触发（默认要等 500ms，对 Dock 来说太迟钝）
@@ -178,9 +210,9 @@ class _DockIconState extends State<_DockIcon> {
                 label: tf(widget.active ? '切换到{label}（当前）' : '切换到{label}', {
                   'label': t(widget.item.label),
                 }),
-                // Stack：图标本体决定本块尺寸（36×36），指示点浮在正下方不占布局 ——
+                // Stack：图标格决定本块尺寸，激活横条贴它的**底边内侧**、不占布局 ——
                 // 这样整块与 Logo(28) 在 Row 里 center 对齐后完全同心。
-                // 若让指示点占布局，图标会被顶高 3.5px，与 Logo 对不齐。
+                // 若让横条占布局，图标会被顶高，与 Logo 对不齐。
                 child: Stack(
                   clipBehavior: Clip.none,
                   alignment: Alignment.center,
@@ -191,6 +223,9 @@ class _DockIconState extends State<_DockIcon> {
                       hover: _hover,
                       focused: focused,
                       showDot: widget.showDot,
+                      // Top 形态的选中项**无底色**，标记由下面那条贴底横条承担
+                      // （`WinNavigationView.vue:3337-3340`）。
+                      activeFill: false,
                       // macOS 式：悬停放大并上浮（数值刻意收小，避免图标乱跳）
                       hoverTransform:
                           Matrix4.translationValues(0, _hover ? -3 : 0, 0) *
@@ -201,11 +236,17 @@ class _DockIconState extends State<_DockIcon> {
                           ),
                     ),
 
-                    // 激活指示点：浮在图标正下方 7px（靠 AppFloat 的底部 padding 容纳），
-                    // 始终占位显示（用 opacity 切显隐），避免激活切换时 Dock 高度跳动
+                    // 激活横条：**贴条目底边内侧 4px**（`bottom: 4px`），宽度等于
+                    // 条目宽、高 3px、圆角 2px —— 逐值照参照物 Top 形态的
+                    // `.win-nav-indicator`（`WinNavigationView.vue:3195-3198` +
+                    // `:3219-3224`）。它替代了原先浮在图标下方 7px 的圆点：
+                    // 原生 Top 形态没有圆点，标记只有这一条横线。
+                    // 始终占位（用 opacity 切显隐），切换激活项时 Dock 高度不跳动。
                     Positioned(
-                      bottom: -7,
-                      child: NavIndicatorDot(active: widget.active),
+                      left: 0,
+                      right: 0,
+                      bottom: 4,
+                      child: NavIndicatorBar(active: widget.active),
                     ),
                   ],
                 ),

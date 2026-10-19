@@ -16,21 +16,31 @@ import 'package:parse_dl/widgets/nav_items.dart';
 ///
 /// 这两个都不靠肉眼能稳定发现（改一次可能又改回去），所以固化成几何断言。
 void main() {
-  /// Dock 内的内容高度 = 图标方块 36px
-  const iconSize = 36.0;
+  /// Dock 内的内容高度 = 图标格边长（照参照物 Top 形态条目 40 高）
+  const iconSize = NavMetrics.iconBox;
 
-  /// AppFloat padding：top 6 + bottom 10
-  const padTop = 6.0;
-  const padBottom = 10.0;
+  /// AppFloat padding：上下各 2（= 参照物条目 `margin: 2px 4px` 的垂直那一半）
+  const padTop = 2.0;
+  const padBottom = 2.0;
 
-  /// 设计高度 = 上下边框 2 + padding 16 + 内容 36
-  const expectedDockHeight = 2 + padTop + padBottom + iconSize; // 54
+  /// 设计高度 = 上下边框 2 + padding 4 + 内容 40
+  const expectedDockHeight = 2 + padTop + padBottom + iconSize; // 46
+
+  /// 真机窗口的逻辑尺寸（`main.dart` 的 `WindowOptions.size` 1280×920，
+  /// 客户区实测 1267×912）。Dock 在 Top 形态下条目变宽（图标格 40 + 条目
+  /// 外边距 4+4），自然宽已超过测试默认的 800×600 视口 —— 那会触发
+  /// `RenderFlex overflowed`，把「宽度只由常量决定」这条断言变成测不出。
+  /// 这里显式按真机视口量，语义不变。
+  const viewport = Size(1267, 912);
 
   Future<void> pumpDock(
     WidgetTester tester, {
     String route = 'home',
     bool taskRunning = false,
   }) async {
+    tester.view.physicalSize = viewport;
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       AppTheme(
         colors: AppColors.dark,
@@ -54,22 +64,27 @@ void main() {
 
   /// Dock 的自然宽度，**按导航数据算**而不是写死一个数。
   ///
-  /// 组成：① 上下边框 2 + 左右 padding 16 ② Logo 28 ③ Logo 后那条分隔线 9
-  /// （1px 线 + 左右各 4 边距）④ 每个模块 = 单字徽标 22 + 5 + 每项 40
-  /// （36 图标格 + 左右各 2）+ 组尾分隔线 9 ⑤ 全局项每项 40。
-  /// ⑥ 置顶项（`kNavPrimary`）每项 40 + 它后面那条分隔线 9 —— 「总览」排在
+  /// 组成：① 上下边框 2 + 左右 padding 16 ② Logo 28 ③ Logo 后那条分隔线 8
+  /// （1px 线 + 左 3 右 4 边距，照参照物 `.win-nav-item-separator`）
+  /// ④ 每个模块 = 单字徽标 22 + 5 + 每项 40（= 图标格 40，Dock 条目自身无外边距）
+  /// + 组尾分隔线 8 ⑤ 全局项每项 40。
+  /// ⑥ 置顶项（`kNavPrimary`）每项 40 + 它后面那条分隔线 8 —— 「总览」排在
   /// 三个模块之前，与模块尾一样跟一条竖向分隔线（见 `dock.dart` 的渲染顺序）。
   /// 写死数字的话，加第三个模块就得回来改一次；按数据算才是这条断言真正想说的
-  /// 「宽度只由这些常量决定，没被气泡/指示点撑歪」。
+  /// 「宽度只由这些常量决定，没被气泡/指示条撑歪」。
   double dockNaturalWidth() {
-    double w = 2 + 16 + 28 + 9;
+    // 竖向分隔线总宽 = 1px 线 + 左 3 + 右 4（照参照物 `.win-nav-item-separator`）
+    const double divider = 1 + 3 + 4;
+    // 每个 Dock 条目 = 图标格 40 + 左右外边距 4+4（照参照物 `margin: 2px 4px`）
+    const double item = NavMetrics.iconBox + 8;
+    double w = 2 + 16 + 28 + divider;
     for (final _ in kNavPrimary) {
-      w += 40.0 + 9;
+      w += item + divider;
     }
     for (final g in kNavGroups) {
-      w += 22 + 5 + 40.0 * g.children.length + 9;
+      w += 22 + 5 + item * g.children.length + divider;
     }
-    return w + 40.0 * kNavStandalone.length;
+    return w + item * kNavStandalone.length;
   }
 
   testWidgets('Dock 高度紧凑：气泡标签不再占用布局（曾 90px，现 54px）', (tester) async {
@@ -80,11 +95,11 @@ void main() {
       size.height,
       expectedDockHeight,
       reason:
-          'Dock 高度应为 54px（2 边框 + 6 上 + 36 内容 + 10 下）；'
+          'Dock 高度应为 46px（2 边框 + 2 上 + 40 内容 + 2 下）；'
           '若又变成 ~90px，说明悬停标签被放回了布局流里',
     );
-    // 宽度只需容纳内容，不该被撑满屏幕
-    expect(size.width, lessThan(800));
+    // 宽度只需容纳内容，不该被撑满屏幕（留出至少 20% 余量）
+    expect(size.width, lessThan(viewport.width * 0.8));
     expect(size.width, closeTo(dockNaturalWidth(), 0.51),
         reason: '宽度必须正好等于导航常量拼出来的自然宽度（多出来的就是被撑歪了）');
   });
@@ -149,14 +164,15 @@ void main() {
     );
   });
 
-  testWidgets('导航图标水平间距：同模块内恒为 40px，模块之间被分隔线拉开', (tester) async {
+  testWidgets('导航图标水平间距：同模块内恒为 48px，模块之间被分隔线拉开', (tester) async {
     await pumpDock(tester);
 
     final dxs = [for (final c in iconCenters(tester)) c.dx];
     expect(dxs.length, kNavItems.length);
 
-    // 图标方块 36 + 左右各 2 的外边距 = 40
-    const gap = iconSize + 4;
+    // 条目中心间距 = 图标格 40 + 两侧各 4 的条目外边距（参照物 Top 形态
+    // `.win-nav-item { margin: 2px 4px }`，`WinNavigationView.vue:3237`）
+    const gap = iconSize + 8;
 
     // 同一模块内部：相邻图标恒为 40px（这是「未被指示点/气泡撑歪」的原断言）
     //
@@ -200,7 +216,7 @@ void main() {
     );
   });
 
-  testWidgets('激活指示点不参与布局：切换激活项 Dock 高度不变', (tester) async {
+  testWidgets('激活指示条不参与布局：切换激活项 Dock 高度不变', (tester) async {
     await pumpDock(tester, route: 'home');
     final h1 = tester.getSize(find.byType(AppFloat)).height;
 

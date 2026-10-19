@@ -126,14 +126,35 @@ final kDockItems = kNavItems;
 /// 抽出来的目的：两种布局用**同一套数值**，避免出现
 /// 「Dock 图标 18px、侧边栏图标 16px」这类不一致。
 abstract final class NavMetrics {
-  /// 图标方块边长 —— Dock 的图标格、侧边栏每行的图标格都用它
-  static const double iconBox = 36;
+  /// 图标格边长 —— **Dock 专用**（侧边栏走 [sidebarIconSize]）。
+  ///
+  /// **2026-10-19 T4b 改为 40**：参照物原生 `NavigationView` 的 Top 形态
+  /// （水平导航条）条目是 `height: 40px`（同一仓库的 Web 复刻
+  /// `website-winui3/src/components/WinNavigationView.vue:3235`），
+  /// 且 `padding: 0 12px` + 图标 16 → 内容宽恰为 `16 + 12 + 12 = 40`
+  /// （`:3245-3258`）。原值 36 是本项目自绘的，无参照物依据。
+  static const double iconBox = 40;
 
-  /// 图标本体大小
-  static const double iconSize = 18;
+  /// 图标本体大小 —— **Dock 专用**（侧边栏走 [sidebarIconSize]）。
+  ///
+  /// **2026-10-19 T4b 改为 16**：参照物 Top 形态条目 `> .icon` 是
+  /// `width: 16px; font-size: 16px`（`WinNavigationView.vue:3248-3251`）；
+  /// 原生 XAML 那边 `MainWindow.xaml:287-289` 的 `FontIcon` 不覆盖尺寸，
+  /// 走系统 `NavigationViewItem` 模板默认的 16。原值 18 无依据，
+  /// 也与已照原生改过的侧边栏（`sidebarIconSize = 16`）不一致。
+  static const double iconSize = 16;
 
-  /// 激活指示点直径
+  /// 激活指示点直径（圆点形态，侧边栏用）
   static const double dot = 4;
+
+  /// 激活指示条尺寸（**横向导航条形态**，Dock 用）。
+  ///
+  /// 参照物 Top 形态：`height: 3px; border-radius: 2px;
+  /// background: var(--accent-base)`（`WinNavigationView.vue:3195-3198`
+  /// 的 `.win-nav-indicator` + `:3219-3224` 的
+  /// `.win-nav-top-bar .win-nav-indicator`）。宽度等于条目宽。
+  static const double barHeight = 3;
+  static const double barRadius = 2;
 
   /// 导航项圆角
   static const double radius = 12;
@@ -188,12 +209,19 @@ abstract final class NavMetrics {
 /// 它是几何而不是装饰参数，且两布局的锚定位置不同（侧边栏 `left:11px`、
 /// Dock 形态下对齐行头）——由侧边栏行与 Dock 图标格用 [NavActiveBar] 表达，
 /// 三套风格共用同一条，不作为区分点。
+/// [activeFill] 为 false 时**不画选中底色**，只保留透明描边与圆角 ——
+/// 这是参照物 **Top 形态**（水平导航条）的画法：
+/// `.win-nav-top-bar .win-nav-item.is-selected { background: transparent; }`
+/// （`WinNavigationView.vue:3337-3340`），选中标记由贴条目底边的
+/// 强调色横条承担（`:3219-3224`），不是底色。侧边栏（Left 形态）相反，
+/// 走 `--subtle-secondary` 底 + 贴左缘竖条，所以那里保持默认 true。
 BoxDecoration navItemDecoration(
   AppColors c, {
   required bool active,
   bool focused = false,
   AppStyle style = AppStyle.winui,
   Brightness brightness = Brightness.light,
+  bool activeFill = true,
 }) {
   if (focused) {
     // 焦点框 = 1px 描边 + 向外撑 1.5px 的硬边。单圈 1px 在 125% 缩放下只有
@@ -205,8 +233,13 @@ BoxDecoration navItemDecoration(
     if (active) {
       // 既选中又被聚焦：底色仍走该风格的选中画法（frosted = selectedDecoration，
       // liquid/clay = 同一套令牌底），这里只把描边与柔光换成焦点框。
-      return _activeDecorationFor(c, style, active: true, brightness: brightness)
-          .copyWith(border: ring, boxShadow: hardGlow);
+      return _activeDecorationFor(
+        c,
+        style,
+        active: true,
+        brightness: brightness,
+        fill: activeFill,
+      ).copyWith(border: ring, boxShadow: hardGlow);
     }
     return BoxDecoration(
       color: Colors.transparent,
@@ -216,7 +249,13 @@ BoxDecoration navItemDecoration(
     );
   }
   if (active) {
-    return _activeDecorationFor(c, style, active: true, brightness: brightness);
+    return _activeDecorationFor(
+      c,
+      style,
+      active: true,
+      brightness: brightness,
+      fill: activeFill,
+    );
   }
   return BoxDecoration(
     // **不再画悬停底色**（2026-10-17 用户裁定删除该效果）。
@@ -251,6 +290,7 @@ BoxDecoration _activeDecorationFor(
   AppStyle style, {
   required bool active,
   Brightness brightness = Brightness.light,
+  bool fill = true,
 }) {
   // 导航行圆角随风格：WinUI3 的 NavigationView 选中项是 4px 圆角，
   // 另三套沿用 NavMetrics.radius（12）。这一条是「形态」而不是「颜色」，
@@ -277,8 +317,16 @@ BoxDecoration _activeDecorationFor(
   // 浅色 `0x1A0078D4`（10% 强调色）、深色 `0x264CC2FF`，都无描边无发光。
   final t = style.navActiveOf(brightness);
   final radius = BorderRadius.circular(rowRadius);
-  final glow =
-      t.glow == null ? null : [kNavActiveGlow.copyWith(color: t.glow)];
+  final glow = t.glow == null ? null : [kNavActiveGlow.copyWith(color: t.glow)];
+  if (!fill) {
+    // Top 形态：选中底**透明**，标记交给贴条目底边的强调色横条。
+    // 仍保留透明描边（宽度恒 1px，避免切换瞬间文字/图标跳格）。
+    return BoxDecoration(
+      color: Colors.transparent,
+      borderRadius: radius,
+      border: Border.all(color: Colors.transparent, width: 1),
+    );
+  }
   return BoxDecoration(
     gradient: t.gradient,
     color: t.gradient == null ? t.color : null,
@@ -417,11 +465,24 @@ Color navIconColor(AppColors c, {required bool active, required bool hover}) {
 /// 同属「分组标记」，因此共用这一个实现，只有轴向与长度不同。
 ///
 /// [length] 为 null 表示占满交叉轴（侧边栏用）。
+///
+/// **Dock 传 `length: 24` + `margin: EdgeInsets.only(left: 3, right: 4)`**：
+/// 逐值照参照物 Top 形态的 `.win-nav-item-separator` ——
+/// `width: 1px; height: 24px; margin: 0 4px 0 3px`
+/// （`WinNavigationView.vue:3278-3285`）。侧边栏（Left 形态）分隔线横跨整栏、
+/// 上下各留 6，保持默认。
 class NavDivider extends StatelessWidget {
   final Axis axis;
   final double? length;
 
-  const NavDivider({super.key, required this.axis, this.length});
+  /// 覆盖默认外边距。默认值按布局分：竖向 4/4（Dock）、横向 6/6（侧边栏）。
+  ///
+  /// Dock 传参照物 Top 形态的值 —— `.win-nav-item-separator` 是
+  /// `width: 1px; height: 24px; margin: 0 4px 0 3px`
+  /// （`WinNavigationView.vue:3278-3285`），即左 3 右 4。
+  final EdgeInsets? margin;
+
+  const NavDivider({super.key, required this.axis, this.length, this.margin});
 
   @override
   Widget build(BuildContext context) {
@@ -431,9 +492,11 @@ class NavDivider extends StatelessWidget {
     return Container(
       width: vertical ? 1 : (length ?? double.infinity),
       height: vertical ? (length ?? double.infinity) : 1,
-      margin: vertical
-          ? const EdgeInsets.symmetric(horizontal: 4)
-          : const EdgeInsets.symmetric(vertical: 6),
+      margin:
+          margin ??
+          (vertical
+              ? const EdgeInsets.symmetric(horizontal: 4)
+              : const EdgeInsets.symmetric(vertical: 6)),
       color: c.line,
     );
   }
@@ -460,11 +523,14 @@ class NavRunningDot extends StatelessWidget {
   }
 }
 
-/// 激活指示点 —— Dock 与侧边栏共用。
+/// 激活指示点 —— **侧边栏专用**（圆点形态）。
 ///
-/// 两种布局里它都**浮在导航项之外、不参与布局**（Dock 在图标下方、
-/// 侧边栏在图标左侧），所以用 [AnimatedOpacity] 切显隐而不是增删节点，
-/// 这样切换激活项时容器尺寸不会跳动。
+/// 它**浮在导航项之外、不参与布局**（侧边栏里在行外左侧），所以用
+/// [AnimatedOpacity] 切显隐而不是增删节点，这样切换激活项时容器尺寸不会跳动。
+///
+/// Dock 不再用它：参照物原生 `NavigationView` 的 **Top 形态**（水平导航条）
+/// 指示物是**贴着条目底边的横条**，不是浮在条目外的圆点
+/// （`WinNavigationView.vue:3219-3224`）。横条见 [NavIndicatorBar]。
 class NavIndicatorDot extends StatelessWidget {
   final bool active;
 
@@ -481,6 +547,39 @@ class NavIndicatorDot extends StatelessWidget {
         width: NavMetrics.dot,
         height: NavMetrics.dot,
         decoration: BoxDecoration(color: c.accent, shape: BoxShape.circle),
+      ),
+    );
+  }
+}
+
+/// 激活指示**条** —— **Dock 专用**（横向导航条形态）。
+///
+/// 逐值照参照物 Top 形态：`.win-nav-indicator` 是
+/// `height: 3px; border-radius: 2px; background: var(--accent-base)`
+/// （`WinNavigationView.vue:3195-3198`），`.win-nav-top-bar` 下贴条目底边
+/// `bottom: 4px`（`:3219-3224`）。宽度**不写死** —— 它等于条目宽，
+/// 由调用方（Dock 的图标格）用 [Positioned] 撑满。
+///
+/// 与侧边栏的 [NavActiveBar]（3×16 竖条）同属「激活指示物」，但形态与
+/// 锚定位置都不同：那是左侧栏的贴左缘竖条，这是顶部条的贴底横条。
+class NavIndicatorBar extends StatelessWidget {
+  final bool active;
+
+  const NavIndicatorBar({super.key, required this.active});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppTheme.colorsOf(context);
+
+    return AnimatedOpacity(
+      opacity: active ? 1 : 0,
+      duration: const Duration(milliseconds: 160),
+      child: Container(
+        height: NavMetrics.barHeight,
+        decoration: BoxDecoration(
+          color: c.accent,
+          borderRadius: BorderRadius.circular(NavMetrics.barRadius),
+        ),
       ),
     );
   }
@@ -543,6 +642,11 @@ class NavIconBox extends StatelessWidget {
   /// Dock 的悬停效果是「上浮 + 放大」，由调用方注入 transform。
   final Matrix4? hoverTransform;
 
+  /// 是否画选中底色。**Dock 传 false** —— 参照物 Top 形态的选中项
+  /// `background: transparent`（`WinNavigationView.vue:3337-3340`），
+  /// 标记由贴底横条 [NavIndicatorBar] 承担。
+  final bool activeFill;
+
   const NavIconBox({
     super.key,
     required this.item,
@@ -551,6 +655,7 @@ class NavIconBox extends StatelessWidget {
     required this.showDot,
     this.focused = false,
     this.hoverTransform,
+    this.activeFill = true,
   });
 
   @override
@@ -574,6 +679,7 @@ class NavIconBox extends StatelessWidget {
         focused: focused,
         style: t.style,
         brightness: t.brightness,
+        activeFill: activeFill,
       ),
       child: NavIconContent(
         item: item,
