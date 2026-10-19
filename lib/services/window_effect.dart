@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_acrylic/flutter_acrylic.dart' as acrylic;
 
+import 'win32_acrylic.dart';
+
 import '../theme/window_material.dart';
 
 /// 材质 → 原生窗口效果的映射。
@@ -78,6 +80,23 @@ Future<MaterialApplyResult> applyWindowMaterial(
       ok: false,
       message: '窗口材质仅在 Windows 上可用',
     );
+  }
+
+  // **细亚克力走自己的通路**（2026-10-19）：DWM 的 `SYSTEMBACKDROP_TYPE`
+  // 只有五档（自动/无/Mica/Acrylic/MicaAlt），没有「细亚克力」；
+  // `flutter_acrylic` 因此把 acrylicThin 落成普通亚克力，真机上两档像素差为 0。
+  // 这里改用 `SetWindowCompositionAttribute` + `ACCENT_ENABLE_ACRYLICBLURBEHIND`，
+  // 把不透明度从 0xB3 压到 0x60 —— 与参照物 `DesktopAcrylicKind.Thin` 同向。
+  if (material == WindowMaterial.acrylicThin) {
+    final applied = Win32Acrylic.instance.apply(thin: true, dark: dark);
+    if (applied) {
+      return MaterialApplyResult(ok: true, message: '${material.label} 已应用');
+    }
+    // 拿不到 `SetWindowCompositionAttribute`（个别系统没有）→ 回退普通亚克力。
+    debugPrint('细亚克力不可用（SetWindowCompositionAttribute 缺失），回退普通亚克力');
+  } else {
+    // 其它三档走 DWM；切过去之前必须先清掉 Win10 那层模糊，否则会叠成双层。
+    Win32Acrylic.instance.clear();
   }
 
   final effect = windowEffectOf(material);

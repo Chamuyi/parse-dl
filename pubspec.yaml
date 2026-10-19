@@ -21,6 +21,12 @@ dependencies:
   flutter_acrylic: ^1.1.0
   # 无边框窗口、拖动、最小化/最大化/关闭
   window_manager: ^0.4.2
+  # 细亚克力要自己调 `SetWindowCompositionAttribute`（DWM 的
+  # SYSTEMBACKDROP_TYPE 只有五档、没有「细亚克力」）。
+  # 这两个包本来就在依赖树里（window_manager / webview_windows 带进来的），
+  # 但 `depend_on_referenced_packages` 要求显式声明才能 import。
+  ffi: ^2.1.0
+  win32: ^5.15.0
   # 选背景图
   file_picker: ^8.1.4
 
