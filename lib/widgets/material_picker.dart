@@ -185,12 +185,19 @@ class _MaterialTileState extends State<_MaterialTile> {
                   width: 2,
                 ),
               ),
+              // 窄窗口下这一格只有约 140px 宽：预览块 48 + 间距 8 = 56，
+              // 文字列剩不到 84px，中文两行必然撑破（实测溢出 3.3px）。
+              // 所以预览块也包 Flexible、文字列用 Expanded —— 两边都能缩，
+              // 窄时文字先省略，不让卡片被撑开。
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  MaterialPreviewSwatch(
-                    key: ValueKey('material-preview-${m.id}'),
-                    material: m,
+                  Flexible(
+                    flex: 0,
+                    child: MaterialPreviewSwatch(
+                      key: ValueKey('material-preview-${m.id}'),
+                      material: m,
+                    ),
                   ),
                   const SizedBox(width: 8),
                   Flexible(

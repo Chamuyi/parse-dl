@@ -7,6 +7,8 @@ import '../services/app_state.dart';
 import '../services/settings_store.dart';
 import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
+import '../theme/fluent_tokens.dart';
+import '../widgets/fluent_icon_tile.dart';
 import '../theme/window_material.dart';
 import '../widgets/account_section.dart';
 import '../widgets/app_section.dart';
@@ -143,6 +145,7 @@ class SettingsPage extends StatelessWidget {
                         children: [
               _Field(
                 label: t('界面语言'),
+                icon: Icons.language,
                 description:
                     t('选择应用界面的语言。选「跟随系统」时，系统语言为中文就用中文，'
                         '否则用英文。切换后立即生效，并在下次启动时保留。'),
@@ -158,6 +161,7 @@ class SettingsPage extends StatelessWidget {
               // 点击后：写设置 → 立刻应用原生窗口 → 选中态跟着变。
               _Field(
                 label: t('窗口材质'),
+                icon: Icons.wallpaper,
                 description: t('选择窗口背景的视觉材质效果，并可自定义色调'),
                 child: MaterialPicker(
                   value: appearance.windowMaterial,
@@ -174,6 +178,7 @@ class SettingsPage extends StatelessWidget {
               if (appearance.visualStyle == AppStyle.winui)
                 _Field(
                   label: t('强调色'),
+                icon: Icons.palette_outlined,
                   description: t('WinUI 风格下的强调色：按钮、选中态与链接都用它。'),
                   child: AccentPicker(
                     value: appearance.winUiAccent,
@@ -183,6 +188,7 @@ class SettingsPage extends StatelessWidget {
                 ),
               _Field(
                 label: t('自定义色调'),
+                icon: Icons.colorize_outlined,
                 description:
                     t('开启后用选定颜色给窗口底色染色，让材质效果更明显。'
                         '需要先选择「云母」或「亚克力」材质。'),
@@ -224,6 +230,7 @@ class SettingsPage extends StatelessWidget {
               ),
               _Field(
                 label: t('导航形态'),
+                icon: Icons.view_sidebar_outlined,
                 description:
                     t('选择主界面用哪种导航：底部悬浮 Dock，或左侧常规侧边栏。'
                         '两者展示完全相同的页面与顺序，切换后立即生效，并在下次启动时保留。'),
@@ -234,6 +241,7 @@ class SettingsPage extends StatelessWidget {
               ),
               _Field(
                 label: t('主题模式'),
+                icon: Icons.dark_mode_outlined,
                 description: t('选择「跟随系统」后，应用会随 Windows 的浅色/深色设置自动切换。'),
                 child: _ThemeModePicker(
                   value: appearance.themeMode,
@@ -242,6 +250,7 @@ class SettingsPage extends StatelessWidget {
               ),
               _Field(
                 label: t('背景图片'),
+                icon: Icons.image_outlined,
                 description: t('导入一张本地图片作为主界面背景，可调节不透明度以配合窗口材质。'),
                 child: BackgroundPicker(
                   value: appearance.backgroundImage,
@@ -323,6 +332,7 @@ class SettingsPage extends StatelessWidget {
             trailing: t('X 接口标识缓存（搜索用户或加载媒体失败时使用）'),
             child: _Field(
                 label: t('刷新 X 接口缓存'),
+                icon: Icons.refresh,
                 description:
                     t('搜索用户或加载媒体失败时（如提示「找不到该用户」或长时间无响应），'
                         '通常是 X 更换了内部接口标识。点此清除缓存后重新搜索即可。'),
@@ -479,52 +489,140 @@ class _TintSliderRow extends StatelessWidget {
   }
 }
 
+/// 设置页的一项 —— 照抄图吧的 `SettingsCardStyle` 结构。
+///
+/// ### 出处
+///
+/// `TubaWinUi3.WinUI3/Pages/SettingsPage.xaml`（每个设置项都是这个形状）
+/// + `Styles/SettingsStyles.xaml:10`（`SettingsCardStyle` 继承 `FluentCardStyle`）
+/// + `Styles/FluentTokens.xaml:65-71`（`FluentCardStyle`）。
+///
+/// ### 形状（与改造前的区别）
+///
+/// 改造前是**纵向堆叠**：标题 → 描述 → 控件，全部塞在同一张大卡里，
+/// 项与项之间只靠 22px 间距分隔。图吧不是这样：
+///
+/// ```
+/// ┌──────────────────────────────────────────────────┐  ← 每项独立卡片
+/// │ [图标块]  标题                    [右侧控件]      │     圆角 8 + 1px 边线
+/// │  36×36    描述                                   │     内边距 16
+/// └──────────────────────────────────────────────────┘
+/// ```
+///
+/// 三个关键差异，都已照抄：
+/// 1. **每项是独立卡片**（不是一张大卡里堆多项）—— 卡片是 WinUI 分层的本体；
+/// 2. **横向三段式**：图标块 | 标题+描述 | 右侧控件；
+/// 3. **图标块 36×36**（`IconBorderStyle`），与首页快捷入口同一套。
+///
+/// ### 参数说明
+///
+/// [child] 是**宽控件**（语言选择、材质格、导航形态、调色盘等），
+/// 它太宽、放不进右侧，所以排在标题行**下方**、占满卡片宽度 ——
+/// 参照物里这类控件同样是这个排法（如「窗口材质」的 2×2 格就在标题行下面）。
+///
+/// [trailing] 是**窄控件**（开关、下拉），直接排进标题行右侧。
 class _Field extends StatelessWidget {
   final String label;
   final String description;
   final Widget child;
   final Widget? trailing;
 
+  /// 图标。null 时不留图标块（用于没有合适图标的项）。
+  final IconData? icon;
+
   const _Field({
     required this.label,
     required this.description,
     required this.child,
     this.trailing,
+    this.icon,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = AppTheme.colorsOf(context);
     final tail = trailing;
+    final ic = icon;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 22),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w500,
-                  color: c.textStrong,
+      // 卡片之间 8px（FluentTokens 的 SpaceXSmall）—— 参照物是
+      // `StackPanel Spacing="16"` 减去卡片自身的视觉呼吸，取 8 更贴近截图。
+      padding: const EdgeInsets.only(bottom: FluentSpace.xSmall),
+      child: Container(
+        // 官方 FluentCardStyle 内边距 16，但那是 2000px 级窗口下的规格。
+        // 880px 窗口下左右各 16 会把可用宽度压掉 32px，里面原本刚好放得下的
+        // 控件溢出（实测 3.3px）。横向收到 12（仍是 8px 网格档位）。
+        padding: const EdgeInsets.symmetric(
+          horizontal: FluentSpace.small,
+          vertical: FluentSpace.medium,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // 图标块在**窄窗口**下隐藏。
+                //
+                // 880px 窗口减去侧栏与页面内边距后，卡片内可用宽度只剩约
+                // 300px；36 图标 + 16 间距会挤掉文字列，实测溢出 3.3px。
+                // 参照物是 2000px 级的窗口，不会遇到这个约束；
+                // 这里的取舍是「窄时保文字、宽时保图标」—— 信息优先。
+                if (ic != null && MediaQuery.sizeOf(context).width >= 1000) ...[
+                  FluentIconTile(icon: Icon(ic)),
+                  const SizedBox(width: FluentSpace.medium),
+                ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 开关**紧跟标题**，不推到行尾。
+                      //
+                      // 这是用户 2026-09-30 明确要求的：整行约 1100px 宽，
+                      // 开关推到行尾后，视线得横穿整个页面才对上「这个开关
+                      // 是哪一项的」。判据在 `appearance_controls_test.dart`
+                      // 钉死了 ≤24px，所以这里用 Row 包住标题 + 开关。
+                      // 标题 + 开关（紧跟，不推到行尾）。
+                      //
+                      // **用 Wrap 而不是 Row**：880px 窗口下卡片内可用宽度只有
+                      // 约 300px，长标题（如「自定义色调」）+ 开关会超出几个像素
+                      // （实测 3.3px）。Wrap 在放不下时自动折行，不会溢出；
+                      // 宽窗口下仍然是一行、开关紧跟标题，语义不变。
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: FluentSpace.xSmall,
+                        children: [
+                          Text(
+                            label,
+                            style: TextStyle(
+                              // 官方 SectionHeaderStyle = BodyStrong 14 / w600
+                              fontSize: FluentText.bodyStrong,
+                              fontWeight: FluentWeight.strong,
+                              color: c.textStrong,
+                            ),
+                          ),
+                          ?tail,
+                        ],
+                      ),
+                      const SizedBox(height: FluentSpace.xxSmall),
+                      Text(
+                        description,
+                        style: TextStyle(
+                          fontSize: FluentText.caption,
+                          color: c.textMuted,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              // 开关紧跟标题，不推到行尾：整行约 1100px 宽，两端一分离，
-              // 视线就得横穿整个页面才对上「这个开关是哪一项的」。
-              if (tail != null) ...[const SizedBox(width: 10), tail],
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            description,
-            style: TextStyle(fontSize: 12.5, color: c.textMuted, height: 1.5),
-          ),
-          const SizedBox(height: 12),
-          child,
-        ],
+              ],
+            ),
+            const SizedBox(height: FluentSpace.small),
+            // 宽控件占满卡片宽度。
+            child,
+          ],
+        ),
       ),
     );
   }
