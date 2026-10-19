@@ -251,9 +251,21 @@ Future<void> main(List<String> args) async {
   // 不再是 const：窗口标题要按当前语言查表。
   // 注意这是**启动时**定的一次 —— 运行中切语言不会改 OS 层标题，
   // 但窗口是无边框自绘标题栏，OS 标题只在任务栏悬停时露出来，下次启动即正确。
+  // **尺寸要乘 devicePixelRatio**（2026-10-19 真机取证）。
+  //
+  // 链路上两处口径不一致：
+  //   * `windows/runner/win32_window.cpp:140` 创建窗口时写的是
+  //     `Scale(size.width, scale_factor)` —— **逻辑像素**，会乘 DPI；
+  //   * `window_manager.setSize` 走 `SetWindowPos` —— **物理像素**，不乘。
+  // 不补偿的话，runner 先按 1280×1.25=1600 建窗，随后这里又把它改回
+  // 1280 物理 = 1267 逻辑 —— 等于把窗口缩小了 20%，右栏被窗口右缘切断
+  // （真机 `设置` / `关于` 两页都能看到）。
+  // 乘上 DPR 后窗口物理 1600、逻辑 1280，与设计稿一致。
+  final dpr =
+      WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
   final windowOptions = WindowOptions(
-    size: const Size(_kWindowWidth, _kWindowHeight),
-    minimumSize: const Size(_kMinWindowWidth, _kMinWindowHeight),
+    size: const Size(_kWindowWidth, _kWindowHeight) * dpr,
+    minimumSize: const Size(_kMinWindowWidth, _kMinWindowHeight) * dpr,
     center: true,
     // 无边框：标题栏由我们自己画
     titleBarStyle: TitleBarStyle.hidden,
