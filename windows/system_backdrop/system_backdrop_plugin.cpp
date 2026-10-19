@@ -30,6 +30,40 @@ constexpr DWORD kDwmSystemBackdropType = 38;
 // DWMWA_USE_IMMERSIVE_DARK_MODE; 20 is the value since Windows 11 22H2
 // (older builds used 19, which current Windows ignores).
 constexpr DWORD kDwmUseImmersiveDarkMode = 20;
+// DWMWA_CAPTION_COLOR. COLOR_NONE (0xFFFFFFFE) stops DWM from painting the
+// system caption background, which would otherwise cover the material. Same
+// value the flutter_acrylic Windows plugin uses.
+constexpr DWORD kDwmCaptionColor = 35;
+
+// SetWindowCompositionAttribute / WCA_ACCENT_POLICY. This undocumented pair is
+// the step that actually makes the material visible.
+//
+// Measured on hardware (2026-10-20): with DwmExtendFrameIntoClientArea alone
+// the client area renders as opaque BLACK -- DWM starts compositing the glass
+// region, but Flutter's surface keeps covering it. Calling
+// SetWindowCompositionAttribute with ACCENT_DISABLED turns OFF the window's
+// redirection/compositing override, which is what lets Flutter's pixels and
+// the DWM material blend instead of one hiding the other. flutter_acrylic does
+// exactly this before every DwmSetWindowAttribute call.
+constexpr DWORD kAccentDisabled = 0;
+constexpr DWORD kAccentEnableAcrylicBlurBehind = 4;
+constexpr int kWcaAccentPolicy = 19;
+
+struct AccentPolicy {
+  int accent_state;
+  int accent_flags;
+  DWORD gradient_color;
+  int animation_id;
+};
+
+struct WinCompAttrData {
+  DWORD attrib;
+  void* data;
+  SIZE_T size;
+};
+
+using SetWindowCompositionAttributeFn =
+    BOOL(WINAPI*)(HWND, WinCompAttrData*);
 
 constexpr int kBackdropNone = 1;
 constexpr int kBackdropMica = 2;
@@ -98,9 +132,51 @@ class BackdropController {
     const HWND top = ::GetAncestor(hwnd_, GA_ROOT);
     if (top == nullptr) return false;
 
+    // Step 0: turn OFF the window's compositing override before touching DWM.
+    // Without this the client area stays opaque black and hides the material
+    // (measured 2026-10-20). Mirrors flutter_acrylic's Windows plugin, which
+    // does this before every DwmSetWindowAttribute call.
+    if (auto* user32 = ::GetModuleHandleW(L"user32.dll")) {
+      auto set_attr = reinterpret_cast<SetWindowCompositionAttributeFn>(
+          ::GetProcAddress(user32, "SetWindowCompositionAttribute"));
+      if (set_attr != nullptr) {
+        AccentPolicy accent{};
+        accent.accent_state = static_cast<int>(kAccentDisabled);
+        accent.accent_flags = 2;
+        accent.gradient_color = 0;
+        accent.animation_id = 0;
+        WinCompAttrData data{};
+        data.attrib = static_cast<DWORD>(kWcaAccentPolicy);
+        data.data = &accent;
+        data.size = sizeof(accent);
+        set_attr(top, &data);
+      }
+    }
+
     const BOOL dark_flag = dark ? TRUE : FALSE;
     ::DwmSetWindowAttribute(top, kDwmUseImmersiveDarkMode, &dark_flag,
                             sizeof(dark_flag));
+
+    // All three calls are required (measured on hardware, 2026-10-20).
+    //
+    // Setting SYSTEMBACKDROP_TYPE alone returns S_OK but does NOT composite
+    // anything: the real-machine screenshot showed the window beneath with
+    // sharp text and no blur at all.
+    //
+    // The flutter_acrylic Windows plugin has always done this correctly and
+    // does two more things we had missed:
+    //   1) DwmExtendFrameIntoClientArea(hwnd, {-1,-1,-1,-1}) -- extends the
+    //      DWM frame over the whole client area. This is the precondition for
+    //      the material to be drawn there; negative margins are the documented
+    //      "sheet of glass" form.
+    //   2) DwmSetWindowAttribute(CAPTION_COLOR, 0xFFFFFFFE) -- COLOR_NONE,
+    //      removes the system caption tint that would otherwise cover it.
+    MARGINS margins{-1, -1, -1, -1};
+    ::DwmExtendFrameIntoClientArea(top, &margins);
+
+    COLORREF color_none = 0xFFFFFFFE;  // COLOR_NONE
+    ::DwmSetWindowAttribute(top, kDwmCaptionColor, &color_none,
+                            sizeof(color_none));
 
     const HRESULT hr = ::DwmSetWindowAttribute(
         top, kDwmSystemBackdropType, &backdrop, sizeof(backdrop));
@@ -112,8 +188,9 @@ class BackdropController {
     // previous flutter_acrylic path did, and its removal is what makes the
     // tier switch visible.
     if (backdrop == kBackdropNone) {
-      MARGINS margins{0, 0, 0, 0};
-      ::DwmExtendFrameIntoClientArea(top, &margins);
+      // Restore the normal frame so the desktop stops showing through.
+      MARGINS reset_margins{0, 0, 0, 0};
+      ::DwmExtendFrameIntoClientArea(top, &reset_margins);
     }
 
     // |active| is deliberately unused: DWM dims Mica on focus loss by itself,
