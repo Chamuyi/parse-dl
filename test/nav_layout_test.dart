@@ -200,23 +200,32 @@ void main() {
       expect(sidebarIcons, dockIcons, reason: '同一组导航项在两种布局里必须同序同图标');
     });
 
-    testWidgets('图标格尺寸共用同一常量（18px 图标 / 36px 格子）', (tester) async {
-      // Dock：图标格本身就是导航项本体
+    testWidgets('图标格尺寸：Dock 36 方格 / 侧边栏原生 16', (tester) async {
+      // **2026-10-19 用户裁定放开「两种布局共用同一图标格常量」**。
+      // 原因：参照物 tubatool 用的是原生 `NavigationViewItem`，条目形态是
+      // 「16px 图标 + 12 间距 + 文字、行高 40、圆角 4」；Dock 是自绘的悬浮
+      // 方块（36px 格）。两者本来就是两套形态，硬绑成同一个常量会让
+      // 侧边栏永远做不成 WinUI 的样子。
+      //
+      // 仍然保留的约束：**同一布局内部必须一致**（下面逐项量）。
+
+      // Dock：图标格本身就是导航项本体，36×36
       await tester.pumpWidget(_navHarness(NavLayout.dock));
       expect(
         tester.getSize(find.byType(NavIconBox).first),
         const Size(NavMetrics.iconBox, NavMetrics.iconBox),
       );
 
-      // 侧边栏：图标内容装在一个同样 36 的格子里
+      // 侧边栏：原生条目，图标格 16×16
       await tester.pumpWidget(_navHarness(NavLayout.sidebar));
       expect(
         tester.getSize(find.byType(NavIconContent).first),
-        const Size(NavMetrics.iconBox, NavMetrics.iconBox),
+        const Size(NavMetrics.sidebarIconSize, NavMetrics.sidebarIconSize),
       );
     });
 
-    testWidgets('图标本体大小两种布局一致', (tester) async {
+    testWidgets('图标本体大小：Dock 18 / 侧边栏原生 16', (tester) async {
+      // 同 ① 的理由：两套形态各用各的常量，但各自必须钉死。
       await tester.pumpWidget(_navHarness(NavLayout.dock));
       final dockIconSize = tester
           .widget<Icon>(find.byIcon(Icons.home_rounded))
@@ -228,7 +237,7 @@ void main() {
           .size;
 
       expect(dockIconSize, NavMetrics.iconSize);
-      expect(sidebarIconSize, NavMetrics.iconSize);
+      expect(sidebarIconSize, NavMetrics.sidebarIconSize);
     });
 
     testWidgets('激活态：两种布局都用「主题色底 + 描边 + 发光」且只标记当前页', (tester) async {
@@ -316,7 +325,11 @@ void main() {
         reason: '激活优先于悬停',
       );
       expect(navIconColor(c, active: false, hover: true), c.textStrong);
-      expect(navIconColor(c, active: false, hover: false), c.textMuted);
+      // **2026-10-19 用户裁定**：未选中项改用主文本色（`textStrong`）。
+      // 原先是 `textMuted`，在深色窗口材质上侧边栏文字暗到几乎读不出来
+      // （真机截图里整列像被抹掉）。WinUI `NavigationViewItem` 未选中态
+      // 本来就是主文本色，选中态才换强调色 —— 这里照抄它。
+      expect(navIconColor(c, active: false, hover: false), c.textStrong);
     });
 
     testWidgets('激活指示点两种布局各一个，且当前页才有', (tester) async {

@@ -252,9 +252,13 @@ class _SidebarGroupHeaderState extends State<_SidebarGroupHeader> {
               'hint': t(widget.expanded ? '点击收起' : '点击展开'),
             }),
             child: Container(
-              height: NavMetrics.iconBox + 4,
+              // 原生 `NavigationViewItem` 单行 40、顶层左缩进 16。
+              height: NavMetrics.sidebarRowHeight,
               margin: const EdgeInsets.symmetric(vertical: 1),
-              padding: const EdgeInsets.only(left: 8, right: 6),
+              padding: const EdgeInsets.only(
+                left: NavMetrics.sidebarIndentTop,
+                right: 8,
+              ),
               // 标题行本身不用激活底色：激活是子项的事，
               // 这里只靠**文字/图标变色 + 箭头方向**表达状态，避免一行亮两层。
               decoration: navItemDecoration(
@@ -266,16 +270,17 @@ class _SidebarGroupHeaderState extends State<_SidebarGroupHeader> {
               ),
               child: Row(
                 children: [
+                  // 原生条目：16px 图标，不是 36px 方块。
                   SizedBox(
-                    width: NavMetrics.iconBox,
-                    height: NavMetrics.iconBox,
+                    width: NavMetrics.sidebarIconSize,
+                    height: NavMetrics.sidebarIconSize,
                     child: Icon(
                       widget.group.icon,
-                      size: NavMetrics.iconSize,
+                      size: NavMetrics.sidebarIconSize,
                       color: color,
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: NavMetrics.sidebarIconGap),
                   Expanded(
                     child: Text(
                       t(widget.group.label),
@@ -398,10 +403,13 @@ class _SidebarNavRowState extends State<_SidebarNavRow> {
                   // 一次平滑过渡。
                   duration: const Duration(milliseconds: 80),
                   curve: Curves.easeOut,
-                  height: NavMetrics.iconBox + 4,
+                  height: NavMetrics.sidebarRowHeight,
                   margin: const EdgeInsets.symmetric(vertical: 1),
+                  // 原生层级缩进：子项 40、顶层 16。
                   padding: EdgeInsets.only(
-                    left: widget.indented ? 22 : 8,
+                    left: widget.indented
+                        ? NavMetrics.sidebarIndentChild
+                        : NavMetrics.sidebarIndentTop,
                     right: 10,
                   ),
                   // 悬停时轻微右移，对应 Dock 的「上浮」——同为方向性位移反馈
@@ -419,16 +427,18 @@ class _SidebarNavRowState extends State<_SidebarNavRow> {
                       // **不带自身底色**（底色已经由上面整行的 container 提供），
                       // 否则会出现「激活底色套激活底色」的框中框。
                       SizedBox(
-                        width: NavMetrics.iconBox,
-                        height: NavMetrics.iconBox,
+                        width: NavMetrics.sidebarIconSize,
+                        height: NavMetrics.sidebarIconSize,
                         child: NavIconContent(
                           item: widget.item,
                           active: widget.active,
                           hover: _hover,
                           showDot: widget.showDot,
+                          // 原生条目 16px 图标（Dock 用默认 18）。
+                          iconSize: NavMetrics.sidebarIconSize,
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: NavMetrics.sidebarIconGap),
                       Expanded(
                         child: Text(
                           t(widget.item.label),

@@ -137,6 +137,28 @@ abstract final class NavMetrics {
 
   /// 导航项圆角
   static const double radius = 12;
+
+  // ── 侧边栏专用（照抄原生 `NavigationViewItem`）──────────────────
+  //
+  // 参照物 tubatool 的 `MainWindow.xaml` 用原生 `NavigationView`，
+  // 条目不是「36px 图标方块」，而是「16px 图标 + 12 间距 + 文字」。
+  // Dock 仍是悬浮圆角格（[iconBox] / [iconSize]），两套形态各自独立 ——
+  // 2026-10-19 用户裁定放开了「必须共用同一常量」的约束。
+
+  /// 侧边栏图标本体（原生 16）
+  static const double sidebarIconSize = 16;
+
+  /// 图标与文字间距
+  static const double sidebarIconGap = 12;
+
+  /// 侧边栏行高（原生 `NavigationViewItem` 单行 40）
+  static const double sidebarRowHeight = 40;
+
+  /// 顶层项左缩进
+  static const double sidebarIndentTop = 16;
+
+  /// 子项左缩进（= 16 + 24，原生层级缩进）
+  static const double sidebarIndentChild = 40;
 }
 
 /// 导航项容器装饰 —— **两种布局共用这一个函数**。
@@ -370,10 +392,14 @@ class NavActiveBar extends StatelessWidget {
   }
 }
 
-/// 图标颜色 —— 两种布局共用。
+/// 图标/文字颜色。
+///
+/// 未选中项用**主文本色**（`TextFillColorPrimary`），不是次要色 ——
+/// 原生 `NavigationViewItem` 就是这个取色；用 [AppColors.textMuted] 时
+/// 侧边栏在深色窗口材质上暗到几乎读不出来（2026-10-19 真机取证）。
 Color navIconColor(AppColors c, {required bool active, required bool hover}) {
   if (active) return c.accentText;
-  return hover ? c.textStrong : c.textMuted;
+  return c.textStrong;
 }
 
 /// 分组分隔线 —— Dock 是竖向短分隔线，侧边栏是横向分隔线，
@@ -459,12 +485,16 @@ class NavIconContent extends StatelessWidget {
   final bool hover;
   final bool showDot;
 
+  /// 图标本体尺寸。默认 Dock 的 18；侧边栏传 [NavMetrics.sidebarIconSize]（16）。
+  final double iconSize;
+
   const NavIconContent({
     super.key,
     required this.item,
     required this.active,
     required this.hover,
     required this.showDot,
+    this.iconSize = NavMetrics.iconSize,
   });
 
   @override
@@ -476,7 +506,7 @@ class NavIconContent extends StatelessWidget {
       children: [
         Icon(
           item.icon,
-          size: NavMetrics.iconSize,
+          size: iconSize,
           color: navIconColor(c, active: active, hover: hover),
         ),
         if (showDot) const Positioned(right: 6, top: 6, child: NavRunningDot()),
