@@ -87,9 +87,11 @@ class StatusBadge extends StatelessWidget {
         ),
     };
 
-    // WinUI3 的状态标记是**小圆角矩形**（4px），不是胶囊 —— 这是它和另三套
-    // 在「同一个语义」上最直观的形态差异之一。内边距也略收紧（8→7），
-    // 因为直角矩形比胶囊在视觉上更"占宽"，沿用 8 会显得松散。
+    // 形态走令牌：`winui` 档是 **12px 圆角的药丸 + 8,3 内边距**
+    // （`lib/theme/app_style.dart:890-892`：`badgeRadius:12 / badgePadH:8 / badgePadV:3`），
+    // 出处：参照物 `Styles/ToolCardStyles.xaml:40-45` 的状态药丸（Padding `8,3` +
+    // `PillCornerRadiusToken`）与 `Styles/FluentTokens.xaml:52` 的该令牌 = `12`。
+    // 底色仍按状态取色（done 绿 / run 蓝 / wait 灰 / err 红），形态与配色互不影响。
     final shape = t.style.shapeOf();
 
     return Container(
