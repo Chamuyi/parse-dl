@@ -456,6 +456,39 @@ extension AppStyleNavTokens on AppStyle {
           : StyleNavActive.winuiLight;
 }
 
+/// 官方 `SubtleFillColorSecondary` —— WinUI 的「极淡填充」档
+/// （图标块底色，2026-10-19 批次 A 引入）。
+///
+/// 参照物出处：`Styles/SettingsStyles.xaml:15` —— `IconBorderStyle` 的
+/// `Background="{ThemeResource SubtleFillColorSecondaryBrush}"`。
+/// 官方取值（`fluent_full/lib/src/styles/color_resources.dart`）：
+/// 深色 `0x0FFFFFFF`（:211）、浅色 `0x09000000`（:298）。
+///
+/// 不扩 `AppColors`：它是 25 槽位固定结构（`style_colors_test.dart:78`
+/// 钉着「每套恰好 25 个槽位」），而这个颜色是**按亮度派生**的官方画刷，
+/// 照 `StyleNavActive` 的先例做成亮度感知令牌即可。
+@immutable
+class StyleSubtleFill {
+  /// 填充色，保留官方 alpha（压在卡片面 / 窗口底上合成）。
+  final Color color;
+
+  const StyleSubtleFill(this.color);
+
+  /// 浅色：`subtleFillColorSecondary` = 3.5% 黑。
+  static const winuiLight = StyleSubtleFill(Color(0x09000000));
+
+  /// 深色：`subtleFillColorSecondary` = 6% 白。
+  static const winuiDark = StyleSubtleFill(Color(0x0FFFFFFF));
+}
+
+/// 极淡填充令牌入口。
+extension AppStyleSubtleFillTokens on AppStyle {
+  StyleSubtleFill subtleFillOf(Brightness brightness) =>
+      brightness == Brightness.dark
+          ? StyleSubtleFill.winuiDark
+          : StyleSubtleFill.winuiLight;
+}
+
 /// 侧边栏底色（CSS `.side`，含右分隔线随风格的有无）。
 @immutable
 class StyleSidebar {
@@ -753,10 +786,10 @@ extension AppStyleButtonTokens on AppStyle {
 // 有一半在控件形态上：
 //
 //   组件     | 另三套                    | WinUI3
-//   标题栏   | 44px 高、圆角按钮内缩 2px | 32px 高、直角按钮 flush 到窗口边
+//   标题栏   | 44px 高、圆角按钮内缩 2px | 48px 高、直角按钮 flush 到窗口边
 //   开关     | Material Switch.adaptive  | 40x20 胶囊 + 12px 圆滑块
 //   选项格   | 9px 圆角 + 凹面底         | 4px 圆角 + 1px 边线
-//   徽章     | 999 胶囊                  | 4px 圆角矩形
+//   徽章     | 999 胶囊                  | 12px 圆角药丸（PillCornerRadiusToken）
 //   导航行   | 12px 圆角                 | 4px 圆角
 //
 // 所以这里再加一组几何令牌。与 AppStyleRadiusTokens 的分工：后者是
@@ -771,10 +804,11 @@ extension AppStyleButtonTokens on AppStyle {
 /// 值直接取自 WinUI3 规范或既有预览稿，改动时一眼能核对。
 @immutable
 class StyleShape {
-  /// 标题栏高度。WinUI3 = 32（Windows 11 标准标题栏），另三套 44。
+  /// 标题栏高度。WinUI3 = 48（原生 `TitleBar` 控件高，参照物
+  /// `MainWindow.xaml:19`），另三套 44。
   final double titleBarHeight;
 
-  /// 窗口按钮尺寸。WinUI3 = 46x32（flush 到窗口右上角）。
+  /// 窗口按钮尺寸。WinUI3 = 36x48（宽取系统 `SM_CXSIZE`，高与标题栏齐平）。
   final double captionWidth;
   final double captionHeight;
 
@@ -801,10 +835,12 @@ class StyleShape {
   /// 选项格是否画 1px 边线（WinUI3 用边线分层，另三套用凹面底色）。
   final bool optCellBordered;
 
-  /// 徽章圆角。WinUI3 = 4（矩形），另三套 999（胶囊）。
+  /// 徽章圆角。WinUI3 = 12（官方 `PillCornerRadiusToken`，参照物
+  /// `Styles/ToolCardStyles.xaml:42`），另三套 999（胶囊）。
   final double badgeRadius;
 
-  /// 徽章内边距。
+  /// 徽章内边距。WinUI3 = 8/3（参照物 `StatusPillStyle` 的 `Padding="8,3"`，
+  /// `ToolCardStyles.xaml:41`）。
   final double badgePadH;
   final double badgePadV;
 
@@ -830,14 +866,18 @@ class StyleShape {
   });
 
   /// WinUI3 形态。取值来源：
-  /// - 标题栏 **48px** / 按钮 46×48：照抄参照物 `MainWindow.xaml:19` 的
-  ///   `<RowDefinition Height="48" />` —— 它用的是原生 `TitleBar` 控件，
+  /// - 标题栏 **48px** / 按钮 **36×48**：标题栏照抄参照物 `MainWindow.xaml:19`
+  ///   的 `<RowDefinition Height="48" />` —— 它用的是原生 `TitleBar` 控件，
   ///   标准高度 48。此前按 32 做，比参照物矮 1/3，是「不像 WinUI」的显眼一处。
+  ///   按钮宽 36 = 系统 `SM_CXSIZE`（本机实测）：参照物三按钮由 DWM 绘制、
+  ///   仓内无 XAML 定义；此前写 46 属自创值（WinUI 主题里的 40 是**返回按钮**
+  ///   宽，语义不对应最小化/最大化/关闭三按钮）。
   /// - 开关 40x20 / 滑块 12：fluent_ui 的 ToggleSwitch 尺寸。
-  /// - 选项格 / 徽章 / 导航行 4px：WinUI3 的「控件圆角 4px」规范。
+  /// - 选项格 / 导航行 4px：WinUI3 的「控件圆角 4px」规范；
+  ///   徽章 12px —— 官方 `PillCornerRadiusToken`（`FluentTokens.xaml:52`）。
   static const winui = StyleShape(
     titleBarHeight: 48,
-    captionWidth: 46,
+    captionWidth: 36,
     captionHeight: 48,
     captionRadius: 0,
     captionMargin: 0,
@@ -847,9 +887,9 @@ class StyleShape {
     switchThumb: 12,
     optCellRadius: 4,
     optCellBordered: true,
-    badgeRadius: 4,
-    badgePadH: 7,
-    badgePadV: 2,
+    badgeRadius: 12,
+    badgePadH: 8,
+    badgePadV: 3,
     navRowRadius: 4,
   );
 
@@ -859,7 +899,7 @@ class StyleShape {
   /// 「一次只做一个风格」。
   static const legacy = StyleShape(
     titleBarHeight: 44,
-    captionWidth: 46,
+    captionWidth: 36,
     captionHeight: 32,
     captionRadius: 6,
     captionMargin: 2,

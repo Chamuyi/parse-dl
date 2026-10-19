@@ -10,7 +10,7 @@ import 'nav_items.dart';
 /// 常规样式的左侧竖向侧边栏。
 ///
 /// **与 [Dock] 的关系**：展示同一组导航项（[kNavItems]），并且复用
-/// [NavIconBox] / [navItemDecoration] / [NavIndicatorDot] / [NavRunningDot] /
+/// [NavIconBox] / [navItemDecoration] / [NavActiveBar] / [NavRunningDot] /
 /// [NavDivider]，因此两种导航的图标尺寸、激活底色、描边、发光、悬停反馈、
 /// 运行红点、分隔线**完全同源**，只差排布方向：
 ///
@@ -252,12 +252,13 @@ class _SidebarGroupHeaderState extends State<_SidebarGroupHeader> {
               'hint': t(widget.expanded ? '点击收起' : '点击展开'),
             }),
             child: Container(
-              // 原生 `NavigationViewItem` 单行 40、顶层左缩进 16。
+              // 原生 `NavigationViewItem` 单行 40、顶层左缩进 16、右内边距 16
+              // （`.win-nav-item-header { padding: 0 16px; }`，`vue:3136`）。
               height: NavMetrics.sidebarRowHeight,
               margin: const EdgeInsets.symmetric(vertical: 1),
               padding: const EdgeInsets.only(
                 left: NavMetrics.sidebarIndentTop,
-                right: 8,
+                right: 16,
               ),
               // 标题行本身不用激活底色：激活是子项的事，
               // 这里只靠**文字/图标变色 + 箭头方向**表达状态，避免一行亮两层。
@@ -286,7 +287,9 @@ class _SidebarGroupHeaderState extends State<_SidebarGroupHeader> {
                       t(widget.group.label),
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 13.5,
+                        // 参照物 `.win-nav-item-header { font-size: 14px; }`
+                        // （`WinNavigationView.vue:3140`）。
+                        fontSize: 14,
                         fontWeight: FontWeight.w600,
                         color: color,
                       ),
@@ -344,7 +347,7 @@ class _SidebarLogo extends StatelessWidget {
   }
 }
 
-/// 侧边栏的一行：图标格 + 文字标签，激活指示点浮在行外左侧。
+/// 侧边栏的一行：图标格 + 文字标签，激活标记是贴栏左缘的竖条。
 class _SidebarNavRow extends StatefulWidget {
   final NavItem item;
   final bool active;
@@ -389,8 +392,8 @@ class _SidebarNavRowState extends State<_SidebarNavRow> {
             label: tf(widget.active ? '切换到{label}（当前）' : '切换到{label}', {
               'label': t(widget.item.label),
             }),
-            // Stack：指示点浮在行外左侧，不参与布局 ——
-            // 与 Dock 用「图标下方浮点」的思路一致，切换激活项时列表不跳动。
+            // Stack：激活竖条画在行框内左缘，不参与行内布局 ——
+            // 切换激活项时列表不跳动。
             child: Stack(
               clipBehavior: Clip.none,
               children: [
@@ -405,12 +408,14 @@ class _SidebarNavRowState extends State<_SidebarNavRow> {
                   curve: Curves.easeOut,
                   height: NavMetrics.sidebarRowHeight,
                   margin: const EdgeInsets.symmetric(vertical: 1),
-                  // 原生层级缩进：子项 40、顶层 16。
+                  // 原生层级缩进：子项 44、顶层 16。
+                  // 右内边距 12 —— `.win-nav-item { padding: 0 12px; }`
+                  // （`WinNavigationView.vue:3048`）。
                   padding: EdgeInsets.only(
                     left: widget.indented
                         ? NavMetrics.sidebarIndentChild
                         : NavMetrics.sidebarIndentTop,
-                    right: 10,
+                    right: 12,
                   ),
                   // 悬停时轻微右移，对应 Dock 的「上浮」——同为方向性位移反馈
                   transform: Matrix4.translationValues(_hover ? 2 : 0, 0, 0),
@@ -444,7 +449,9 @@ class _SidebarNavRowState extends State<_SidebarNavRow> {
                           t(widget.item.label),
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 13.5,
+                            // 参照物 Left 形态条目字号 14（`vue:3140`，
+                            // 与标题行同一档）。
+                            fontSize: 14,
                             fontWeight: widget.active
                                 ? FontWeight.w600
                                 : FontWeight.w500,
@@ -460,27 +467,21 @@ class _SidebarNavRowState extends State<_SidebarNavRow> {
                   ),
                 ),
 
-                // 激活指示点：浮在行外左侧（Dock 里它浮在图标下方）
-                Positioned(
-                  left: -9,
-                  top: 0,
-                  bottom: 0,
-                  child: Center(child: NavIndicatorDot(active: widget.active)),
-                ),
-
-                // 左侧激活竖条（CSS `:288-292`/`:359-363`/`:422-426` 三套逐字节
-                // 相同的 3×15px 胶囊，规格一致不是风格区分点，但不许丢）。
+                // 左侧激活竖条 —— 参照物 Left 形态**只有这一个**激活标记：
+                // `.win-nav-left-panel .win-nav-indicator { left: 4px; width: 3px;
+                // height: 16px; }`（`WinNavigationView.vue:3207-3213`），
+                // 子项 `left: 36px`（`:3215-3217`）。
                 //
-                // 位置随风格：WinUI3 的 NavigationView 指示条**贴侧栏左缘**
-                // （left:0，压在行的最外侧），另三套是画在行框内左缘的悬浮胶囊
-                // （left:11，行 padding 非缩进为 8）。这条差异是「贴边分栏」
-                // 与「悬浮卡片」两种骨架的直接体现，不只是配色。
+                // 2026-10-19 批次 A 删掉了原先多画的那个 4px 圆点：参照物左栏
+                // 全套样式里没有任何圆点（`:3195-3213` 的 indicator 就是这条
+                // 竖条），同一条信息画两个标记属于自创。
                 Positioned(
-                  left: AppTheme.of(context).style == AppStyle.winui ? 0 : 11,
+                  left: widget.indented ? 36 : 4,
                   top: 0,
                   bottom: 0,
                   child: Center(child: NavActiveBar(active: widget.active)),
                 ),
+
               ],
             ),
           ),

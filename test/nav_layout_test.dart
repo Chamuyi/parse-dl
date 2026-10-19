@@ -321,7 +321,11 @@ void main() {
         }
 
         // ② 指示物：恰好一个激活，且落在当前页上
-        final marker = isDock ? NavIndicatorBar : NavIndicatorDot;
+        // 2026-10-19 批次 A：侧边栏的标记从「4px 圆点」改成参照物左栏那条
+        // 竖条（`WinNavigationView.vue:3195-3213` 的左栏只有一个 indicator），
+        // 所以这里按 NavActiveBar 定位。判据语义没变 —— 仍是
+        // 「恰好一个、且落在当前页」。
+        final marker = isDock ? NavIndicatorBar : NavActiveBar;
         final markers = find.byType(marker);
         expect(markers, findsNWidgets(kNavItems.length),
             reason: '$layout：每个导航项都挂一个指示物（用透明度切显隐）');

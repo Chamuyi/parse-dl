@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 import '../theme/fluent_tokens.dart';
 
@@ -49,20 +50,21 @@ class FluentIconTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = AppTheme.colorsOf(context);
+    final th = AppTheme.of(context);
+    final c = th.colors;
 
     return Container(
       width: size,
       height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        // 官方 SubtleFillColorSecondary（深色 6% 白 / 浅色 3.5% 黑）。
-        // 色板里最接近的既有槽位是 `lineSoft`（官方 subtleFillColorTertiary
-        // 量级，深色 4% 白 / 浅色 2% 黑）—— 同一族、同一用途。
+        // 官方 `SubtleFillColorSecondary`（深色 6% 白 / 浅色 3.5% 黑）——
+        // 参照物 `Styles/SettingsStyles.xaml:15` 给 `IconBorderStyle` 的底色。
         //
-        // 不新增 `subtleFill` 槽位：`AppColors` 是 25 槽位固定结构，
-        // 有判据锁住槽位数量，为一个组件扩结构不划算。
-        color: c.lineSoft,
+        // 2026-10-19 批次 A 修正：原先借 `lineSoft`（官方
+        // `subtleFillColorTertiary` 量级，深色 4% 白 / 浅色 2% 黑），
+        // 那是**描边**档位，铺在图标块上比参照物淡一档。
+        color: th.style.subtleFillOf(th.brightness).color,
         // 官方 CornerRadius 是 8（CardCornerRadiusToken），不是控件的 4。
         borderRadius: BorderRadius.circular(FluentRadius.card),
       ),

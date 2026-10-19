@@ -79,20 +79,25 @@ class PageHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           if (ic != null) ...[
-            // 参照物 `IconTile`：48×48、圆角 8、SubtleFill 透明底。
+            // 参照物 `IconTile`：48×48、圆角 8，底色
+            // `Background="{ThemeResource SubtleFillColorTransparentBrush}"`
+            // （`Controls/ToolPageHeader.xaml:50`）= 官方 `subtleFillColorTransparent`
+            // `0x00FFFFFF`（`color_resources.dart:210/:297`）—— 即**不铺底色**。
             Container(
               width: FluentBox.headerIconTile,
               height: FluentBox.headerIconTile,
               decoration: BoxDecoration(
-                color: c.textMuted.withValues(alpha: 0.06),
+                color: Colors.transparent,
                 borderRadius: BorderRadius.circular(FluentRadius.card),
               ),
               child: Icon(
                 ic,
-                size: 24,
-                color: c.accentSoft.computeLuminance() > 0.6
-                    ? c.textStrong
-                    : c.accent,
+                // 参照物 `FontIcon FontSize="20"`（`ToolPageHeader.xaml:57`）。
+                size: 20,
+                // 参照物 `Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"`
+                // （`ToolPageHeader.xaml:58`）= 色板的 accentText 槽位
+                // （浅 #005A9E / 深 #7FD4FF，即官方「强调色文字」档）。
+                color: c.accentText,
               ),
             ),
             // 参照物 `ColumnSpacing="16"`。

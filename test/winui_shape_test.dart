@@ -38,11 +38,17 @@ void main() {
       expect(w.captionMargin, 0);
       expect(l.captionRadius, greaterThan(0));
       expect(l.captionMargin, greaterThan(0));
-      // 宽度两套相同（46 是 Win11 的按钮宽度比例）。
+      // 宽度两套相同：**36**（2026-10-19 批次 A 去自创值）。
+      // 参照物的最小化/最大化/关闭三按钮由系统 DWM 绘制，仓内没有 XAML 定义
+      // （grep `MinMaxClose` / `CaptionButton` 命中 0），故取本机实测的系统度量
+      // `SM_CXSIZE = 36`。此前写 46 无出处；WinUI 主题里的 40 是**返回按钮**宽，
+      // 语义不对应三按钮。
       // 高度两套**不同**：winui 48（与 `TitleBar` 控件等高，按钮铺满栏高）；
       // legacy 32（旧画法，按钮在 44 高的栏里垂直居中）。
       // 这里如实钉住差异，不强行拉平 —— 拉平会改动 legacy 的既有观感。
       expect(w.captionWidth, l.captionWidth);
+      // 钉字面量（不写 StyleShape.winui.captionWidth 自比 —— 那会恒真）
+      expect(w.captionWidth, 36, reason: '宽 = 系统 SM_CXSIZE，本机实测');
       expect(w.captionHeight, 48);
       expect(l.captionHeight, 32);
     });
@@ -74,10 +80,16 @@ void main() {
       expect(l.optCellBordered, isFalse, reason: '另三套用凹面底色分层');
     });
 
-    test('徽章：WinUI 4px 矩形，另三套 999 胶囊', () {
-      expect(w.badgeRadius, 4);
+    test('徽章：WinUI 12px 药丸（PillCornerRadiusToken），另三套 999 胶囊', () {
+      // 2026-10-19 批次 A：WinUI 徽章是**药丸**，不是直角矩形 ——
+      // 参照物 `StatusPillStyle` 用官方 `PillCornerRadiusToken` = 12
+      // （`Styles/ToolCardStyles.xaml:42` + `Styles/FluentTokens.xaml:52`），
+      // 内边距 `Padding="8,3"`（`ToolCardStyles.xaml:41`）。
+      expect(w.badgeRadius, 12);
+      expect(w.badgePadH, 8);
+      expect(w.badgePadV, 3);
       expect(l.badgeRadius, 999);
-      // 负控制：矩形与胶囊在 20px 高时视觉差异明显，不能被谁改成同一档
+      // 负控制：药丸与胶囊在 20px 高时视觉差异明显，不能被谁改成同一档
       expect(w.badgeRadius, isNot(l.badgeRadius));
     });
 

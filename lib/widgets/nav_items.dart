@@ -144,9 +144,6 @@ abstract final class NavMetrics {
   /// 也与已照原生改过的侧边栏（`sidebarIconSize = 16`）不一致。
   static const double iconSize = 16;
 
-  /// 激活指示点直径（圆点形态，侧边栏用）
-  static const double dot = 4;
-
   /// 激活指示条尺寸（**横向导航条形态**，Dock 用）。
   ///
   /// 参照物 Top 形态：`height: 3px; border-radius: 2px;
@@ -178,8 +175,9 @@ abstract final class NavMetrics {
   /// 顶层项左缩进
   static const double sidebarIndentTop = 16;
 
-  /// 子项左缩进（= 16 + 24，原生层级缩进）
-  static const double sidebarIndentChild = 40;
+  /// 子项左缩进（参照物 `.win-nav-group-child { padding-left: 44px; }`，
+  /// `WinNavigationView.vue:3424`）
+  static const double sidebarIndentChild = 44;
 }
 
 /// 导航项容器装饰 —— **两种布局共用这一个函数**。
@@ -205,10 +203,10 @@ abstract final class NavMetrics {
 /// 在浅卡片 #EDEDED 上 4.64，两端都够。
 /// 描边宽度恒为 1px（未聚焦时是透明描边），否则切换瞬间文字会跳格。
 ///
-/// **左侧 3×15px 竖条**（三套 CSS 逐字节相同的那条）不在这里画：
-/// 它是几何而不是装饰参数，且两布局的锚定位置不同（侧边栏 `left:11px`、
-/// Dock 形态下对齐行头）——由侧边栏行与 Dock 图标格用 [NavActiveBar] 表达，
-/// 三套风格共用同一条，不作为区分点。
+/// **左侧竖条**不在这里画：它是几何而不是装饰参数，两布局的锚定也不同
+/// —— 侧边栏 `left:4px`、子项 `left:36px`（`WinNavigationView.vue:3207-3217`），
+/// 由行内的 [NavActiveBar] 表达；Dock 的 Top 形态改用贴条目底边的横条
+/// [NavIndicatorBar]。
 /// [activeFill] 为 false 时**不画选中底色**，只保留透明描边与圆角 ——
 /// 这是参照物 **Top 形态**（水平导航条）的画法：
 /// `.win-nav-top-bar .win-nav-item.is-selected { background: transparent; }`
@@ -469,13 +467,13 @@ Color navIconColor(AppColors c, {required bool active, required bool hover}) {
 /// **Dock 传 `length: 24` + `margin: EdgeInsets.only(left: 3, right: 4)`**：
 /// 逐值照参照物 Top 形态的 `.win-nav-item-separator` ——
 /// `width: 1px; height: 24px; margin: 0 4px 0 3px`
-/// （`WinNavigationView.vue:3278-3285`）。侧边栏（Left 形态）分隔线横跨整栏、
-/// 上下各留 6，保持默认。
+/// （`WinNavigationView.vue:3278-3285`）。侧边栏（Left 形态）分隔线横跨整栏，
+/// 默认外边距 `3px 0 4px`（`:3155`）。
 class NavDivider extends StatelessWidget {
   final Axis axis;
   final double? length;
 
-  /// 覆盖默认外边距。默认值按布局分：竖向 4/4（Dock）、横向 6/6（侧边栏）。
+  /// 覆盖默认外边距。默认值按布局分：竖向 4/4（Dock）、横向 上 3 下 4（侧边栏）。
   ///
   /// Dock 传参照物 Top 形态的值 —— `.win-nav-item-separator` 是
   /// `width: 1px; height: 24px; margin: 0 4px 0 3px`
@@ -496,7 +494,9 @@ class NavDivider extends StatelessWidget {
           margin ??
           (vertical
               ? const EdgeInsets.symmetric(horizontal: 4)
-              : const EdgeInsets.symmetric(vertical: 6)),
+              // 侧边栏（Left 形态）：`.win-nav-item-separator` 的
+              // `margin: 3px 0 4px`（`WinNavigationView.vue:3155`）。
+              : const EdgeInsets.only(top: 3, bottom: 4)),
       color: c.line,
     );
   }
@@ -523,34 +523,6 @@ class NavRunningDot extends StatelessWidget {
   }
 }
 
-/// 激活指示点 —— **侧边栏专用**（圆点形态）。
-///
-/// 它**浮在导航项之外、不参与布局**（侧边栏里在行外左侧），所以用
-/// [AnimatedOpacity] 切显隐而不是增删节点，这样切换激活项时容器尺寸不会跳动。
-///
-/// Dock 不再用它：参照物原生 `NavigationView` 的 **Top 形态**（水平导航条）
-/// 指示物是**贴着条目底边的横条**，不是浮在条目外的圆点
-/// （`WinNavigationView.vue:3219-3224`）。横条见 [NavIndicatorBar]。
-class NavIndicatorDot extends StatelessWidget {
-  final bool active;
-
-  const NavIndicatorDot({super.key, required this.active});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = AppTheme.colorsOf(context);
-
-    return AnimatedOpacity(
-      opacity: active ? 1 : 0,
-      duration: const Duration(milliseconds: 160),
-      child: Container(
-        width: NavMetrics.dot,
-        height: NavMetrics.dot,
-        decoration: BoxDecoration(color: c.accent, shape: BoxShape.circle),
-      ),
-    );
-  }
-}
 
 /// 激活指示**条** —— **Dock 专用**（横向导航条形态）。
 ///
