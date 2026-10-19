@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
+import '../theme/fluent_tokens.dart';
 
 /// 毛玻璃卡片。
 ///
@@ -46,7 +47,9 @@ class AppCard extends StatelessWidget {
   const AppCard({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(20),
+    // 官方 FluentCardStyle 的 Padding 是 **16**（FluentTokens.xaml:66）。
+    // 此前是自取的 20 —— 那会让卡片显得松、与参照物的紧凑感对不上。
+    this.padding = FluentBox.cardPadding,
     this.radius = AppRadius.card,
     this.blur,
     this.glow = false,

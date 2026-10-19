@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
+import '../theme/fluent_tokens.dart';
 import 'app_card.dart';
+import 'fluent_icon_tile.dart';
 
 /// 预览稿的**三列快捷卡** —— `.quick .qc` 的 Flutter 对应物。
 ///
@@ -63,8 +65,10 @@ class QuickGrid extends StatelessWidget {
           // 高度与栏宽解耦。
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
+            // 官方 ToolCardItemStyle：Margin "0,0,12,12" ⇒ 卡片间距 12
+            // （FluentTokens 的 8px 网格档位之一）。此前是自取的 10。
+            mainAxisSpacing: FluentSpace.small,
+            crossAxisSpacing: FluentSpace.small,
             // 高度按内容取：**标题两行 34** + 间距 1 + **副题两行 28** = 63，
             // 加下上 padding 26 → 89；给 92 留 3px 余量。
             //
@@ -112,16 +116,26 @@ class _QuickTile extends StatelessWidget {
     final card = AppCard(
       // `.qc` 圆角 12，与 `.stat` / `.hero2` 同档（CSS `:805`）
       radius: AppRadius.hero2,
+      // 官方 FluentCardStyle 的内边距是 16，但那是给「图标 + 两行文字」的
+      // 设置项用的。快捷卡是**三列窄格**，16+16 的左右内边距 + 36 图标块
+      // 之后文字只剩不到 60px，中文标题必然折行。
+      // 所以横向收到 12（仍是 8px 网格档位），纵向保持 12。
       padding: winui
-          ? const EdgeInsets.fromLTRB(16, 12, 14, 12)
+          ? const EdgeInsets.fromLTRB(
+              FluentSpace.small, FluentSpace.small, FluentSpace.small, FluentSpace.small)
           : const EdgeInsets.fromLTRB(14, 13, 14, 13),
       child: Row(
         children: [
-          // WinUI3 的入口是**线性小图标**，没有彩色底块：底块是「卡片套卡片」
-          // 的视觉语言（用一块有色的面把图标包起来）。WinUI 让图标本身的
-          // 强调色承担识别，背景一律留白。
+          // WinUI 的入口**有**底块 —— 是官方 IconBorderStyle：36×36、
+          // 圆角 8、中性浅底（SubtleFillColorSecondary）、图标用正文色。
+          //
+          // 2026-10-19 改：此前这里写的是「WinUI 没有彩色底块，纯图标」，
+          // 判断错了。参照物 SettingsPage.xaml 里每个设置项、每个导航卡
+          // 都带这个底块（97 处引用），它是 WinUI 最容易认出的部件之一。
+          // 与旧预览稿的区别只在配色：预览稿用 accentSoft + accent（彩色），
+          // WinUI 用中性浅底 + 正文色（克制）。
           if (winui)
-            Icon(cell.icon, size: 20, color: c.accent)
+            FluentIconTile(icon: Icon(cell.icon))
           else
             Container(
               width: 34,
@@ -133,7 +147,12 @@ class _QuickTile extends StatelessWidget {
               ),
               child: Icon(cell.icon, size: 17, color: c.accent),
             ),
-          SizedBox(width: winui ? 14 : 11),
+          // 图标块与文字之间：官方 ColumnSpacing 用 16（FluentSpace.medium）。
+          // 图标块从 20px 纯图标换成 36×36 底块后，文字宽度被吃掉 16px ——
+          // 真机上「解析抖音作品」这类 6 字标题会从一行变两行。
+          // 所以这里取官方值 16 的下限 12，并把卡片左右 padding 收紧一档，
+          // 把省下的宽度还给文字（见下面 AppCard 的 padding）。
+          SizedBox(width: winui ? FluentSpace.small : 11),
           Expanded(
             child: Column(
               mainAxisSize: MainAxisSize.min,
