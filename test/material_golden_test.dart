@@ -82,30 +82,50 @@ void main() {
       print('GOLDEN ${e.key} = #${e.value.toARGB32().toRadixString(16).padLeft(8, '0')}');
     }
 
-    // 判据 1（核心）：细亚克力必须与普通亚克力不同
+    // 判据 1（核心）：**四档两两都必须不同**
+    //
+    // 为什么四档都要不同：真机实测本机深色下 DWM 把 mica / mica-alt /
+    // acrylic 渲染成完全相同的背景色 (43,43,43)，只靠 DWM 四档分不出来。
+    // 差异全靠 backdropVeilOf，所以这里必须逐对断言。
     for (final brightness in Brightness.values) {
       final b = brightness.name;
-      expect(
-        results['${b}_acrylic']!.toARGB32(),
-        isNot(equals(results['${b}_acrylic-thin']!.toARGB32())),
-        reason: '$b：细亚克力与普通亚克力的背景层合成相同 —— '
-            'DWM 只有一档亚克力，差异全靠 backdropVeilOf，这里必须不同',
-      );
+      final mats = WindowMaterial.values;
+      for (var i = 0; i < mats.length; i++) {
+        for (var j = i + 1; j < mats.length; j++) {
+          expect(
+            results['${b}_${mats[i].id}']!.toARGB32(),
+            isNot(equals(results['${b}_${mats[j].id}']!.toARGB32())),
+            reason: '$b：${mats[i].id} 与 ${mats[j].id} 的背景层合成相同 —— '
+                'DWM 在深色下会把多档渲染成同一色，差异全靠 backdropVeilOf，'
+                '这里必须不同',
+          );
+        }
+      }
     }
 
-    // 判据 2：其余三档不叠膜
+    // 判据 2：四档的膜都必须非 null（都参与区分）
     for (final brightness in Brightness.values) {
-      for (final m in [
-        WindowMaterial.mica,
-        WindowMaterial.micaAlt,
-        WindowMaterial.acrylic,
-      ]) {
+      for (final m in WindowMaterial.values) {
         expect(
           backdropVeilOf(m, brightness),
-          isNull,
-          reason: '${brightness.name} / ${m.id} 不该叠膜',
+          isNotNull,
+          reason: '${brightness.name} / ${m.id} 没叠膜 —— '
+              'DWM 分不出这一档，必须由 Flutter 层补',
         );
       }
+    }
+
+    // 判据 3：细亚克力必须比普通亚克力**更暗**（方向与参照物一致）
+    for (final brightness in Brightness.values) {
+      final b = brightness.name;
+      final acrylic = results['${b}_acrylic']!.computeLuminance();
+      final thin = results['${b}_acrylic-thin']!.computeLuminance();
+      expect(
+        thin,
+        lessThan(acrylic),
+        reason: '$b：细亚克力应比普通亚克力更暗（参照物方向），'
+            '实际 acrylic=$acrylic thin=$thin',
+      );
     }
   });
 }
