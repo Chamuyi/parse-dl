@@ -57,6 +57,7 @@ class AboutPage extends StatelessWidget {
         // 页补上纯文字页头，副题照 `PAGES.about.s`。
         PageHeader(
           title: t('关于'),
+        icon: Icons.info_outline_rounded,
           subtitle: t('版本、许可与本机环境'),
         ),
         const SizedBox(height: 14),

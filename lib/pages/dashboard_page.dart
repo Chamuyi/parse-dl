@@ -122,6 +122,7 @@ class DashboardPage extends StatelessWidget {
         // 没有页头，欢迎条就是第一块内容。
         PageHeader(
           title: t('总览'),
+        icon: Icons.dashboard_outlined,
           subtitle: t('总览 · 快捷入口 · 最近活动'),
         ),
         const SizedBox(height: 14),

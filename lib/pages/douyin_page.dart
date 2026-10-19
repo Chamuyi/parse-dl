@@ -815,6 +815,7 @@ class _DouyinPageState extends State<DouyinPage> {
         // 副题照 `PAGES.douyin.s` = 「左边浏览，右边抓取」。
         PageHeader(
           title: t('抖音解析下载'),
+        icon: Icons.music_note_rounded,
           subtitle: t('左边浏览，右边抓取'),
         ),
         const SizedBox(height: 10),

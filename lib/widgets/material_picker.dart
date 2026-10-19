@@ -83,9 +83,13 @@ class MaterialPicker extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         // 参照物是固定 2×2（`Grid` 两行两列各 `*`）。窄到两列放不下时退成
-        // 一列 —— 同页的 NavLayoutPicker / AccentPicker 也是这个阈值行为，
-        // 保证文字不被挤成一串省略号。
-        final twoCol = constraints.maxWidth >= 300;
+        // 一列 —— 同页的 NavLayoutPicker / AccentPicker 也是这个阈值行为。
+        //
+        // **阈值 300 太低**（2026-10-19 真机取证）：一格至少需要
+        // 48（预览块）+ 8 + 约 90（「Acrylic Thin / 更透亮的磨砂」不换行）
+        // + 24（左右内边距）+ 4（边框）≈ 174；两列加 8 间距 ≈ 356。
+        // 300 时两列会被硬塞进 300px，格子里的 Row 溢出。取 380 留余量。
+        final twoCol = constraints.maxWidth >= 380;
         final items = WindowMaterial.values;
 
         Widget tile(WindowMaterial m) => _MaterialTile(

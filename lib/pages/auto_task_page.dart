@@ -102,6 +102,7 @@ class _AutoTaskPageState extends State<AutoTaskPage> {
         // top 16 padding 已经构成页头与窗口上沿的距离。
         PageHeader(
           title: t('自动执行'),
+        icon: Icons.bolt_rounded,
           subtitle: t('按名单批量跑'),
         ),
         const SizedBox(height: 12),

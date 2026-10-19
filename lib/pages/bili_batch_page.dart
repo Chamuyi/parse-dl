@@ -367,6 +367,7 @@ class _BiliBatchPageState extends State<BiliBatchPage> {
     // 右面板里 —— 放进 `_panel` 会让它被右栏 400px 的宽度挤成两行。
     final header = PageHeader(
       title: t('B 站批量下载'),
+      icon: Icons.playlist_add_check_rounded,
       subtitle: t('主页 / 合集 / 系列 / 收藏夹'),
     );
 

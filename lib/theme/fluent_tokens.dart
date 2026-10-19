@@ -122,6 +122,11 @@ abstract final class FluentBox {
   /// 图标块（`IconBorderStyle`）：36×36、圆角 8。
   static const double iconTile = 36;
 
+  /// 页头图标块（`ToolPageHeader.xaml` 的 `IconTile`）：48×48、圆角 8。
+  ///
+  /// 比卡片里的 [iconTile] 大一圈 —— 页头只有一颗图标，尺寸按标题层级放大。
+  static const double headerIconTile = 48;
+
   /// 导航卡图标块（`NavCardIconBorderStyle`）：40×40、圆角 8。
   static const double navIconTile = 40;
 

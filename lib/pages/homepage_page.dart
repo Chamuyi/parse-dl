@@ -182,6 +182,7 @@ class _HomepagePageState extends State<HomepagePage> {
         // 分工明确，所以页头只给标题行，正文与 hero 之间补一档间距。
         PageHeader(
           title: t('X 主页'),
+        icon: Icons.home_rounded,
           subtitle: t('下载某个 X 用户的全部媒体'),
         ),
         const SizedBox(height: 14),

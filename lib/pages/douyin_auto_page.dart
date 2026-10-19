@@ -420,6 +420,7 @@ class _DouyinAutoPageState extends State<DouyinAutoPage> {
         // 副题照 `PAGES['douyin-auto'].s` = 「按目标批量滚动抓取」。
         PageHeader(
           title: t('抖音自动下载'),
+        icon: Icons.bolt_rounded,
           subtitle: t('按目标批量滚动抓取'),
         ),
         const SizedBox(height: 10),

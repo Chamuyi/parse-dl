@@ -252,8 +252,8 @@ Future<void> main(List<String> args) async {
   // 注意这是**启动时**定的一次 —— 运行中切语言不会改 OS 层标题，
   // 但窗口是无边框自绘标题栏，OS 标题只在任务栏悬停时露出来，下次启动即正确。
   final windowOptions = WindowOptions(
-    size: Size(1280, 920),
-    minimumSize: Size(880, 620),
+    size: const Size(_kWindowWidth, _kWindowHeight),
+    minimumSize: const Size(_kMinWindowWidth, _kMinWindowHeight),
     center: true,
     // 无边框：标题栏由我们自己画
     titleBarStyle: TitleBarStyle.hidden,
@@ -293,6 +293,15 @@ Future<void> main(List<String> args) async {
     biliLedger: biliLedger,
   ));
 }
+
+/// 窗口默认尺寸（**逻辑像素**，运行时乘 devicePixelRatio 变成物理像素）。
+///
+/// 1280×920 / 最小 880×620 与设计稿一致；`test/ui_smoke_test.dart` 的三档
+/// 视口（1280×900 / 1000×700 / 880×620）也按这套逻辑尺寸取。
+const double _kWindowWidth = 1280;
+const double _kWindowHeight = 920;
+const double _kMinWindowWidth = 880;
+const double _kMinWindowHeight = 620;
 
 /// 从启动参数里取出落地页 id：`--page=<id>`（也接受 `--page <id>`）。
 ///

@@ -83,6 +83,15 @@ enum SettingsScope {
   };
 }
 
+/// 双栏转单栏的宽度阈值（内容区可用宽，逻辑像素）。
+///
+/// **这是实测值，不是估的**（2026-10-19 真机探针）：
+/// * 窗口 1280×920 物理、DPI 120 → 客户区逻辑 1267
+/// * 扣掉侧边栏与页面内边距后，`LayoutBuilder` 拿到 **maxWidth = 1007.2**
+/// * 1007.2 下双栏**仍然溢出**（右栏「下载」卡被窗口右缘切断，真机截图可见）
+/// 所以阈值必须显著高于 1007.2。取 1060 留出约 50px 余量；低于它就上下堆叠。
+const double _kTwoColumnMinWidth = 1060;
+
 class SettingsPage extends StatelessWidget {
   final Brightness brightness;
 
@@ -118,26 +127,31 @@ class SettingsPage extends StatelessWidget {
         // accentSoft 图标方块的私有 _PageHeader，2026-10-13 按用户裁定换成
         // 预览稿那一套纯文字页头。原私有页头的外边距 `only(top: 28, bottom: 24)`
         // 在这里按等量间距补回，页面高度不塌。
-        Padding(
-          padding: const EdgeInsets.only(top: 28, bottom: 24),
-          child: PageHeader(
-            title: t(scope.title),
-            subtitle: t(scope.subtitle),
-          ),
+        // 页头自带内边距（照抄 `ToolPageHeader` 的 `Padding="24,24,24,20"`），
+        // 外层不再重复补白 —— 否则上下各叠一层，标题被压在页面中部。
+        PageHeader(
+          title: t(scope.title),
+          subtitle: t(scope.subtitle),
+          icon: Icons.tune_rounded,
         ),
 
-        // ── 全局设置：双栏平铺 ────────────────────────────────
+        // ── 全局设置：双栏平铺（窄窗口转单栏）──────────────────
         // 预览稿 `.cols`（`app.css:111`）：两个 `flex:1` 的 pane、间距 11px。
         // 左 pane = 外观 + 代理，右 pane = 下载 + 应用（`index.html:662-697`）。
         // 每张卡改用共享 [SectionCard] 平铺，去掉折叠壳 —— 打开设置页即见当前值。
+        //
+        // **窄窗口必须转单栏**（2026-10-19 真机取证）：窗口 1280×920 物理，
+        // 本机 DPI 120 下客户区逻辑宽只有 1267；再扣掉侧边栏 220 与页面内边距
+        // 28/32，内容区约 980。双栏在这个宽度下**实测溢出**（RenderFlex
+        // overflowed by 18 pixels on the right），真机表现为右栏文字被窗口
+        // 右缘切断。低于阈值改成上下堆叠，宽度够时仍是双栏。
         if (scope == SettingsScope.global)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final twoColumn = constraints.maxWidth >= _kTwoColumnMinWidth;
+              final leftPane = Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                     SectionCard(
                       title: t('外观'),
                       child: Column(
@@ -268,14 +282,11 @@ class SettingsPage extends StatelessWidget {
                       title: t('代理'),
                       child: const ProxySection(),
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
+                ],
+              );
+              final rightPane = Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                     SectionCard(
                       title: t('下载'),
                       child: Column(
@@ -299,10 +310,25 @@ class SettingsPage extends StatelessWidget {
                       title: t('应用'),
                       child: const AppSection(),
                     ),
-                  ],
-                ),
-              ),
-            ],
+                ],
+              );
+
+              // 宽：左右并排；窄：上下堆叠（宽度不够时硬塞双栏必溢出）。
+              if (!twoColumn) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [leftPane, const SizedBox(height: 12), rightPane],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: leftPane),
+                  const SizedBox(width: 11),
+                  Expanded(child: rightPane),
+                ],
+              );
+            },
           ),
 
         // ── 账号 ──────────────────────────────────────────────

@@ -148,7 +148,11 @@ class _DownloadManagementPageState extends State<DownloadManagementPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        PageHeader(title: t(title), subtitle: t(subtitle)),
+        PageHeader(
+          title: t(title),
+          subtitle: t(subtitle),
+          icon: Icons.download_rounded,
+        ),
         const SizedBox(height: 12),
 
         // ① Tab 条 —— 预览稿 `index.html:394-395` 的 `.tabs2.card`：

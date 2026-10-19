@@ -635,6 +635,7 @@ class _BiliPageState extends State<BiliPage> {
         // 而不是塞进某一栏。副题照 `PAGES.bili.s` = 「左边浏览，右边抓取」。
         PageHeader(
           title: t('B 站解析下载'),
+        icon: Icons.live_tv_rounded,
           subtitle: t('左边浏览，右边抓取'),
         ),
         const SizedBox(height: 10),
