@@ -237,6 +237,21 @@ void main() {
     '最小880x620': Size(880, 620),
   };
 
+  /// 设置页的 `brightness` 参数跟着当前组合走。
+  ///
+  /// **2026-10-19 T6 实测澄清**：旧版这里写死 `Brightness.dark`，看起来像
+  /// 「浅色档没测到设置页」，但实际**不是** —— `SettingsPage.brightness`
+  /// 是个**死参数**：`lib/pages/settings_page.dart` 里它只被声明与接收
+  /// （:96 / :112），**从未参与任何渲染**；设置页的真实明暗来自它内部
+  /// `AppTheme.colorsOf(context)`，而 `AppTheme.brightness` 在下面 `render()`
+  /// 里**已经按当前组合传了**。所以浅色档下设置页本来就是浅色渲染的。
+  ///
+  /// 把这里改成可变量是为了消除这个误导性的写死值（负控制实测：改回
+  /// `Brightness.dark` 后 `ui_smoke_test` 仍全绿，证实它不影响渲染）。
+  /// **真正的像素级盲区不在本文件**，而在 `card_content_painted_test.dart`
+  /// 的深色档 —— 详见 `appearance_matrix_painted_test.dart` 顶部说明。
+  Brightness pageBrightness = Brightness.dark;
+
   final pages = <String, Widget Function()>{
     '总览': () => DashboardPage(onNavigate: (_) {}),
     'X 主页': () => HomepagePage(onNavigate: (_) {}),
@@ -251,17 +266,17 @@ void main() {
     // 所以这里能验右侧面板在三种窗口尺寸下不撑破。
     'B 站批量下载': () => const BiliBatchPage(),
     '全局设置': () => SettingsPage(
-        brightness: Brightness.dark, onMaterialChanged: (_) async {}),
+        brightness: pageBrightness, onMaterialChanged: (_) async {}),
     'X 下载设置': () => SettingsPage(
-        brightness: Brightness.dark,
+        brightness: pageBrightness,
         onMaterialChanged: (_) async {},
         scope: SettingsScope.xDownload),
     '抖音设置': () => SettingsPage(
-        brightness: Brightness.dark,
+        brightness: pageBrightness,
         onMaterialChanged: (_) async {},
         scope: SettingsScope.douyin),
     'B 站设置': () => SettingsPage(
-        brightness: Brightness.dark,
+        brightness: pageBrightness,
         onMaterialChanged: (_) async {},
         scope: SettingsScope.bili),
     '关于': () => const AboutPage(
@@ -282,6 +297,7 @@ void main() {
           testWidgets('${entry.key} @ $combo @ ${size.key} 不溢出、内容可见',
               (tester) async {
             seed();
+            pageBrightness = brightness;
             await render(
               tester,
               size.value,
