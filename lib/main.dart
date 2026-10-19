@@ -37,7 +37,7 @@ import 'widgets/liquid_glass.dart';
 ///   3. 初始化窗口管理器 → 建无边框透明窗口
 ///   4. 应用 Windows 材质（Mica / 亚克力）
 ///   5. runApp
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // **必须在任何 HttpClient 创建之前**。
@@ -279,6 +279,7 @@ Future<void> main() async {
   // 「切换明暗」也能即时反映到窗口外观（2026-10-15 修）。
 
   runApp(XDownloaderApp(
+    initialRoute: launchRouteFrom(args, kAppRoutes),
     store: store,
     appState: appState,
     homepageStore: homepageStore,
@@ -291,6 +292,29 @@ Future<void> main() async {
     biliBatchStore: biliBatchStore,
     biliLedger: biliLedger,
   ));
+}
+
+/// 从启动参数里取出落地页 id：`--page=<id>`（也接受 `--page <id>`）。
+///
+/// **为什么需要它**：真机截图必须先停在目标页，而自动化点击这条路走不通 ——
+/// Flutter 走原始输入通道，`WM_LBUTTONDOWN` 一律不认，导航不过去。
+/// 让应用自己在启动时落地，则截图脚本可以完全后台跑（不碰前台、不抢焦点）。
+///
+/// 非法或缺失一律返回 null，回落到默认落地页 —— 启动路径不能因为
+/// 一个拼错的参数就异常。
+String? launchRouteFrom(List<String> args, List<String> known) {
+  for (var i = 0; i < args.length; i++) {
+    final a = args[i];
+    String? value;
+    if (a.startsWith('--page=')) {
+      value = a.substring('--page='.length);
+    } else if (a == '--page' && i + 1 < args.length) {
+      value = args[i + 1];
+    }
+    if (value == null || value.isEmpty) continue;
+    return known.contains(value) ? value : null;
+  }
+  return null;
 }
 
 /// 读 Windows「个性化 → 颜色」里的强调色，供 [WinUiAccent.system] 用。

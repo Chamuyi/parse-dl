@@ -91,8 +91,13 @@ class XDownloaderApp extends StatelessWidget {
   final BiliBatchStore biliBatchStore;
   final BiliLedger biliLedger;
 
+  /// 启动落地页（导航 id），来自 `--page=<id>`；null = 默认落地页。
+  /// 见 `_AppShell.initialRoute`。
+  final String? initialRoute;
+
   const XDownloaderApp({
     super.key,
+    this.initialRoute,
     required this.store,
     required this.appState,
     required this.homepageStore,
@@ -230,7 +235,10 @@ class XDownloaderApp extends StatelessWidget {
                 GlobalCupertinoLocalizations.delegate,
               ],
               theme: _buildMaterialTheme(brightness, appearance.visualStyle),
-              home: _AppShell(brightness: brightness),
+              home: _AppShell(
+                brightness: brightness,
+                initialRoute: initialRoute,
+              ),
             ),
           );
         },
@@ -262,7 +270,14 @@ class XDownloaderApp extends StatelessWidget {
 class _AppShell extends StatefulWidget {
   final Brightness brightness;
 
-  const _AppShell({required this.brightness});
+  /// 启动落地页（导航 id）。null = 用默认落地页 `dashboard`。
+  ///
+  /// 只为真机截图机制服务（`--page=<id>` 启动参数，见 `launchRouteFrom`）：
+  /// 自动化点击走不通 —— Flutter 走原始输入通道，不认 `WM_LBUTTONDOWN`，
+  /// 所以「导航到设置页再截图」这条路只能由应用自己在启动时落地。
+  final String? initialRoute;
+
+  const _AppShell({required this.brightness, this.initialRoute});
 
   @override
   State<_AppShell> createState() => _AppShellState();
@@ -316,6 +331,30 @@ const List<String> kAppRoutes = [
   return (children: visited, index: at);
 }
 
+/// 启动时的保活栈初值 —— **纯函数**，`test/launch_route_test.dart` 直接钉住它。
+///
+/// 抽出理由：`--page=<id>` 只允许改**初值**，而初值由两个字段共同决定，
+/// 少改一个就静默退化：`keepAliveStack` 要求「当前页在已访问列表里」，
+/// 只改 `route` 会让首帧退回单页渲染，保活在第一个页面上就失效（不崩，
+/// 所以肉眼与日志都看不出来）。把两字段的联动收在一个纯函数里，判据才钉得住。
+///
+/// [requested] 为 null 或不在 [kAppRoutes] 里时原样返回 —— 启动路径不能因为
+/// 一个拼错的参数改变行为。
+({String route, List<String> visited}) launchStack(
+  String? requested,
+  String defaultRoute,
+  List<String> defaultVisited,
+) {
+  if (requested == null || !kAppRoutes.contains(requested)) {
+    return (route: defaultRoute, visited: defaultVisited);
+  }
+  // 目标页排在最前：它此刻就是当前页，必须在已访问列表里。
+  if (requested == defaultRoute || defaultVisited.contains(requested)) {
+    return (route: requested, visited: defaultVisited);
+  }
+  return (route: requested, visited: <String>[requested, ...defaultVisited]);
+}
+
 class _AppShellState extends State<_AppShell> {
   /// 当前选中的页面（导航 id）。
   ///
@@ -362,6 +401,21 @@ class _AppShellState extends State<_AppShell> {
   /// 浮层的开关/进行中状态变了就重建本层 —— 遮罩挂在 `build` 的树上，
   /// 不重建就永远不出现。
   void _onDouyinOverlayChanged() => setState(() {});
+
+  @override
+  void initState() {
+    super.initState();
+    // 启动即落到指定页（`--page=<id>`）。只改**初值**：之后用户点导航
+    // 照样走 `_setRoute`，两者不冲突。
+    // 只在参数**真的**指向别处时才动初值，默认路径一个字节都不碰。
+    if (widget.initialRoute == null) return;
+    final start = launchStack(widget.initialRoute, _routeId, _visited);
+    if (start.route == _routeId) return;
+    _routeId = start.route;
+    _visited
+      ..clear()
+      ..addAll(start.visited);
+  }
 
   @override
   void dispose() {
