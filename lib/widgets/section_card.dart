@@ -68,7 +68,8 @@ class SectionCard extends StatelessWidget {
     required this.title,
     required this.child,
     this.trailing,
-    this.contentPadding = const EdgeInsets.fromLTRB(13, 0, 13, 13),
+    // WinUI 卡片内边距 16（官方 `FluentCardStyle`）；旧风格保留 13。
+    this.contentPadding = EdgeInsets.zero,
     this.radius = AppRadius.card,
     this.flex = false,
   });
@@ -140,15 +141,24 @@ class _SectionCardHead extends StatelessWidget {
     final winui = AppTheme.of(context).style == AppStyle.winui;
 
     return Padding(
-      padding: EdgeInsets.fromLTRB(13, winui ? 8 : 10, 13, winui ? 8 : 10),
+      // 参照物卡头留白 16/12（与 `FluentCardStyle` 的 16 内边距对齐）。
+      padding: EdgeInsets.fromLTRB(
+        winui ? 16 : 13,
+        winui ? 12 : 10,
+        winui ? 16 : 13,
+        winui ? 12 : 10,
+      ),
       child: Row(
         // min：标题按内容取宽，剩下的空白交给右侧（CSS `.ct` 默认行为）
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 参照物 `SectionHeaderStyle` = 官方 `BodyStrongTextBlockStyle`：
+          // **14px + SemiBold**。此前 11.5 让整个界面像「网页小标签」而不是
+          // WinUI 卡片头 —— 这是 2026-10-19 用户判「不像 WinUI」的直接原因之一。
           Text(
             title,
             style: TextStyle(
-              fontSize: 11.5,
+              fontSize: winui ? 14 : 11.5,
               fontWeight: FontWeight.w600,
               letterSpacing: winui ? 0 : 0.3,
               color: c.textStrong,

@@ -4,6 +4,7 @@ import 'package:window_manager/window_manager.dart';
 import '../l10n/l10n.dart';
 import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
+import 'title_bar_search.dart';
 
 /// 自绘标题栏。窗口是无边框的（titleBarStyle: hidden），
 /// 所以标题栏、拖动、三个窗口按钮都由这里负责。
@@ -134,6 +135,15 @@ class _TitleBarState extends State<TitleBar> with WindowListener {
               ),
             ),
           ),
+
+          // 中间：搜索框 —— 照抄参照物 `TitleBar.Content` 里的 320px
+          // `AutoSuggestBox`。WinUI 的标题栏本身就是功能区，不是一条
+          // 只有三个窗口按钮的细带；少了它，界面不像 WinUI 的一半原因就在这。
+          if (shape.titleBarHeight >= 48) ...[
+            const Spacer(),
+            const TitleBarSearch(),
+            const Spacer(),
+          ],
 
           // 右侧：三个窗口按钮，flush 排布
           _CaptionButton(

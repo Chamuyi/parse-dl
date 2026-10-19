@@ -156,6 +156,8 @@ const Map<String, String> kStringsEn = {
   '已清除 X 接口缓存，请重新搜索': 'X API cache cleared — search again',
   '应用': 'Application',
   '页面「{route}」迁移中': 'Page "{route}" is still being migrated',
+  // ── 标题栏搜索 ───────────────────────────────────────────────
+  '搜索设置与页面': 'Search settings and pages',
 
   // ── 关于页 ───────────────────────────────────────────────────
   '批量下载 X、抖音与 B 站上的图片与视频':

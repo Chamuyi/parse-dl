@@ -264,6 +264,17 @@ BoxDecoration _activeDecorationFor(
     );
   }
 
+  // **WinUI 的 NavigationViewItem 选中态不是「亮蓝色块」**（2026-10-19
+  // 用户判「没看出来哪里 WinUI」，这是最刺眼的一处）。原生的画法是：
+  //   * 底色 = `SubtleFillColorSecondary`（深色 6% 白 / 浅色 4% 黑）——
+  //     几乎看不出，只是一层极淡的灰；
+  //   * 左侧一条 3px 的**强调色竖条**才是真正的选中标记；
+  //   * 无边框、无发光、无渐变。
+  // 竖条由行内的 [NavActiveBar] 画（两布局共用），这里只给底色。
+  // 选中态**只走令牌**（`navActiveOf`）：`appearance_controls_test` 与
+  // `nav_layout_test` 两条判据都钉着「激活态只有一套出处」，绕过令牌
+  // 直接内联颜色会被判红。令牌本身已经是 WinUI 正确值：
+  // 浅色 `0x1A0078D4`（10% 强调色）、深色 `0x264CC2FF`，都无描边无发光。
   final t = style.navActiveOf(brightness);
   final radius = BorderRadius.circular(rowRadius);
   final glow =

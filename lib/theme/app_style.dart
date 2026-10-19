@@ -830,14 +830,15 @@ class StyleShape {
   });
 
   /// WinUI3 形态。取值来源：
-  /// - 标题栏 32px / 按钮 46x32：Windows 11 标准标题栏（fluent_ui 的
-  ///   NavigationView 与系统窗口一致）。
+  /// - 标题栏 **48px** / 按钮 46×48：照抄参照物 `MainWindow.xaml:19` 的
+  ///   `<RowDefinition Height="48" />` —— 它用的是原生 `TitleBar` 控件，
+  ///   标准高度 48。此前按 32 做，比参照物矮 1/3，是「不像 WinUI」的显眼一处。
   /// - 开关 40x20 / 滑块 12：fluent_ui 的 ToggleSwitch 尺寸。
   /// - 选项格 / 徽章 / 导航行 4px：WinUI3 的「控件圆角 4px」规范。
   static const winui = StyleShape(
-    titleBarHeight: 32,
+    titleBarHeight: 48,
     captionWidth: 46,
-    captionHeight: 32,
+    captionHeight: 48,
     captionRadius: 0,
     captionMargin: 0,
     titleBarTintedLikeSidebar: true,

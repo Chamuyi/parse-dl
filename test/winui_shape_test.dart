@@ -20,8 +20,14 @@ void main() {
     const w = StyleShape.winui;
     const l = StyleShape.legacy;
 
-    test('标题栏高度 32 vs 44', () {
-      expect(w.titleBarHeight, 32, reason: 'Windows 11 标准标题栏是 32px');
+    test('标题栏高度 48 vs 44', () {
+      // **2026-10-19 更正**：此前写 32，理由是「Windows 11 标准标题栏 32px」。
+      // 那个 32 指的是**系统 window chrome**（非客户区那一圈）；本应用是
+      // 自绘标题栏，对标的是参照物 `MainWindow.xaml:19` 的
+      // `<RowDefinition Height="48" />` —— 它用的是 WinUI 3 的 `TitleBar`
+      // **控件**，标准高度 48，且能把搜索框放进 `TitleBar.Content`。
+      // 32 与 48 不是对错之争，是「系统 chrome」与「应用内 TitleBar 控件」之别。
+      expect(w.titleBarHeight, 48, reason: '对齐 WinUI TitleBar 控件的 48px');
       expect(l.titleBarHeight, 44, reason: '另三套沿用改造前的 44px');
       // 负控制：两者必须真的不同，否则「按风格切换」这件事本身没意义
       expect(w.titleBarHeight, isNot(l.titleBarHeight));
@@ -32,9 +38,13 @@ void main() {
       expect(w.captionMargin, 0);
       expect(l.captionRadius, greaterThan(0));
       expect(l.captionMargin, greaterThan(0));
-      // 尺寸两套相同（46x32 就是 Win11 的比例，另三套早已对齐）
+      // 宽度两套相同（46 是 Win11 的按钮宽度比例）。
+      // 高度两套**不同**：winui 48（与 `TitleBar` 控件等高，按钮铺满栏高）；
+      // legacy 32（旧画法，按钮在 44 高的栏里垂直居中）。
+      // 这里如实钉住差异，不强行拉平 —— 拉平会改动 legacy 的既有观感。
       expect(w.captionWidth, l.captionWidth);
-      expect(w.captionHeight, l.captionHeight);
+      expect(w.captionHeight, 48);
+      expect(l.captionHeight, 32);
     });
 
     test('标题栏是否与侧栏连成一片：只有 winui 为真', () {
