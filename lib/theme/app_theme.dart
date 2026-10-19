@@ -26,7 +26,19 @@ class AppColors {
   /// 卡片：半透明，配合 BackdropFilter 形成毛玻璃
   final Color surfaceCard;
   final Color surfaceCardHover;
+
+  /// 标题栏窗口按钮的三态底色与失焦前景。
+  ///
+  /// 为什么单独立槽位、而不是复用 [surfaceCardHover]：那个槽位有九个组件
+  /// 共用（设置页开关行、折叠组、导航布局选择器、下载管理行…），改它会连带
+  /// 改掉它们的悬停观感。参照物也是把标题栏按钮配色**单独**写在一处
+  /// （`tubatool/TubaWinUi3.WinUI3/Services/BuiltinWindowHelper.cs:141-167`
+  /// 的 `ApplyCore`），与内容区的悬停色无关 —— 这里照抄那个结构。
+  final Color captionHoverBg;
+  final Color captionPressedBg;
+  final Color captionInactiveFg;
   final Color surfaceSunken;
+
   /// 浮动层（Dock / 弹出面板 / 对话框）
   final Color surfaceFloat;
   final Color surfaceSolid;
@@ -100,6 +112,9 @@ class AppColors {
     required this.surfaceBase,
     required this.surfaceCard,
     required this.surfaceCardHover,
+    required this.captionHoverBg,
+    required this.captionPressedBg,
+    required this.captionInactiveFg,
     required this.surfaceSunken,
     required this.surfaceFloat,
     required this.surfaceSolid,
@@ -151,6 +166,9 @@ class AppColors {
       surfaceBase: surfaceBase,
       surfaceCard: surfaceCard,
       surfaceCardHover: surfaceCardHover,
+      captionHoverBg: captionHoverBg,
+      captionPressedBg: captionPressedBg,
+      captionInactiveFg: captionInactiveFg,
       surfaceSunken: surfaceSunken,
       surfaceFloat: surfaceFloat,
       surfaceSolid: surfaceSolid,
@@ -195,6 +213,12 @@ class AppColors {
     surfaceBase: Colors.transparent,
     surfaceCard: Color(0xE8F8FAFC), // 91%
     surfaceCardHover: Color(0xF5FBFCFE), // 96%
+    // 标题栏窗口按钮：浅色 hover/pressed 与失焦前景，逐值取自参照物
+    // `BuiltinWindowHelper.cs:159-161`（hover #E6E6E6 / pressed #D2D2D2）
+    // 与 `:166`（ButtonInactiveForegroundColor #A0A0A0）。
+    captionHoverBg: Color(0xFFE6E6E6),
+    captionPressedBg: Color(0xFFD2D2D2),
+    captionInactiveFg: Color(0xFFA0A0A0),
     surfaceSunken: Color(0xF2F2F4F7), // 95%，刻意保留「凹下去」的那半档
     surfaceFloat: Color(0xFAFFFFFF), // 98%
     surfaceSolid: Color(0xFFF8FAFC),
@@ -231,6 +255,12 @@ class AppColors {
     surfaceBase: Colors.transparent,
     surfaceCard: Color(0xE61B1F27), // 90%
     surfaceCardHover: Color(0xEE232833), // 93%
+    // 标题栏窗口按钮：深色 hover/pressed 与失焦前景，逐值取自参照物
+    // `BuiltinWindowHelper.cs:148-150`（hover #323232 / pressed #1E1E1E）
+    // 与 `:166`（ButtonInactiveForegroundColor #A0A0A0）。
+    captionHoverBg: Color(0xFF323232),
+    captionPressedBg: Color(0xFF1E1E1E),
+    captionInactiveFg: Color(0xFFA0A0A0),
     surfaceSunken: Color(0xF0151820), // 94%
     surfaceFloat: Color(0xFF252A38), // 实心
     surfaceSolid: Color(0xFF14171E),

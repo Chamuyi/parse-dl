@@ -95,6 +95,14 @@ class StyleColors {
       surfaceCard: Color(0xFFFBFBFB),
       // controlFillColorSecondary（50% 的 #F9F9F9）合成后
       surfaceCardHover: Color(0xFFF7F7F7),
+      // 标题栏窗口按钮三态。**不复用 surfaceCardHover**：那个槽位是内容区
+      // 悬停色（#F7F7F7），而参照物给标题栏按钮单独配了一套
+      // （`BuiltinWindowHelper.cs:159-161`：hover #E6E6E6 / pressed #D2D2D2），
+      // 浅色下两者相差 15/255 —— 照抄就不能拿内容区那个值顶替。
+      captionHoverBg: Color(0xFFE6E6E6),
+      captionPressedBg: Color(0xFFD2D2D2),
+      // `:166` ButtonInactiveForegroundColor
+      captionInactiveFg: Color(0xFFA0A0A0),
       // solidBackgroundFillColorTertiary
       surfaceSunken: Color(0xFFF9F9F9),
       // solidBackgroundFillColorQuarternary
@@ -153,6 +161,12 @@ class StyleColors {
       surfaceCard: Color(0xFF2B2B2B),
       // controlFillColorSecondary（8% 白）合成后
       surfaceCardHover: Color(0xFF323232),
+      // 标题栏窗口按钮三态（`BuiltinWindowHelper.cs:148-150` / `:166`）。
+      // 深色下 hover 与 surfaceCardHover 恰好同值（#323232），但 pressed
+      // （#1E1E1E）与失焦前景（#A0A0A0）是内容区色板没有的 —— 仍是独立槽位。
+      captionHoverBg: Color(0xFF323232),
+      captionPressedBg: Color(0xFF1E1E1E),
+      captionInactiveFg: Color(0xFFA0A0A0),
       // solidBackgroundFillColorSecondary
       surfaceSunken: Color(0xFF1C1C1C),
       // solidBackgroundFillColorQuarternary

@@ -508,6 +508,12 @@ class _AppShellState extends State<_AppShell> {
                 onMinimize: () => _windowAction('minimize'),
                 onToggleMaximize: () => _windowAction('maximize'),
                 onClose: () => _windowAction('close'),
+                // 标题栏右列的「下载队列」按钮 → 下载管理页
+                // （`kAppRoutes:309` 的 'download-management'，即 `_pageFor:696`
+                // 的 `DownloadManagementPage()`，feed 默认列全部模块的任务）。
+                // 标题栏不认识路由表，跳转一律由外壳层的 `_setRoute` 执行 ——
+                // 与 `DashboardPage.onNavigate` 是同一个分工。
+                onOpenDownloads: _setRoute,
               ),
               // 下载引擎没起来时全程挂着这条 —— 挂在根布局是为了覆盖所有页面，
               // 用户不管在哪个界面点下载，都不会以为程序一切正常。
