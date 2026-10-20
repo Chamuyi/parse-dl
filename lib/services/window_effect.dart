@@ -100,6 +100,9 @@ Future<MaterialApplyResult> applyWindowMaterial(
     dark: dark,
     active: active,
   );
+  // 材质是否真的挂上只有原生侧知道，这一行把结论带到 stdout（debug 版
+  // 可直接从控制台读到，不必靠像素反推）。
+  debugPrint('[BACKDROP] ${material.id} applied=$applied');
 
   return MaterialApplyResult(
     ok: applied,

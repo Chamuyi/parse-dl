@@ -64,8 +64,40 @@ endfunction()
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 
-# 窗口材质插件（DWM 系统背景，四档 Mica / 亚克力）。
+# 窗口材质插件（Windows App SDK 合成控制器，四档 Mica / 亚克力）。
 # 必须写在 runner 之前：runner 的 CMakeLists 里 target_link_libraries 会引用它。
+
+# Windows App SDK NuGet 包位置。插件要链 MddBootstrapInitialize2 与 C++/WinRT 头，
+# 都从这个包里取。版本固定，与 windows/gen_winrt_projection.ps1 生成的投影一致。
+set(WASDK_VERSION "1.7.250606001")
+if(NOT DEFINED WASDK_ROOT)
+  set(WASDK_ROOT "$ENV{USERPROFILE}/.nuget/packages/microsoft.windowsappsdk/${WASDK_VERSION}"
+      CACHE PATH "Windows App SDK NuGet package root")
+endif()
+if(NOT EXISTS "${WASDK_ROOT}/lib/uap10.0.17763/Microsoft.UI.winmd")
+  message(FATAL_ERROR "Windows App SDK not found at ${WASDK_ROOT}. Expected the NuGet package microsoft.windowsappsdk/${WASDK_VERSION}.")
+endif()
+
+# Windows SDK 自带的两套 C++/WinRT 头，缺一不可：
+#   Include/<ver>/cppwinrt   -> winrt/base.h（C++/WinRT 基础库）
+#   Include/<ver>/winrt      -> windows.ui.composition.interop.h
+#                               （ICompositorDesktopInterop / IDesktopWindowTarget
+#                                的 ABI 声明只在这里，WindowsAppSDK 投影不含它）
+if(NOT DEFINED WINSDK_CPPWINRT_BASE)
+  foreach(_ver 10.0.26100.0 10.0.22621.0 10.0.22000.0 10.0.19041.0)
+    set(_p "C:/Program Files (x86)/Windows Kits/10/Include/${_ver}/cppwinrt")
+    if(EXISTS "${_p}/winrt/base.h")
+      set(WINSDK_CPPWINRT_BASE "${_p}" CACHE PATH "Windows SDK C++/WinRT base headers")
+      set(WINSDK_WINRT_INTEROP "C:/Program Files (x86)/Windows Kits/10/Include/${_ver}/winrt"
+          CACHE PATH "Windows SDK winrt interop headers")
+      break()
+    endif()
+  endforeach()
+endif()
+if(NOT DEFINED WINSDK_CPPWINRT_BASE)
+  message(FATAL_ERROR "Windows SDK C++/WinRT headers not found (.../Include/<ver>/cppwinrt/winrt/base.h)")
+endif()
+
 add_subdirectory("system_backdrop")
 
 # Application build; see runner/CMakeLists.txt.

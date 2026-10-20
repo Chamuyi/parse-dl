@@ -3,6 +3,8 @@
 #include <dwmapi.h>
 #include <flutter_windows.h>
 
+#include <string>
+
 #include "resource.h"
 
 namespace {
@@ -28,6 +30,7 @@ constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme"
 
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
+
 
 using EnableNonClientDpiScaling = BOOL __stdcall(HWND hwnd);
 
@@ -134,14 +137,60 @@ bool Win32Window::Create(const std::wstring& title,
   UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
   double scale_factor = dpi / 96.0;
 
-  HWND window = CreateWindow(
-      window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
+  // WS_EX_NOREDIRECTIONBITMAP is a prerequisite for WinUI 3 / WinAppSDK
+  // system backdrops (MicaController / DesktopAcrylicController): it stops
+  // DWM from allocating a redirection surface for this window, so the
+  // content is composited directly by the compositor.
+  //
+  // 2026-10-20: without it, attaching a DesktopAcrylicController crashed the
+  // process with 0xC000027B (coremessaging.dll) on the very first window
+  // state change (move / z-order / minimize). WinUI 3 windows always carry
+  // this ex-style, which is why the reference app never hit it.
+  //
+  // Cost: no DWM-drawn drop shadow or system rounding -- WinUI 3 apps have
+  // the same trade-off (AppWindow manages rounding itself). This window uses
+  // a borderless self-drawn title bar and never relied on the system shadow.
+  //
+  // NOTE: this file must stay pure ASCII. MSVC decodes sources with the
+  // system code page (936 here) and promotes C4819 to an error via /WX.
+  // 2026-10-21 ARCHITECTURE CHANGE: the window no longer carries
+  // WS_EX_NOREDIRECTIONBITMAP.
+  //
+  // Reason: with that flag the window has no redirection surface, so Flutter's
+  // GL output never reaches the screen -- the material (drawn by the WinAppSDK
+  // composition controllers into a DComp tree) covered everything and the UI
+  // disappeared. Measured on screen three times.
+  //
+  // New architecture (proven by the dualwin experiment): the WinAppSDK
+  // material is drawn into a SEPARATE companion window that sits directly
+  // below this one, and this window is made per-pixel transparent with
+  // DwmExtendFrameIntoClientArea. DWM then composites Flutter's own pixels
+  // over the official material, so both exist at the same time.
+  //
+  // The companion window is created and kept in sync by the system_backdrop
+  // plugin (see windows/system_backdrop/system_backdrop_plugin.cpp).
+  //
+  // NOTE: this file must stay pure ASCII. MSVC decodes sources with the
+  // system code page (936 here) and promotes C4819 to an error via /WX.
+  const DWORD ex_style = 0;
+
+  HWND window = CreateWindowEx(
+      ex_style, window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
       Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
       Scale(size.width, scale_factor), Scale(size.height, scale_factor),
       nullptr, nullptr, GetModuleHandle(nullptr), this);
 
   if (!window) {
     return false;
+  }
+
+  // Per-pixel transparency: extend the DWM frame over the whole client area so
+  // pixels Flutter leaves at alpha 0 let the material window below show
+  // through. The material itself is NOT drawn by DWM here -- it comes from the
+  // companion window underneath.
+  {
+    MARGINS margins = {-1, -1, -1, -1};
+    ::DwmExtendFrameIntoClientArea(window, &margins);
   }
 
   UpdateTheme(window);

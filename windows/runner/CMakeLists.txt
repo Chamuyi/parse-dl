@@ -34,9 +34,18 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
-# 窗口材质插件（windows/system_backdrop）。走系统 dwmapi，
-# 不再需要 Windows App SDK 的元数据、导入库与引导 DLL。
+# 窗口材质插件（windows/system_backdrop）。走 Windows App SDK 的合成控制器，
+# 与参照物（图吧工具箱 / WinUI 3）同一套 API。
 target_link_libraries(${BINARY_NAME} PRIVATE system_backdrop)
+
+# Windows App Runtime 引导 DLL 必须和 exe 放在一起。
+# 插件静态导入 Microsoft.WindowsAppRuntime.Bootstrap.dll（MddBootstrapInitialize2），
+# 少了它 exe 一启动就报「找不到 Microsoft.WindowsAppRuntime.Bootstrap.dll」。
+add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${WASDK_ROOT}/runtimes/win-x64/native/Microsoft.WindowsAppRuntime.Bootstrap.dll"
+    "$<TARGET_FILE_DIR:${BINARY_NAME}>/Microsoft.WindowsAppRuntime.Bootstrap.dll"
+  COMMENT "Copying Windows App Runtime bootstrap DLL")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
