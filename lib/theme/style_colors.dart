@@ -89,10 +89,17 @@ class StyleColors {
       // = 官方 solidBackgroundFillColorBase。内容区铺它当底 ——
       // WinUI 里这层由 Mica 提供，Flutter 侧没有 Mica，用官方同名令牌兜底。
       surfaceBase: Color(0xFFF3F3F3),
-      // cardBackgroundFillColorDefault（70% 白）**合成到不透明**后的值。
-      // 理由同 [winuiDark]：官方是压在 Mica 上的，我方要自己合掉，
-      // 否则深色壁纸会把卡片压暗、对比度不稳。
-      surfaceCard: Color(0xFFFBFBFB),
+      // = 官方 `cardBackgroundFillColorDefault`（`0xB3FFFFFF`，70% 白，**半透明**）。
+      //
+      // **2026-10-20 改回半透明**。原先是 `0xFFFBFBFB`（不透明），理由是
+      // 「官方压在 Mica 上，我方要自己合掉」—— 但那条理由的前提是**窗口还没有
+      // 真材质**。现在材质真渲染了，预合成反而把材质挡在卡片外：
+      // 实测卡片 (251,251,251) 与内容底 (251,251,251) 完全同值，卡片边界消失，
+      // 整页糊成一整块白 —— 与图吧「卡片 250 / 底 236，差 14 有层次」差很远。
+      //
+      // 参照物 `TubaWinUi3.WinUI3` 全项目用的就是
+      // `{ThemeResource CardBackgroundFillColorDefaultBrush}`（半透明原值）。
+      surfaceCard: Color(0xB3FFFFFF),
       // controlFillColorSecondary（50% 的 #F9F9F9）合成后
       surfaceCardHover: Color(0xFFF7F7F7),
       // 标题栏窗口按钮三态。**不复用 surfaceCardHover**：那个槽位是内容区
@@ -153,12 +160,11 @@ class StyleColors {
     colors: AppColors(
       // = 官方 solidBackgroundFillColorBase（#202020）。同 [winuiLight]。
       surfaceBase: Color(0xFF202020),
-      // cardBackgroundFillColorDefault（5% 白）**合成到不透明**后的值。
+      // = 官方 `cardBackgroundFillColorDefault`（`0x0DFFFFFF`，5% 白，**半透明**）。
       //
-      // 官方那 5% 白是压在**不透明 Mica** 上的；我方窗口底只有 0.85 不透明度，
-      // 白壁纸会从下面顶上来把卡片冲淡（实测 faint 对比度掉到 1.79）。
-      // 所以这里预先把它合成掉 —— 等价于 Mica 那一层，观感与官方一致。
-      surfaceCard: Color(0xFF2B2B2B),
+      // 同 [winuiLight]：原先是 `0xFF2B2B2B`（不透明），前提是「窗口还没有真材质」。
+      // 现在材质真渲染了，预合成会把材质挡在卡片外、卡片与背景糊成一片。
+      surfaceCard: Color(0x0DFFFFFF),
       // controlFillColorSecondary（8% 白）合成后
       surfaceCardHover: Color(0xFF323232),
       // 标题栏窗口按钮三态（`BuiltinWindowHelper.cs:148-150` / `:166`）。
