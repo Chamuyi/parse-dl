@@ -115,17 +115,42 @@ void main() {
       }
     }
 
-    // 判据 3：细亚克力必须比普通亚克力**更暗**（方向与参照物一致）
+    // 判据 3：细亚克力必须比普通亚克力**更亮**
+    //
+    // 方向依据是档位语义本身：`acrylicThin` 的标签是
+    // `Lighter acrylic variant` /「更透亮的磨砂」—— 更轻的一档就该更亮更透。
+    //
+    // 2026-10-20 用户实测指出反了（「你这不是写的更透亮的吗，怎么更黑了」），
+    // 当时四档一律递增压暗，thin 压得最狠、比 acrylic 还暗 5~6 阶。
+    // 这条断言就是防它再翻回去。
     for (final brightness in Brightness.values) {
       final b = brightness.name;
       final acrylic = results['${b}_acrylic']!.computeLuminance();
       final thin = results['${b}_acrylic-thin']!.computeLuminance();
       expect(
         thin,
-        lessThan(acrylic),
-        reason: '$b：细亚克力应比普通亚克力更暗（参照物方向），'
-            '实际 acrylic=$acrylic thin=$thin',
+        greaterThan(acrylic),
+        reason: '$b：细亚克力是「更透亮」的一档，必须比普通亚克力**更亮**；'
+            '实际 acrylic=$acrylic thin=$thin（方向反了说明膜的 alpha 排布搞反）',
       );
+    }
+
+    // 判据 4：整条阶梯必须单调递增 —— mica < mica-alt < acrylic < acrylic-thin
+    // （亮度递增 = 材质逐档变轻，与四档语义一致）
+    for (final brightness in Brightness.values) {
+      final b = brightness.name;
+      final lums = [
+        for (final m in WindowMaterial.values)
+          results['${b}_${m.id}']!.computeLuminance(),
+      ];
+      for (var i = 1; i < lums.length; i++) {
+        expect(
+          lums[i],
+          greaterThan(lums[i - 1]),
+          reason: '$b：第 ${i + 1} 档应比第 $i 档更亮（材质逐档变轻），'
+              '实际 ${lums[i - 1]} → ${lums[i]}',
+        );
+      }
     }
   });
 }

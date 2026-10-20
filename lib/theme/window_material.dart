@@ -274,26 +274,42 @@ MaterialPreviewSpec materialPreviewSpecOf(WindowMaterial material) =>
 /// 幅度仍然只作用在背景层（卡片不透明、文字压在卡片上），不牺牲可读性。
 Color? backdropVeilOf(WindowMaterial material, Brightness brightness) =>
     switch (material) {
-      // 四档都**压暗**，只是幅度递增 —— 深色底（实测 43）与浅色底（实测 251）
-      // 都还有压暗空间，而提亮在深色下会很快撞上限（实测四档挤成 e2/e1/df/d6）。
-      // 压暗幅度按参照物预览块的明暗序：mica 最亮 → acrylic-thin 最暗。
-      // 幅度按**真机实测**逐轮加大（2026-10-20）：
-      // 第一轮 0x0D 太弱（两档肉眼一样，平均通道差 1.7）；
-      // 第二轮 0x08/0x18/0x28/0x38 有改善，但 mica-alt↔acrylic 只到 1.91，
-      // 仍贴着阈值 2 边缘 —— 真机上不同壁纸/亮度会让它掉下去。
-      // 本轮把相邻档间隔拉到 ≥ 0x10（16 阶），实测最小一对 ≥ 3。
+      // 方向必须与**档位语义**一致（2026-10-20 用户指出反了）。
+      //
+      // `acrylicThin` 的英文标签是 `Lighter acrylic variant`、中文是「更透亮的
+      // 磨砂」—— 它应当比 `acrylic` **更亮、更透**。但之前四档一律压暗且幅度
+      // 递增，thin 压得最狠，实测比 acrylic 还暗 5~6 阶，与标签直接矛盾
+      // （用户原话「你这不是写的更透亮的吗，怎么更黑了」）。
+      //
+      // 排布：**膜越淡 → 越亮越透**。alpha 越小 = 压得越少 = 越亮。
+      //
+      //   mica        0x22/0x28  最实（云母是有底色的不透明质感）
+      //   mica-alt    0x18/0x1C
+      //   acrylic     0x10/0x14
+      //   acrylicThin 0x04/0x06  最淡 ⇒ **最亮最透**，与「更透亮的磨砂」一致
+      //
+      // **为什么 thin 不能完全不叠（alpha=0）**：DWM 在本机只给一档亚克力
+      // （`acrylic` 与 `acrylic-thin` 原生同为值 3），两档的差异全靠这层膜。
+      // 若 thin 完全不叠、acrylic 叠 0x10，两者能分辨；但留一点 0x04 是为了
+      // 让 thin 在浅色壁纸下也不至于「透到发白、与 mica 撞车」。
+      //
+      // 2026-10-20 踩过两次方向错误：
+      //   ① 四档一律递增压暗 → thin 最暗，与「更透亮」的标签直接矛盾。
+      //   ② 以为「alpha 越大越亮」→ 实际 alpha 越大越暗（膜是黑的）。
+      // 判据在 `test/material_golden_test.dart`：它直接量合成后的亮度，
+      // 断言 thin 必须**比 acrylic 亮**，方向错了当场判红。
       WindowMaterial.mica => brightness == Brightness.dark
-          ? const Color(0x04000000)
-          : const Color(0x08000000),
+          ? const Color(0x22000000)
+          : const Color(0x28000000),
       WindowMaterial.micaAlt => brightness == Brightness.dark
           ? const Color(0x18000000)
-          : const Color(0x1E000000),
+          : const Color(0x1C000000),
       WindowMaterial.acrylic => brightness == Brightness.dark
-          ? const Color(0x2C000000)
-          : const Color(0x34000000),
+          ? const Color(0x10000000)
+          : const Color(0x14000000),
       WindowMaterial.acrylicThin => brightness == Brightness.dark
-          ? const Color(0x40000000)
-          : const Color(0x48000000),
+          ? const Color(0x04000000)
+          : const Color(0x06000000),
     };
 
 /// 主题模式。对应设置里的 `themeMode`。
