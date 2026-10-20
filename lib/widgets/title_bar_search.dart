@@ -58,10 +58,15 @@ class _TitleBarSearchState extends State<TitleBarSearch> {
     // 会把新文件里手写的颜色字面量判红（注释里也不行，正则不剥注释）。
     // 这三个槽位就是官方 `controlFillColorDefault` /
     // `controlStrokeColorDefault` / `controlStrokeColorSecondary` 的对应物：
-    //   surfaceSunken = 输入框底（深 6% 白 / 浅 4% 黑）
+    //   controlFill   = 官方 controlFillColorDefault（深 6% 白 / 浅 70% 白，**半透明**）
     //   lineSoft      = 常规描边
     //   line          = 底边那一档略深的描边
-    final fill = c.surfaceSunken;
+    //
+    // **2026-10-20 修**：原先用 surfaceSunken（不透明实色）。标题栏现在会透出
+    // 窗口材质，实测材质是 (82,79,70)，而不透明深灰是 (28,28,28) —— 两者叠在
+    // 一起就是一块「黑洞」，用户报「最上面怎么一块黑色」。
+    // 官方输入框底色是半透明的，压在材质上只做轻微提亮，不会打出暗块。
+    final fill = c.controlFill;
     final stroke = c.lineSoft;
     final bottomStroke = c.line;
 

@@ -104,6 +104,9 @@ class StyleColors {
       // `:166` ButtonInactiveForegroundColor
       captionInactiveFg: Color(0xFFA0A0A0),
       // solidBackgroundFillColorTertiary
+      // 官方 controlFillColorDefault（浅色）= 0xB3FFFFFF（70% 白，半透明）。
+      // 输入框压在材质上时靠这层半透明白提亮，而不是画一块不透明实色。
+      controlFill: Color(0xB3FFFFFF),
       surfaceSunken: Color(0xFFF9F9F9),
       // solidBackgroundFillColorQuarternary
       surfaceFloat: Color(0xFFFFFFFF),
@@ -168,6 +171,12 @@ class StyleColors {
       captionPressedBg: Color(0xFF1E1E1E),
       captionInactiveFg: Color(0xFFA0A0A0),
       // solidBackgroundFillColorSecondary
+      // 官方 controlFillColorDefault（深色）= 0x0FFFFFFF（6% 白，半透明）。
+      //
+      // **2026-10-20 修**：搜索框原先用 surfaceSunken（0xFF1C1C1C 不透明深灰），
+      // 压在透出材质的标题栏（实测 82,79,70）上就是一块「黑洞」——用户报
+      // 「最上面怎么一块黑色」。官方那 6% 白是**叠在材质上提亮**的，不是实色。
+      controlFill: Color(0x0FFFFFFF),
       surfaceSunken: Color(0xFF1C1C1C),
       // solidBackgroundFillColorQuarternary
       surfaceFloat: Color(0xFF2C2C2C),

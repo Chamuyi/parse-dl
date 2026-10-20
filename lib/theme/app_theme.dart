@@ -39,6 +39,13 @@ class AppColors {
   final Color captionInactiveFg;
   final Color surfaceSunken;
 
+  /// 输入框/搜索框底色 = 官方 `controlFillColorDefault`。
+  ///
+  /// **必须是半透明的**：标题栏与侧栏现在会透出窗口材质，不透明实色压在上面
+  /// 会打出一块暗斑（2026-10-20 用户报「最上面怎么一块黑色」）。
+  /// 官方值：深色 `0x0FFFFFFF`（6% 白）/ 浅色 `0xB3FFFFFF`（70% 白）。
+  final Color controlFill;
+
   /// 浮动层（Dock / 弹出面板 / 对话框）
   final Color surfaceFloat;
   final Color surfaceSolid;
@@ -116,6 +123,7 @@ class AppColors {
     required this.captionPressedBg,
     required this.captionInactiveFg,
     required this.surfaceSunken,
+    required this.controlFill,
     required this.surfaceFloat,
     required this.surfaceSolid,
     required this.scrim,
@@ -170,6 +178,7 @@ class AppColors {
       captionPressedBg: captionPressedBg,
       captionInactiveFg: captionInactiveFg,
       surfaceSunken: surfaceSunken,
+    controlFill: controlFill,
       surfaceFloat: surfaceFloat,
       surfaceSolid: surfaceSolid,
       scrim: scrim,
@@ -211,6 +220,7 @@ class AppColors {
   ///    相邻档 ≥1.34。旧值在同一位置是 11.8 / 7.7 / 6.4 / 3.4——`faint` 破 4.5。
   static const light = AppColors(
     surfaceBase: Colors.transparent,
+    controlFill: Color(0x0A000000), // 4% 黑（压在材质上提亮/压暗用）
     surfaceCard: Color(0xE8F8FAFC), // 91%
     surfaceCardHover: Color(0xF5FBFCFE), // 96%
     // 标题栏窗口按钮：浅色 hover/pressed 与失焦前景，逐值取自参照物
@@ -253,6 +263,7 @@ class AppColors {
   /// 面越暗，最弱那档文字允许越暗，四档才有排布空间。
   static const dark = AppColors(
     surfaceBase: Colors.transparent,
+    controlFill: Color(0x0FFFFFFF), // 6% 白
     surfaceCard: Color(0xE61B1F27), // 90%
     surfaceCardHover: Color(0xEE232833), // 93%
     // 标题栏窗口按钮：深色 hover/pressed 与失焦前景，逐值取自参照物
