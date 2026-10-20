@@ -116,8 +116,21 @@ include(flutter/generated_plugins.cmake)
 set(BUILD_BUNDLE_DIR "$<TARGET_FILE_DIR:${BINARY_NAME}>")
 # Make the "install" step default, as it's required to run.
 set(CMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD 1)
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX "${BUILD_BUNDLE_DIR}" CACHE PATH "..." FORCE)
+# 2026-10-21: the guard above never fired in practice.
+#   * CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT only trips when the value is
+#     a plain path; BUILD_BUNDLE_DIR is a generator expression, so the FORCE
+#     had no effect and the cache kept "C:/Program Files/parse_dl" (needs
+#     admin) -> INSTALL failed -> plugin DLLs never reached the output dir ->
+#     the app popped "cannot find xxx_plugin.dll" on every launch.
+#   * The install rules below are expressed in terms of the generator
+#     expression anyway, so the cache value only decides where "make install"
+#     would put things; pin it to a harmless in-tree path and stop guessing.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT OR
+   CMAKE_INSTALL_PREFIX MATCHES "^[A-Za-z]:/Program Files")
+  # Must match where the runner actually links its exe, otherwise the app
+  # runs but its DLLs and data/ land somewhere else.
+  set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/runner/Release"
+      CACHE PATH "..." FORCE)
 endif()
 
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
