@@ -508,9 +508,22 @@ class StyleSidebar {
     required this.borderRight,
   });
 
-  /// WinUI3 · 浅色。`fluent_ui` theme.dart:469 `#F9F9F9`，带右分隔线。
+  /// WinUI3 · 浅色 = 官方 `layerFillColorDefault`（`0x80FFFFFF`，50% 白）。
+  ///
+  /// **2026-10-20 改**：原值 `0xFFF9F9F9` 是完全不透明的实色，把窗口材质整块
+  /// 挡住了 —— 侧栏是 265px × 全高、界面里最大的一片连续表面，做成就等于
+  /// 让材质没有存在感（用户实测反馈：「做了半天和原来有区别？」）。
+  ///
+  /// 查 `F:\samples\_verify\fluent_full\lib\src\styles\color_resources.dart:332`
+  /// 确认官方语义令牌是**半透明**的：
+  ///   `layerFillColorDefault = 0x80ffffff`（浅色）/ `0x4c3a3a3a`（深色）。
+  /// WinUI 的 NavigationView 侧栏正是靠这个半透明层压在 Mica 上，
+  /// 材质才成为界面的主导视觉。照抄就要照抄到 alpha。
+  ///
+  /// 材质不可用时也不会翻车：下层是 `surfaceBase` 的不透明回退色，
+  /// 50% 白压上去仍是不透明浅灰，可读性不变。
   static const winuiLight = StyleSidebar(
-    color: Color(0xFFF9F9F9),
+    color: Color(0x80FFFFFF),
     borderRight: true,
   );
 
@@ -519,8 +532,11 @@ class StyleSidebar {
   ///
   /// 2026-10-19 修正：原值 `#2C2C2C` 是我按理解取的，与内容区同色 —— 侧栏
   /// 于是完全看不出边界。真实系统里侧栏是**更暗的一层**，靠色差分层。
+  /// **2026-10-20 改**：原值 `0xFF21201F` 是不透明实色，理由改成与浅色一致 ——
+  /// 官方 `layerFillColorDefault`（深色）= `0x4C3A3A3A`，30% 黑，半透明，
+  /// 压在 Mica 上透出材质。
   static const winuiDark = StyleSidebar(
-    color: Color(0xFF21201F),
+    color: Color(0x4C3A3A3A),
     borderRight: true,
   );
 
