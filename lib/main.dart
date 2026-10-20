@@ -251,21 +251,25 @@ Future<void> main(List<String> args) async {
   // 不再是 const：窗口标题要按当前语言查表。
   // 注意这是**启动时**定的一次 —— 运行中切语言不会改 OS 层标题，
   // 但窗口是无边框自绘标题栏，OS 标题只在任务栏悬停时露出来，下次启动即正确。
-  // **尺寸要乘 devicePixelRatio**（2026-10-19 真机取证）。
+  // **尺寸不要再乘 devicePixelRatio**（2026-10-20 真机实测纠正）。
   //
-  // 链路上两处口径不一致：
-  //   * `windows/runner/win32_window.cpp:140` 创建窗口时写的是
-  //     `Scale(size.width, scale_factor)` —— **逻辑像素**，会乘 DPI；
-  //   * `window_manager.setSize` 走 `SetWindowPos` —— **物理像素**，不乘。
-  // 不补偿的话，runner 先按 1280×1.25=1600 建窗，随后这里又把它改回
-  // 1280 物理 = 1267 逻辑 —— 等于把窗口缩小了 20%，右栏被窗口右缘切断
-  // （真机 `设置` / `关于` 两页都能看到）。
-  // 乘上 DPR 后窗口物理 1600、逻辑 1280，与设计稿一致。
-  final dpr =
-      WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+  // `b392b47` 曾在这里写 `* dpr`，理由是「runner 按逻辑像素建窗、而
+  // window_manager 按物理像素设尺寸，两边口径不一致」。**该判断是错的**，
+  // 结果是 DPR 被乘了两次：
+  //
+  //   1280 × 1.25(runner) × 1.25(这里) = 2000 物理像素
+  //
+  // 实测证据（本机 DPR 1.25、屏幕 2560×1440、工作区 2560×1400）：
+  //   带 `* dpr`  → 窗口 2000×1437，底边 y=1419 **超出工作区底 1400 共 19px**，
+  //                  底部被任务栏切掉（用户报「为什么默认启动的这么大」）。
+  //   去掉 `* dpr` → 窗口 1600×1150，完整落在工作区内。
+  //
+  // `WindowOptions.size` 的语义是**逻辑像素**，window_manager 自己会按
+  // `pixel_ratio_` 换算（插件源码 `window_manager.cpp` 里 `pixel_ratio_`
+  // 在 `WM_CREATE` 与 `WM_DPICHANGED` 两处赋值）。所以这里给设计稿逻辑值即可。
   final windowOptions = WindowOptions(
-    size: const Size(_kWindowWidth, _kWindowHeight) * dpr,
-    minimumSize: const Size(_kMinWindowWidth, _kMinWindowHeight) * dpr,
+    size: const Size(_kWindowWidth, _kWindowHeight),
+    minimumSize: const Size(_kMinWindowWidth, _kMinWindowHeight),
     center: true,
     // 无边框：标题栏由我们自己画
     titleBarStyle: TitleBarStyle.hidden,
