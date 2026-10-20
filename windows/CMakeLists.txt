@@ -116,27 +116,24 @@ include(flutter/generated_plugins.cmake)
 set(BUILD_BUNDLE_DIR "$<TARGET_FILE_DIR:${BINARY_NAME}>")
 # Make the "install" step default, as it's required to run.
 set(CMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD 1)
-# 2026-10-21: the guard above never fired in practice.
-#   * CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT only trips when the value is
-#     a plain path; BUILD_BUNDLE_DIR is a generator expression, so the FORCE
-#     had no effect and the cache kept "C:/Program Files/parse_dl" (needs
-#     admin) -> INSTALL failed -> plugin DLLs never reached the output dir ->
-#     the app popped "cannot find xxx_plugin.dll" on every launch.
-#   * The install rules below are expressed in terms of the generator
-#     expression anyway, so the cache value only decides where "make install"
-#     would put things; pin it to a harmless in-tree path and stop guessing.
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT OR
-   CMAKE_INSTALL_PREFIX MATCHES "^[A-Za-z]:/Program Files")
-  # Must match where the runner actually links its exe, otherwise the app
-  # runs but its DLLs and data/ land somewhere else.
-  set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/runner/Release"
-      CACHE PATH "..." FORCE)
-endif()
+# 2026-10-21: do NOT route the install rules through CMAKE_INSTALL_PREFIX.
+#   * CMAKE_INSTALL_PREFIX is a single cache value, but this project builds
+#     several configurations (Debug / Profile / Release) into sibling
+#     directories. Pinning it to one of them made the other configurations
+#     install their DLLs and data/ into the wrong tree, so the freshly built
+#     exe started without flutter_windows.dll (measured: Debug build left
+#     only exe + pdb behind).
+#   * The original guard (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT) never
+#     fired either -- it needs a plain path, and BUILD_BUNDLE_DIR is a
+#     generator expression -- so the cache kept "C:/Program Files/parse_dl"
+#     (needs admin) and INSTALL failed outright.
+# Every destination below is therefore expressed directly as the generator
+# expression $<TARGET_FILE_DIR:...>, which resolves per configuration.
 
-set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
-set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
+set(INSTALL_BUNDLE_DATA_DIR "$<TARGET_FILE_DIR:${BINARY_NAME}>/data")
+set(INSTALL_BUNDLE_LIB_DIR "$<TARGET_FILE_DIR:${BINARY_NAME}>")
 
-install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
+install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${BUILD_BUNDLE_DIR}"
   COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"

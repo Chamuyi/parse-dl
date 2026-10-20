@@ -337,9 +337,17 @@ class BackdropController {
     if (!::GetWindowRect(hwnd_, &rc)) return;
     // Cheap idempotence guard: SetWindowPos on every message would make the
     // material flicker while the user drags the window.
-    if (rc.left == last_rect_.left && rc.top == last_rect_.top &&
-        rc.right == last_rect_.right && rc.bottom == last_rect_.bottom &&
-        ::IsWindowVisible(material_hwnd_)) {
+    //
+    // The Z-order check is NOT optional: anything that moves the Flutter
+    // window in the z-order (measured: the launch script sending it to
+    // HWND_BOTTOM) leaves the material window ABOVE it, where its opaque
+    // material covers the whole UI -- the app looks like a solid grey slab.
+    // Re-assert "material directly below Flutter" whenever that drifts.
+    const bool rect_same =
+        (rc.left == last_rect_.left && rc.top == last_rect_.top &&
+         rc.right == last_rect_.right && rc.bottom == last_rect_.bottom);
+    const bool z_ok = (::GetWindow(hwnd_, GW_HWNDNEXT) == material_hwnd_);
+    if (rect_same && z_ok && ::IsWindowVisible(material_hwnd_)) {
       return;
     }
     last_rect_ = rc;
