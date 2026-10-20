@@ -333,6 +333,18 @@ class BackdropController {
  public:
   void SyncMaterialWindow() {
     if (!material_hwnd_ || !::IsWindow(material_hwnd_)) return;
+    // A minimized or hidden owner must take the material window down with it.
+    // Otherwise an opaque slab of material stays on the desktop after the user
+    // minimizes the app (measured: the material window is a separate top-level
+    // window, it does not minimize with its owner).
+    const bool owner_shown =
+        ::IsWindowVisible(hwnd_) && !::IsIconic(hwnd_);
+    if (!owner_shown) {
+      if (::IsWindowVisible(material_hwnd_)) {
+        ::ShowWindow(material_hwnd_, SW_HIDE);
+      }
+      return;
+    }
     RECT rc = {};
     if (!::GetWindowRect(hwnd_, &rc)) return;
     // Cheap idempotence guard: SetWindowPos on every message would make the
@@ -351,9 +363,13 @@ class BackdropController {
       return;
     }
     last_rect_ = rc;
+    const bool material_visible = ::IsWindowVisible(material_hwnd_) != FALSE;
     ::SetWindowPos(material_hwnd_, hwnd_, rc.left, rc.top,
                    rc.right - rc.left, rc.bottom - rc.top,
                    SWP_NOACTIVATE | SWP_NOREDRAW);
+    if (!material_visible) {
+      ::ShowWindow(material_hwnd_, SW_SHOWNOACTIVATE);
+    }
     UpdateRootVisualSize();
   }
 
