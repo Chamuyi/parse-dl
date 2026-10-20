@@ -13,7 +13,6 @@ import 'package:parse_dl/theme/app_theme.dart';
 import 'package:parse_dl/theme/style_colors.dart';
 import 'package:parse_dl/widgets/status_badge.dart';
 import 'package:parse_dl/widgets/title_bar.dart';
-import 'package:parse_dl/widgets/title_bar_search.dart';
 
 /// 标题栏右列（T5）的判据 —— 逐条照参照物
 /// `tubatool/TubaWinUi3.WinUI3/MainWindow.xaml:212-249` 的取值。
@@ -58,25 +57,22 @@ void main() {
     downloads.task(localId)!.status = status;
   }
 
-  /// 已知的**既有缺陷**：`title_bar_search.dart:71` 的 `DecoratedBox` 用非 uniform 的
-  /// `Border`（三边 lineSoft、底边 line 或 accent）配 `borderRadius`，Flutter 每次
-  /// 重绘都抛一次「A borderRadius can only be given on borders with uniform colors」
-  /// （release 下静默画错）。该文件不在本节点边界内，改不得 —— 所以这里把它取走。
+  /// 标题栏渲染时**不允许有任何异常**。
   ///
-  /// 条件断言而不是「断言一定有异常」：修好之后这里变 null 直接跳过；而**别的**
-  /// 异常会因为消息不匹配而判红。
+  /// 历史：这条原本是「容忍器」—— `title_bar_search.dart` 的 `DecoratedBox` 用
+  /// 非 uniform `Border` 配 `borderRadius`，每次重绘都抛
+  /// 「A borderRadius can only be given on borders with uniform colors」，
+  /// 当时因为它不在改写边界内，只能在这里把异常取走。
+  ///
+  /// 2026-10-20 搜索框整个删掉（用户裁定「删了吧」），异常源头随之消失。
+  /// 容忍器改成严格断言：**再有异常就是新的回归**，直接判红。
   Future<void> quietPump(WidgetTester tester) async {
     await tester.pump();
-    final stray = tester.takeException();
-    if (stray != null) {
-      expect(
-        '$stray',
-        contains(
-          'borderRadius can only be given on borders with uniform colors',
-        ),
-        reason: '标题栏里唯一的已知异常只应是 title_bar_search 的非 uniform 边框',
-      );
-    }
+    expect(
+      tester.takeException(),
+      isNull,
+      reason: '标题栏不该抛任何异常；搜索框删掉后那条非 uniform 边框的源头已不存在',
+    );
   }
 
   Future<void> pumpTitleBar(
@@ -144,45 +140,11 @@ void main() {
   const closeKey = 'title-bar-caption-close';
   const queueKey = 'title-bar-download-queue';
 
-  group('① 三列布局：搜索框紧跟左侧标题区，不再是居中', () {
-    testWidgets('**只剩一段**弹性空白，且它在搜索框右边（删掉的是前面那段）', (tester) async {
-      await pumpTitleBar(tester, onOpenDownloads: (_) {});
-      // 改前是 `Spacer + 搜索框 + Spacer`（两段），居中的就是那一对。
-      // 只剩一段且落在搜索框右侧 ⇒ 搜索框被顶到左列。
-      //
-      // 判据按**几何**数而不是按 `find.byType(Spacer)`：中间那段现在兼作
-      // 拖动区（`Expanded` 包 `DragToMoveArea`），类型已经不是 `Spacer` 了。
-      //
-      // **关键：要在两个窗口宽度下都量**。只看一个宽度是抓不到错的 ——
-      // 左侧标题区包 `Expanded`（与中间空白平分剩余宽度）时，1200 宽下
-      // 它恰好撑到 351，两条「贴着标题区」的断言会**碰巧成立**（负控制实测：
-      // 那个错误实现跑出全绿）。把宽度从 1200 换到 1800，弹性列的右边界
-      // 从 351 漂到 651，而自然宽度列纹丝不动 —— 位置漂移才是三列布局的
-      // 定义，也是唯一抓得住它的量。
-      Future<Rect> searchRectAt(double width) async {
-        await pumpTitleBar(tester, onOpenDownloads: (_) {}, width: width);
-        return tester.getRect(find.byType(TitleBarSearch));
-      }
-
-      final narrow = await searchRectAt(1200);
-      final wide = await searchRectAt(1800);
-      // ① 搜索框左边界**不随窗口宽度变化**（参照物第一列是固定 320，
-      //    `MainWindow.xaml:104`；它右边才是 `*` 那一列吃弹性）
-      expect(wide.left, narrow.left, reason: '固定 320 的左列不该随窗口变宽而漂移');
-      // ② 它紧跟在左侧标题区右边（标题区是自然宽度，不是弹性列）
-      final title = tester.getRect(find.byType(DragToMoveArea).first);
-      expect(narrow.left - title.right, lessThan(24));
-    });
-
-    testWidgets('搜索框整体在「下载队列」按钮左边，两者不重叠', (tester) async {
-      await pumpTitleBar(tester, onOpenDownloads: (_) {});
-      final search = tester.getRect(find.byType(TitleBarSearch));
-      final queue = rectOf(tester, queueKey);
-      expect(search.right, lessThanOrEqualTo(queue.left));
-      // 搜索框本身仍是参照物 `MainWindow.xaml:109-119` 的 320 宽
-      expect(search.width, 320);
-    });
-
+  // 2026-10-20：原 group ① 的三条判据全部围绕标题栏左列的 320 宽搜索框
+  // （`TitleBarSearch`）。用户裁定去掉搜索框后，被测对象不存在，整组随之删除。
+  // 若将来接上真实搜索功能，应连同「左列固定宽、紧跟标题区、不随窗口漂移」
+  // 这组几何判据一起恢复。
+  group('① 三列布局：标题区 + 弹性拖动区 + 图标按钮组', () {
     testWidgets('图标按钮组紧贴三个窗口按钮：间距 6（参照物 Spacing="6"）', (tester) async {
       await pumpTitleBar(tester, onOpenDownloads: (_) {});
       final queue = rectOf(tester, queueKey);

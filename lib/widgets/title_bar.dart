@@ -7,7 +7,6 @@ import '../services/download_store.dart';
 import '../theme/app_style.dart';
 import '../theme/app_theme.dart';
 import 'status_badge.dart';
-import 'title_bar_search.dart';
 
 /// 标题栏里的图标按钮几何 —— 逐值照抄参照物
 /// `tubatool/TubaWinUi3.WinUI3/MainWindow.xaml:230-248` 的
@@ -223,13 +222,14 @@ class _TitleBarState extends State<TitleBar> with WindowListener {
           ),
 
           if (shape.titleBarHeight >= 48) ...[
-            // 左列：搜索框 —— 照抄参照物 `TitleBar.Content` 的第一列
-            // （固定 320 的 `AutoSuggestBox`，`MainWindow.xaml:109-119`）。
+            // **搜索框已移除**（2026-10-20 用户裁定「删了吧」）。
             //
-            // **紧跟左侧标题区**，不再左右各一个 Spacer 居中：参照物是三列
-            // `320 / * / Auto`（`:103-107`），搜索框在左列、右列才是一排
-            // 按钮。居中会让标题栏看着像「中间挖了个搜索框」，而不是功能区。
-            const TitleBarSearch(),
+            // 原先是照抄参照物 `MainWindow.xaml:109-119` 的左列 `AutoSuggestBox`
+            // （固定 320 宽）。但它**从来没接上功能**：`const TitleBarSearch()`
+            // 没传 `onChanged`/`onSubmitted`，打字和回车都没有任何反应 ——
+            // 一个能点却没反应的输入框比不放更糟。
+            //
+            // 要恢复的话：得接上真实的搜索路由，而不是只把外观摆回去。
 
             // 中列：弹性空白（参照物第二列 `Width="*"`），把右侧按钮组推到最右。
             // 这段空白同时是**拖动区**：标题区收窄成自然宽度后，栏中间那一大片
