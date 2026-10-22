@@ -20,8 +20,13 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // 用官方 TitleBar 控件时**不要**再 SetTitleBar —— 控件自己处理拖拽区，
+        // 手动 SetTitleBar 会和控件内部逻辑打架（拖不动 / 双击不最大化）。
         ExtendsContentIntoTitleBar = true;
-        SetTitleBar(AppTitleBar);
+        // 标题栏的 PaneToggle 按钮会和 NavigationView 自带的汉堡按钮**重叠**，
+        // 表现为左上角两个方块（实测）。导航用 NavigationView 自己的即可。
+        AppTitleBar.IsPaneToggleButtonVisible = false;
+        AppTitleBar.IsBackButtonVisible = false;
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         AppWindow.SetIcon("Assets/AppIcon.ico");
 
@@ -101,6 +106,12 @@ public sealed partial class MainWindow : Window
         };
         nvi.Icon = new FontIcon { Glyph = item.Glyph };
         return nvi;
+    }
+
+    /// <summary>标题栏的汉堡按钮：切换 NavigationView 侧栏展开/收起。</summary>
+    private void TitleBar_PaneToggleRequested(TitleBar sender, object args)
+    {
+        NavView.IsPaneOpen = !NavView.IsPaneOpen;
     }
 
     private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
