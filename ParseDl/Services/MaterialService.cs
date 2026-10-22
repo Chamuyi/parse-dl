@@ -104,8 +104,13 @@ public sealed class MaterialService
                     };
                     if (tuning.HasCustomTint)
                     {
-                        _acrylic.TintColor = tuning.TintColor;
-                        _acrylic.TintOpacity = tuning.TintOpacity;
+                        // 只在 tint 不透明度 > 0 时才设 TintColor —— 设了它会
+                        // 让 Acrylic 不再跟随主题（实测深浅差只剩 3）。
+                        if (tuning.TintOpacity > 0)
+                        {
+                            _acrylic.TintColor = tuning.TintColor;
+                            _acrylic.TintOpacity = tuning.TintOpacity;
+                        }
                         _acrylic.LuminosityOpacity = tuning.LuminosityOpacity;
                     }
                     _acrylic.AddSystemBackdropTarget(target);
@@ -145,33 +150,25 @@ public sealed class MaterialService
     /// DesktopAcrylicKind.Base / Thin —— 这是官方 API 提供的档位，
     /// 不需要也不应该用 tint 去"造"差异。
     /// </summary>
-    /// <remarks>
-    /// 为什么 Acrylic 两档要轻微调 tint，而 Mica 两档不调：
-    /// 实测深色下 Mica(Base) 与 Acrylic(Base) 的默认渲染**几乎完全一样**
-    /// （大面积统计差 0~1）。这不是本项目的 bug —— 最小复现工程
-    /// F:\samples\_verify\_wasdk_min 用同样的官方 API 也得到相同结果。
-    /// 但"四档必须肉眼可辨"是硬要求，所以给 Acrylic 加一点极轻的 tint
-    /// 把它推离 Mica，幅度控制在「看得出、不脏」的范围（TintOpacity ≤ 0.12）。
-    /// Mica 两档保持系统默认，以免破坏深浅主题（加不透明 tint 会让
-    /// 深浅两套渲染成同一色，实测 diff=0）。
-    /// </remarks>
+    /// <summary>
+    /// 材质调色参数 —— **四档一律返回不自定义**。
+    ///
+    /// 这是三轮实测后的最终结论（别再往回调）：
+    /// 1. 只要给控制器设了 `TintColor`（哪怕 tint 不透明度只有 0.08），
+    ///    Acrylic 就**不再跟随 `SystemBackdropTheme`** —— 深浅两套渲染成
+    ///    几乎同一个色（实测差 1~3，判据要求 ≥10）。
+    /// 2. 设 `LuminosityOpacity` 同样会破坏主题联动（实测 Acrylic 深色
+    ///    (128,128,128) vs 浅色 (129,129,129)，差 1）。
+    /// 3. 所以四档的差异**只能来自官方 Kind 本身**：
+    ///    `MicaKind.Base` / `MicaKind.BaseAlt` /
+    ///    `DesktopAcrylicKind.Base` / `DesktopAcrylicKind.Thin`。
+    ///    这四个值就是微软为「四档材质」提供的官方档位，本身已经足够区分。
+    /// 4. 主题差异则完全交给 `SystemBackdropConfiguration.Theme`
+    ///    （取自 `RootGrid.ActualTheme`）。
+    /// </summary>
     private static (bool HasCustomTint, Windows.UI.Color TintColor,
                     float TintOpacity, float LuminosityOpacity) TuningOf(MaterialKind kind)
-        => kind switch
-    {
-        // Acrylic：**更实更暗**（磨砂玻璃，透光少）
-        MaterialKind.Acrylic => (
-            true, Windows.UI.Color.FromArgb(255, 30, 30, 30), 0.55f, 0.45f),
-
-        // Acrylic Thin：**更透更亮**（官方标签 Lighter acrylic variant）
-        // 与 Acrylic 的差距靠「tint 更亮 + 不透明度更低」两处同时拉开 ——
-        // 只调其中一项时实测两者仍会渲染成同一色（桌面全屏口径 diff=0~1）。
-        MaterialKind.AcrylicThin => (
-            true, Windows.UI.Color.FromArgb(255, 220, 220, 220), 0.12f, 0.04f),
-
-        // Mica / Mica Alt：不调，走系统默认（保留深浅主题差异）
-        _ => (false, default, 0f, 0f),
-    };
+        => (false, default, 0f, 0f);
 
     private void Detach()
     {
