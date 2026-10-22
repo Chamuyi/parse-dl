@@ -66,3 +66,8 @@ userdata/
 # 打包脚本生成的卸载清单（现在落在 build/ 下，同样已忽略；这条是保险）
 _uninst_files.nsh
 _uninst_files.txt
+# WinUI3 分支：忽略 Flutter 与 .NET 构建产物
+ParseDl/bin/
+ParseDl/obj/
+build/
+.dart_tool/

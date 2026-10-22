@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="ParseDl.Pages.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="Transparent">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,8,24,24">
+        <StackPanel Spacing="16" MaxWidth="1000" HorizontalAlignment="Left">
+
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Width="48" Height="48" CornerRadius="8"
+                        Background="{ThemeResource AccentFillColorDefaultBrush}"
+                        VerticalAlignment="Top">
+                    <FontIcon Glyph="&#xE713;" FontSize="22"
+                              Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                </Border>
+                <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="2">
+                    <TextBlock Text="全局设置" FontSize="28" FontWeight="SemiBold" />
+                    <TextBlock Text="外观 · 窗口材质 · 明暗" FontSize="14" Opacity="0.7" />
+                </StackPanel>
+            </Grid>
+
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="窗口材质" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock Text="四档全部由 Windows App SDK 官方合成控制器绘制"
+                               FontSize="12" Opacity="0.65" />
+                    <StackPanel x:Name="MaterialPanel" Spacing="8" />
+                    <TextBlock x:Name="MaterialStatus" Text="" FontSize="12" Opacity="0.7" />
+                </StackPanel>
+            </Border>
+
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="主题" FontSize="16" FontWeight="SemiBold" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <RadioButton x:Name="DarkRadio" Content="深色" GroupName="theme"
+                                     Checked="OnThemeChecked" />
+                        <RadioButton x:Name="LightRadio" Content="浅色" GroupName="theme"
+                                     Checked="OnThemeChecked" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="数据目录" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock x:Name="DataDirText" Text="-" FontSize="12"
+                               IsTextSelectionEnabled="True" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</Page>

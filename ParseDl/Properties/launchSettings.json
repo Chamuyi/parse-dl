@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "ParseDl (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "ParseDl (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
