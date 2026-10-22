@@ -159,13 +159,15 @@ public sealed class MaterialService
                     float TintOpacity, float LuminosityOpacity) TuningOf(MaterialKind kind)
         => kind switch
     {
-        // Acrylic：极轻 tint，把基色推亮一点，与 Mica 拉开
+        // Acrylic：**更实更暗**（磨砂玻璃，透光少）
         MaterialKind.Acrylic => (
-            true, Windows.UI.Color.FromArgb(255, 90, 90, 90), 0.10f, 0.06f),
+            true, Windows.UI.Color.FromArgb(255, 30, 30, 30), 0.55f, 0.45f),
 
-        // Acrylic Thin：更淡的 tint（本就比 Base 亮，靠 Kind 已能区分）
+        // Acrylic Thin：**更透更亮**（官方标签 Lighter acrylic variant）
+        // 与 Acrylic 的差距靠「tint 更亮 + 不透明度更低」两处同时拉开 ——
+        // 只调其中一项时实测两者仍会渲染成同一色（桌面全屏口径 diff=0~1）。
         MaterialKind.AcrylicThin => (
-            true, Windows.UI.Color.FromArgb(255, 110, 110, 110), 0.06f, 0.03f),
+            true, Windows.UI.Color.FromArgb(255, 220, 220, 220), 0.12f, 0.04f),
 
         // Mica / Mica Alt：不调，走系统默认（保留深浅主题差异）
         _ => (false, default, 0f, 0f),

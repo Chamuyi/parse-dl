@@ -117,17 +117,53 @@ public sealed partial class MainWindow : Window
         CurrentRouteId = routeId;
         BreadcrumbText.Text = LabelOf(routeId);
 
-        var pageType = routeId switch
+        switch (routeId)
         {
-            "dashboard" => typeof(DashboardPage),
-            "home" or "douyin" or "bili" or "bili-batch" => typeof(PlaceholderPage),
-            "download-management" or "douyin-downloads" or "bili-downloads" => typeof(PlaceholderPage),
-            "auto-task" or "douyin-auto" => typeof(PlaceholderPage),
-            "settings" => typeof(SettingsPage),
-            "about" => typeof(AboutPage),
-            _ => typeof(PlaceholderPage),
-        };
-        NavFrame.Navigate(pageType, this);
+            case "dashboard":
+                NavFrame.Navigate(typeof(DashboardPage), this);
+                break;
+
+            case "settings":
+                NavFrame.Navigate(typeof(SettingsPage), this);
+                break;
+
+            case "about":
+                NavFrame.Navigate(typeof(AboutPage), this);
+                break;
+
+            // 三个模块的解析页共用 ParsePage，靠参数区分
+            case "home":
+                NavFrame.Navigate(typeof(ParsePage), new ParseNavArgs(ParseKind.X, this));
+                break;
+            case "douyin":
+                NavFrame.Navigate(typeof(ParsePage), new ParseNavArgs(ParseKind.Douyin, this));
+                break;
+            case "bili":
+            case "bili-batch":
+                NavFrame.Navigate(typeof(ParsePage), new ParseNavArgs(ParseKind.Bili, this));
+                break;
+
+            // 三个模块的下载管理页共用 DownloadsPage
+            case "download-management":
+                NavFrame.Navigate(typeof(DownloadsPage), "X 媒体");
+                break;
+            case "douyin-downloads":
+                NavFrame.Navigate(typeof(DownloadsPage), "抖音");
+                break;
+            case "bili-downloads":
+                NavFrame.Navigate(typeof(DownloadsPage), "B 站");
+                break;
+
+            // 自动执行 / 自动下载：功能逻辑尚未迁移，先明确占位
+            case "auto-task":
+            case "douyin-auto":
+            case "x-settings":
+            case "douyin-settings":
+            case "bili-settings":
+            default:
+                NavFrame.Navigate(typeof(PlaceholderPage), this);
+                break;
+        }
     }
 
     private static string LabelOf(string routeId)
