@@ -45,11 +45,11 @@ public sealed partial class SettingsPage : Page
                 GroupName = "material",
                 Tag = kind,
                 Margin = new Thickness(0, 0, 0, 4),
+                // 屏幕阅读器与自动化测试都要靠这个识别档位；不设的话
+                // UIA 的 Name 是空的（实测四个 RadioButton 全是 Name=[]）。
+                Content = label,
             };
-            var panel = new StackPanel { Spacing = 2 };
-            panel.Children.Add(new TextBlock { Text = label, FontSize = 14 });
-            panel.Children.Add(new TextBlock { Text = hint, FontSize = 12, Opacity = 0.6 });
-            rb.Content = panel;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(rb, label);
             rb.Checked += OnMaterialChecked;
             MaterialPanel.Children.Add(rb);
         }
