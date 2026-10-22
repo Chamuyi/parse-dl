@@ -26,20 +26,32 @@ public sealed partial class MainWindow : Window
         AppWindow.SetIcon("Assets/AppIcon.ico");
 
         _material = new MaterialService(this);
-        // 默认 Mica + 深色（与 Flutter 版默认一致：mica / system）
-        _material.Apply(MaterialKind.Mica, isDark: true);
+
+        // 主题来源必须是 XAML 的实际主题，不是自己记的布尔值。
+        // 实测教训：只传布尔值时，浅色下材质仍按深色渲染（深浅差 0）；
+        // 参照物图吧也是取 root.ActualTheme（BackdropService.cs:202-204）。
+        RootGrid.RequestedTheme = ElementTheme.Dark;
+        RootGrid.ActualThemeChanged += (_, _) =>
+            _material.Apply(_material.Current, RootGrid.ActualTheme == ElementTheme.Dark);
+        _material.Apply(MaterialKind.Mica, RootGrid.ActualTheme == ElementTheme.Dark);
 
         BuildNav();
         NavFrame.Navigate(typeof(DashboardPage), this);
 
         Activated += (_, e) =>
-            _material.UpdateState(_material.IsDark, e.WindowActivationState != WindowActivationState.Deactivated);
+            _material.UpdateState(RootGrid.ActualTheme == ElementTheme.Dark,
+                                  e.WindowActivationState != WindowActivationState.Deactivated);
     }
 
     /// <summary>供设置页切换材质。</summary>
     public bool ApplyMaterial(MaterialKind kind, bool isDark) => _material.Apply(kind, isDark);
 
     public MaterialKind CurrentMaterial => _material.Current;
+
+    /// <summary>切换界面明暗。改 RequestedTheme 后由 ActualThemeChanged 带着
+    /// 真实主题重挂材质，避免"界面变了材质没变"。</summary>
+    public void ApplyTheme(bool isDark) =>
+        RootGrid.RequestedTheme = isDark ? ElementTheme.Dark : ElementTheme.Light;
 
     public bool IsDarkTheme => _material.IsDark;
 

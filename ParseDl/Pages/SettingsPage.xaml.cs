@@ -88,7 +88,9 @@ public sealed partial class SettingsPage : Page
     {
         if (_suppressThemeEvent || _host is null) return;
         var isDark = DarkRadio.IsChecked == true;
-        var ok = _host.ApplyMaterial(_host.CurrentMaterial, isDark);
-        MaterialStatus.Text = ok ? $"已切换为{(isDark ? "深色" : "浅色")}" : "切换失败";
+        // 改 RootGrid.RequestedTheme 而不是直接调材质：MainWindow 订阅了
+        // ActualThemeChanged，会带着真实主题重新 Apply，界面与材质才一致。
+        _host.ApplyTheme(isDark);
+        MaterialStatus.Text = isDark ? "已切换为深色" : "已切换为浅色";
     }
 }
