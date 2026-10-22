@@ -154,12 +154,25 @@ public sealed partial class MainWindow : Window
                 NavFrame.Navigate(typeof(DownloadsPage), "B 站");
                 break;
 
-            // 自动执行 / 自动下载：功能逻辑尚未迁移，先明确占位
+            // 自动执行 / 自动下载 共用 AutoTaskPage
             case "auto-task":
+                NavFrame.Navigate(typeof(AutoTaskPage), "x");
+                break;
             case "douyin-auto":
+                NavFrame.Navigate(typeof(AutoTaskPage), "douyin");
+                break;
+
+            // 三个模块设置页共用 ModuleSettingsPage
             case "x-settings":
+                NavFrame.Navigate(typeof(ModuleSettingsPage), ModuleKind.X);
+                break;
             case "douyin-settings":
+                NavFrame.Navigate(typeof(ModuleSettingsPage), ModuleKind.Douyin);
+                break;
             case "bili-settings":
+                NavFrame.Navigate(typeof(ModuleSettingsPage), ModuleKind.Bili);
+                break;
+
             default:
                 NavFrame.Navigate(typeof(PlaceholderPage), this);
                 break;
