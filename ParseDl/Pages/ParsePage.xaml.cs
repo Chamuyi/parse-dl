@@ -2,9 +2,9 @@ using System;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using ParseDl.Controls;
+using ParseDl.Services;
 
 namespace ParseDl.Pages;
 
@@ -17,37 +17,39 @@ public enum ParseKind
 }
 
 /// <summary>
-/// 解析页 —— X 主页 / 抖音解析下载 / B 站解析下载三页共用的结构。
+/// 解析页 —— X 主页 / 抖音解析下载 / B 站解析下载三页共用。
 ///
-/// 为什么合并成一个页面类：Flutter 版这三页是三个文件、各自上千行，但
-/// 骨架完全相同（页头 → Hero 横幅 → 输入卡 → 结果区）。差异只有文案、
-/// 图标与具体 API。合并后差异集中在 <see cref="Profile"/> 里，
-/// 加模块不用再复制一份布局。
+/// 当前能力：接受 **http/https 直链**（图片、视频、音频、压缩包都行）并交给
+/// 真实的 aria2 引擎下载；加入后可直接跳转下载管理看进度。
+/// 平台专用解析（X/抖音/B站的页面抓取与 API）尚未移植 —— 界面上如实标注，
+/// 不假装支持。
 /// </summary>
 public sealed partial class ParsePage : Page
 {
     private MainWindow? _host;
     private ParseKind _kind = ParseKind.X;
+    private TextBox? _input;
+    private TextBlock? _status;
 
     private sealed record Profile(
         string Title, string Subtitle, string Glyph, string Badge,
         string HeroTitle, string HeroSubtitle, string InputLabel,
-        string InputHint, string ActionText);
+        string InputHint, string ActionText, string ModuleName);
 
     private static Profile ProfileOf(ParseKind kind) => kind switch
     {
         ParseKind.X => new Profile(
-            "X 主页", "下载某个 X 用户的全部媒体", "\uE80F", "X",
-            "下载某个 X 用户的全部媒体", "输入用户 ID，加载后开始批量下载图片与视频",
-            "请输入用户 ID", "请输入用户 ID，如：example_user", "加载"),
+            "X 主页", "下载 X 媒体文件", "\uE80F", "X",
+            "下载 X 媒体", "粘贴图片 / 视频直链，交给 aria2 多线程下载",
+            "媒体直链", "粘贴 http(s) 直链，如 https://pbs.twimg.com/media/xxx.jpg", "加入队列", "X 媒体"),
         ParseKind.Douyin => new Profile(
-            "解析下载", "抖音作品解析与下载", "\uE768", "抖",
-            "解析抖音作品", "左边浏览，右边抓取",
-            "作品链接", "粘贴抖音分享链接或作品 ID", "解析"),
+            "解析下载", "抖音媒体下载", "\uE768", "抖",
+            "下载抖音媒体", "粘贴视频 / 图片直链，交给 aria2 多线程下载",
+            "媒体直链", "粘贴 http(s) 直链", "加入队列", "抖音"),
         _ => new Profile(
-            "解析下载", "B 站稿件解析与下载", "\uE768", "B",
-            "解析 B 站稿件", "支持合集 / 系列 / 收藏夹",
-            "稿件地址", "粘贴 B 站视频 / 合集 / 收藏夹链接", "解析"),
+            "解析下载", "B 站媒体下载", "\uE768", "B",
+            "下载 B 站媒体", "粘贴音视频直链，交给 aria2 多线程下载",
+            "媒体直链", "粘贴 http(s) 直链", "加入队列", "B 站"),
     };
 
     public ParsePage()
@@ -73,7 +75,7 @@ public sealed partial class ParsePage : Page
 
         Root.Children.Add(UiKit.PageHeader(p.Title, p.Subtitle, p.Glyph));
 
-        // Hero 横幅：徽标 + 标题 + 副题 + 状态胶囊
+        // Hero
         var hero = new StackPanel { Spacing = 8 };
         var badgeRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         badgeRow.Children.Add(new Border
@@ -97,40 +99,65 @@ public sealed partial class ParsePage : Page
         hero.Children.Add(new TextBlock { Text = p.HeroSubtitle, FontSize = 13, Opacity = 0.7 });
         Root.Children.Add(UiKit.Card(hero, 20));
 
-        // 输入卡
+        // 输入 + 加入队列
         var inputPanel = new StackPanel { Spacing = 10 };
         var row = new Grid { ColumnSpacing = 8 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var box = new TextBox
+        _input = new TextBox
         {
             PlaceholderText = p.InputHint,
             Height = 36,
             VerticalContentAlignment = VerticalAlignment.Center,
         };
-        Grid.SetColumn(box, 0);
-        row.Children.Add(box);
+        Grid.SetColumn(_input, 0);
+        row.Children.Add(_input);
 
         var actionBtn = new Button
         {
             Content = p.ActionText,
             Height = 36,
-            MinWidth = 88,
+            MinWidth = 96,
             Style = (Style)Application.Current.Resources["AccentButtonStyle"],
         };
+        actionBtn.Click += async (_, _) => await OnAddAsync();
         Grid.SetColumn(actionBtn, 1);
         row.Children.Add(actionBtn);
 
         inputPanel.Children.Add(row);
-        inputPanel.Children.Add(new TextBlock
-        {
-            Text = "提示：WinUI 3 版正在迁移中，本页的解析与下载逻辑尚未接入（界面骨架已就位）。",
-            FontSize = 12,
-            Opacity = 0.6,
-            TextWrapping = TextWrapping.Wrap,
-        });
+
+        _status = new TextBlock { Text = "", FontSize = 12, Opacity = 0.75, TextWrapping = TextWrapping.Wrap };
+        inputPanel.Children.Add(_status);
+
         Root.Children.Add(UiKit.SectionCard(p.InputLabel, inputPanel));
+
+        // 说明卡：如实写清已支持 / 未支持
+        var notes = new StackPanel { Spacing = 6 };
+        notes.Children.Add(Bullet("已支持：http / https 直链，多线程分片、断点续传（aria2 引擎）"));
+        notes.Children.Add(Bullet("已支持：下载进度实时刷新、暂停 / 继续 / 移除、打开下载目录"));
+        notes.Children.Add(Bullet("未支持：平台专用解析（X / 抖音 / B 站 的页面抓取、登录态、合集遍历）"));
+        Root.Children.Add(UiKit.SectionCard("能力说明", notes));
+    }
+
+    private static UIElement Bullet(string text)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        row.Children.Add(new TextBlock { Text = "•", FontSize = 13, Opacity = 0.6 });
+        row.Children.Add(new TextBlock { Text = text, FontSize = 13, Opacity = 0.85, TextWrapping = TextWrapping.Wrap });
+        return row;
+    }
+
+    private async System.Threading.Tasks.Task OnAddAsync()
+    {
+        if (_input is null || _status is null) return;
+        var url = _input.Text?.Trim() ?? "";
+        var p = ProfileOf(_kind);
+
+        _status.Text = "正在加入队列…";
+        var (ok, msg) = await DownloadStore.Instance.AddAsync(url, p.ModuleName);
+        _status.Text = ok ? $"✅ {msg}，可到「下载管理」查看进度" : $"❌ {msg}";
+        if (ok) _input.Text = "";
     }
 }
 

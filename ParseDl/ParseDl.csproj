@@ -26,6 +26,13 @@
     <Content Include="Assets\StoreLogo.png" />
     <Content Include="Assets\AppIcon.ico" />
     <Content Include="Assets\Wide310x150Logo.scale-200.png" />
+    <!--
+      aria2c.exe：下载引擎，必须落到**输出根目录**（代码按 exe 同级查找）。
+      注意不能用 <Content>：MSIX 打包项目的 Content 只进包清单，不复制到输出目录
+      （实测输出目录里找不到 aria2c.exe，引擎启动直接失败）。用 None +
+      CopyToOutputDirectory 才会真复制。
+    -->
+    <None Include="Assets\aria2c.exe" Link="aria2c.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -68,7 +75,11 @@
   <PropertyGroup>
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
-    <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
-    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
+    <PublishTrimmed>False</PublishTrimmed>
+    <!--
+      不裁剪：本项目用 System.Text.Json 的反射序列化做 aria2 RPC，
+      裁剪会删掉反射所需的元数据（表现为运行期 JsonSerializer 抛异常）。
+      体积代价可接受（67 MB 已是自包含运行时）。
+    -->
   </PropertyGroup>
 </Project>
