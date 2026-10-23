@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="ParseDl.Pages.BrowsePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls"
+    Background="Transparent">
+
+    <Grid Padding="24,8,24,24" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel x:Name="HeaderHost" Grid.Row="0" />
+
+        <Border Grid.Row="1"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8" Padding="12">
+            <StackPanel Spacing="8">
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="BackButton" Grid.Column="0" Content="←" MinWidth="40"
+                            Click="OnBackClick" />
+                    <TextBox x:Name="UrlBox" Grid.Column="1" Height="32"
+                             VerticalContentAlignment="Center"
+                             KeyDown="OnUrlKeyDown" />
+                    <Button x:Name="GoButton" Grid.Column="2" Content="打开" MinWidth="70"
+                            Click="OnGoClick" />
+                    <Button x:Name="CaptureButton" Grid.Column="3" Content="抓取本页" MinWidth="90"
+                            Style="{ThemeResource AccentButtonStyle}" Click="OnCaptureClick" />
+                </Grid>
+                <TextBlock x:Name="StatusText" Text="" FontSize="12" Opacity="0.75"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="2"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8">
+            <WebView2 x:Name="Web" />
+        </Border>
+    </Grid>
+</Page>

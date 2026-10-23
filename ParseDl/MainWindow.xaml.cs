@@ -159,12 +159,12 @@ public sealed partial class MainWindow : Window
                 NavFrame.Navigate(typeof(AboutPage), this);
                 break;
 
-            // 三个模块的解析页共用 ParsePage，靠参数区分
+            // X 主页与抖音解析：自动抓取需要内嵌浏览器（公开接口拿不到数据）
             case "home":
-                NavFrame.Navigate(typeof(ParsePage), new ParseNavArgs(ParseKind.X, this));
+                NavFrame.Navigate(typeof(BrowsePage), new BrowseNavArgs(BrowseKind.X, this));
                 break;
             case "douyin":
-                NavFrame.Navigate(typeof(ParsePage), new ParseNavArgs(ParseKind.Douyin, this));
+                NavFrame.Navigate(typeof(BrowsePage), new BrowseNavArgs(BrowseKind.Douyin, this));
                 break;
             case "bili":
             case "bili-batch":
