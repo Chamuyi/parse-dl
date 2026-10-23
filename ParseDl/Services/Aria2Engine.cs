@@ -100,7 +100,9 @@ public sealed class Aria2Engine : IDisposable
             "--file-allocation=none",
             "--summary-interval=0",
             "--console-log-level=warn",
-            $"--dir={AppPaths.DataDir}",
+            // 并发上限与默认目录都从设置读（改设置后重启引擎生效）
+            $"--max-concurrent-downloads={Math.Clamp(AppSettings.Instance.MaxConcurrent, 1, 16)}",
+            $"--dir={DefaultDir()}",
         };
 
         var psi = new ProcessStartInfo(exe)
@@ -128,6 +130,27 @@ public sealed class Aria2Engine : IDisposable
         }
         try { _child.Kill(entireProcessTree: true); } catch { }
         return false;
+    }
+
+    /// <summary>默认下载目录：设置里有就用设置，否则用 数据目录\downloads。</summary>
+    public static string DefaultDir()
+    {
+        var configured = AppSettings.Instance.SaveDirBase;
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            try
+            {
+                System.IO.Directory.CreateDirectory(configured);
+                return configured;
+            }
+            catch
+            {
+                // 目录不可用（无权限 / 盘符不存在）时退回默认，不抛
+            }
+        }
+        var dir = System.IO.Path.Combine(AppPaths.DataDir, "downloads");
+        try { System.IO.Directory.CreateDirectory(dir); } catch { }
+        return dir;
     }
 
     private static bool IsPortFree(int port)

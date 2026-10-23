@@ -54,6 +54,50 @@
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="下载" FontSize="16" FontWeight="SemiBold" />
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="默认保存目录" FontSize="14" />
+                            <TextBlock Text="留空则使用 数据目录\downloads" FontSize="12" Opacity="0.6" />
+                        </StackPanel>
+                        <TextBox x:Name="SaveDirBox" Grid.Column="1" MinWidth="280"
+                                 PlaceholderText="如：F:\下载" TextChanged="OnSaveDirChanged" />
+                    </Grid>
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="并发上限" FontSize="14" />
+                            <TextBlock Text="aria2 同时下载的任务数（1-16）" FontSize="12" Opacity="0.6" />
+                        </StackPanel>
+                        <NumberBox x:Name="MaxConcurrentBox" Grid.Column="1" MinWidth="160"
+                                   Minimum="1" Maximum="16" SpinButtonPlacementMode="Compact"
+                                   ValueChanged="OnMaxConcurrentChanged" />
+                    </Grid>
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="写运行日志" FontSize="14" />
+                            <TextBlock Text="关掉可减少磁盘写入" FontSize="12" Opacity="0.6" />
+                        </StackPanel>
+                        <ToggleSwitch x:Name="WriteLogsToggle" Grid.Column="1" Toggled="OnWriteLogsToggled" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16">
                 <StackPanel Spacing="8">
                     <TextBlock Text="数据目录" FontSize="16" FontWeight="SemiBold" />
                     <TextBlock x:Name="DataDirText" Text="-" FontSize="12"

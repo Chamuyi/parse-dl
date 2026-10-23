@@ -83,7 +83,7 @@ public sealed partial class DownloadsPage : Page
         {
             try
             {
-                var dir = System.IO.Path.Combine(AppPaths.DataDir, "downloads");
+                var dir = Aria2Engine.DefaultDir();
                 System.IO.Directory.CreateDirectory(dir);
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {

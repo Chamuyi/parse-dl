@@ -99,7 +99,7 @@ public sealed class DownloadStore
         if (!await EnsureEngineAsync())
             return (false, "下载引擎未就绪：" + EngineMessage);
 
-        var gid = await _engine.AddUriAsync(url, dir ?? Path.Combine(AppPaths.DataDir, "downloads"));
+        var gid = await _engine.AddUriAsync(url, dir ?? Aria2Engine.DefaultDir());
         if (string.IsNullOrEmpty(gid)) return (false, "aria2 拒绝该任务");
 
         var item = new DownloadItem { Gid = gid, Url = url, Module = module };

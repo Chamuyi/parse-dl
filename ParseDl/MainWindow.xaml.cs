@@ -35,10 +35,17 @@ public sealed partial class MainWindow : Window
         // 主题来源必须是 XAML 的实际主题，不是自己记的布尔值。
         // 实测教训：只传布尔值时，浅色下材质仍按深色渲染（深浅差 0）；
         // 参照物图吧也是取 root.ActualTheme（BackdropService.cs:202-204）。
-        RootGrid.RequestedTheme = ElementTheme.Dark;
+        // 从设置恢复上次的明暗与材质档位
+        var cfg = AppSettings.Instance;
+        RootGrid.RequestedTheme = cfg.IsDark ? ElementTheme.Dark : ElementTheme.Light;
         RootGrid.ActualThemeChanged += (_, _) =>
-            _material.Apply(_material.Current, RootGrid.ActualTheme == ElementTheme.Dark);
-        _material.Apply(MaterialKind.Mica, RootGrid.ActualTheme == ElementTheme.Dark);
+        {
+            cfg.IsDark = RootGrid.ActualTheme == ElementTheme.Dark;
+            cfg.Save();
+            _material.Apply(_material.Current, cfg.IsDark);
+        };
+        var startKind = Enum.TryParse<MaterialKind>(cfg.MaterialKind, out var mk) ? mk : MaterialKind.Mica;
+        _material.Apply(startKind, cfg.IsDark);
 
         BuildNav();
         NavFrame.Navigate(typeof(DashboardPage), this);
@@ -49,7 +56,17 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>供设置页切换材质。</summary>
-    public bool ApplyMaterial(MaterialKind kind, bool isDark) => _material.Apply(kind, isDark);
+    public bool ApplyMaterial(MaterialKind kind, bool isDark)
+    {
+        var ok = _material.Apply(kind, isDark);
+        if (ok)
+        {
+            AppSettings.Instance.MaterialKind = kind.ToString();
+            AppSettings.Instance.IsDark = isDark;
+            AppSettings.Instance.Save();
+        }
+        return ok;
+    }
 
     public MaterialKind CurrentMaterial => _material.Current;
 

@@ -1,4 +1,4 @@
-﻿using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Input;
@@ -32,6 +32,9 @@ public partial class App : Application
     /// <param name="args">Details about the launch request and process.</param>
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+        // 先加载设置：材质档位与明暗要在建窗时就用上，否则会先闪一下默认值再切。
+        ParseDl.Services.AppSettings.Instance.Load();
+
         _window = new MainWindow();
         _window.Activate();
     }

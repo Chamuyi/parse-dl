@@ -73,6 +73,30 @@ public sealed partial class SettingsPage : Page
         }
 
         DataDirText.Text = AppPaths.DataDir;
+
+        var cfg = AppSettings.Instance;
+        SaveDirBox.Text = cfg.SaveDirBase;
+        MaxConcurrentBox.Value = cfg.MaxConcurrent;
+        WriteLogsToggle.IsOn = cfg.WriteLogs;
+    }
+
+    private void OnSaveDirChanged(object sender, TextChangedEventArgs e)
+    {
+        AppSettings.Instance.SaveDirBase = SaveDirBox.Text ?? "";
+        AppSettings.Instance.Save();
+    }
+
+    private void OnMaxConcurrentChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (double.IsNaN(args.NewValue)) return;
+        AppSettings.Instance.MaxConcurrent = (int)args.NewValue;
+        AppSettings.Instance.Save();
+    }
+
+    private void OnWriteLogsToggled(object sender, RoutedEventArgs e)
+    {
+        AppSettings.Instance.WriteLogs = WriteLogsToggle.IsOn;
+        AppSettings.Instance.Save();
     }
 
     private void OnMaterialChecked(object sender, RoutedEventArgs e)
