@@ -33,6 +33,8 @@
       CopyToOutputDirectory 才会真复制。
     -->
     <None Include="Assets\aria2c.exe" Link="aria2c.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- ffmpeg.exe：音视频合并用（B站 dash 是分离流，必须合） -->
+    <None Include="Assets\ffmpeg.exe" Link="ffmpeg.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

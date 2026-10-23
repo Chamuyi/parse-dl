@@ -104,6 +104,30 @@ public sealed partial class DownloadsPage : Page
         };
         actions.Children.Add(clearLedgerBtn);
 
+        // 合并音视频 —— B站 dash 是分离流，下完必须合，否则只有画面没声音。
+        var mergeBtn = new Button { Content = "合并音视频", MinWidth = 110 };
+        mergeBtn.Click += async (_, _) =>
+        {
+            var dir = Aria2Engine.DefaultDir();
+            var pairs = MediaMerger.FindPairs(dir);
+            if (pairs.Count == 0)
+            {
+                await ShowInfoAsync("没有找到可合并的配对（需要同名的视频 + 音频文件）");
+                return;
+            }
+
+            var okCount = 0; var failCount = 0; var lastErr = "";
+            foreach (var (video, audio, output) in pairs)
+            {
+                var r = await MediaMerger.MergeAsync(video, audio, output);
+                if (r.Ok) okCount++; else { failCount++; lastErr = r.Message; }
+            }
+            await ShowInfoAsync(failCount == 0
+                ? ("合并完成 " + okCount + " 个")
+                : ("合并完成 " + okCount + " 个，失败 " + failCount + " 个。最后错误：" + lastErr));
+        };
+        actions.Children.Add(mergeBtn);
+
         Root.Children.Add(actions);
 
         // 历史台账：aria2 的会话重启后是空的，用户要能看到「之前下过什么」。
@@ -228,6 +252,26 @@ public sealed partial class DownloadsPage : Page
                 Padding = new Thickness(10, 8, 10, 8),
                 Child = g,
             });
+        }
+    }
+
+    /// <summary>用 ContentDialog 报结果。批量操作必须给回执，不能静默。</summary>
+    private async System.Threading.Tasks.Task ShowInfoAsync(string message)
+    {
+        try
+        {
+            var dlg = new ContentDialog
+            {
+                Title = "提示",
+                Content = message,
+                CloseButtonText = "知道了",
+                XamlRoot = XamlRoot,
+            };
+            await dlg.ShowAsync();
+        }
+        catch
+        {
+            // XamlRoot 还没准备好时（页面未加载完）忽略，避免崩溃
         }
     }
 
