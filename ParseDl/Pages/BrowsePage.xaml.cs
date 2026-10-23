@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -30,6 +31,7 @@ public sealed partial class BrowsePage : Page
 {
     private BrowseKind _kind = BrowseKind.Douyin;
     private bool _ready;
+    private System.Collections.Generic.List<string>? _capturedX;
 
     public BrowsePage() { InitializeComponent(); }
 
@@ -69,6 +71,38 @@ public sealed partial class BrowsePage : Page
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
             Web.CoreWebView2.Settings.IsStatusBarEnabled = false;
+
+            // X 的数据不在 HTML 里 —— 页面是客户端渲染的，推文数据通过 GraphQL
+            // 接口异步拉取。所以必须**拦截网络响应**才能拿到，读 outerHTML 是空的。
+            // 抖音相反：它把数据塞在页面里的 _ROUTER_DATA，读 HTML 就够。
+            if (_kind == BrowseKind.X)
+            {
+                _capturedX = new System.Collections.Generic.List<string>();
+                Web.CoreWebView2.WebResourceResponseReceived += async (_, e) =>
+                {
+                    try
+                    {
+                        var uri = e.Request.Uri ?? "";
+                        // 只关心时间线接口，其他响应不读（读正文很贵）
+                        if (!uri.Contains("graphql") && !uri.Contains("UserTweets") &&
+                            !uri.Contains("UserMedia")) return;
+                        if (_capturedX.Count >= 20) return;
+
+                        var raw = await e.Response.GetContentAsync();
+                        if (raw is null) return;
+                        // IRandomAccessStream 不是 System.IO.Stream，要 AsStreamForRead 转一次
+                        using var netStream = raw.AsStreamForRead();
+                        using var reader = new System.IO.StreamReader(netStream);
+                        var body = await reader.ReadToEndAsync();
+                        if (!string.IsNullOrEmpty(body) && body.Contains("tweet_results"))
+                            _capturedX.Add(body);
+                    }
+                    catch
+                    {
+                        // 读响应失败不影响浏览
+                    }
+                };
+            }
 
             Web.CoreWebView2.NavigationCompleted += (_, _) =>
             {
@@ -156,8 +190,53 @@ public sealed partial class BrowsePage : Page
             }
             else
             {
-                StatusText.Text = "X 的抓取需要登录态与接口响应拦截，当前版本先支持直链下载。" +
-                    "页面数据解析器已实现（XApi.ParseTimeline），接入拦截需要下一步。";
+                // X：用拦截到的响应
+                if (_capturedX is null || _capturedX.Count == 0)
+                {
+                    StatusText.Text = "还没抓到 X 的接口响应。请先登录，然后滚动页面让推文加载出来，再点抓取。";
+                    return;
+                }
+
+                var totalPosts = 0;
+                var totalMedia = 0;
+                var addedMedia = 0;
+                foreach (var body in _capturedX)
+                {
+                    try
+                    {
+                        using var xdoc = System.Text.Json.JsonDocument.Parse(body);
+                        var page = XApi.ParseTimeline(xdoc.RootElement);
+                        totalPosts += page.Posts.Count;
+                        foreach (var p in page.Posts)
+                        {
+                            for (var mi = 0; mi < p.Media.Count; mi++)
+                            {
+                                var m = p.Media[mi];
+                                totalMedia++;
+                                var name = XNameFor(p, mi);
+                                var ext = m.Type == "video" ? "mp4" : "jpg";
+                                var (ok2, _) = await DownloadStore.Instance.AddAsync(
+                                    m.Url, "X 媒体", null, name + "." + ext);
+                                if (ok2) addedMedia++;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // 单个响应解析失败不影响其他
+                    }
+                }
+
+                if (totalMedia == 0)
+                {
+                    StatusText.Text = "抓到 " + _capturedX.Count + " 个响应，"
+                        + totalPosts + " 条推文，但没有媒体（可能都是纯文字推文）。";
+                }
+                else
+                {
+                    StatusText.Text = "抓到 " + _capturedX.Count + " 个响应，"
+                        + totalPosts + " 条推文，" + totalMedia + " 条媒体，入队 " + addedMedia + " 条。";
+                }
             }
         }
         catch (Exception ex)
@@ -168,6 +247,32 @@ public sealed partial class BrowsePage : Page
         {
             CaptureButton.IsEnabled = true;
         }
+    }
+
+    /// <summary>X 媒体按模板命名。</summary>
+    private static string XNameFor(XPost p, int mediaIndex)
+    {
+        var m = p.Media[mediaIndex];
+        var settings = AppSettings.Instance.ForModule("x");
+        var tpl = string.IsNullOrWhiteSpace(settings.FileNameTemplate)
+            ? "%POST_TIME% %USER_SCREEN_NAME% %POST_ID%-%MEDIA_INDEX%%EXT%" : settings.FileNameTemplate;
+        var ctx = new TemplateContext
+        {
+            PostId = p.Id,
+            PostTime = p.CreatedAt,
+            UserId = p.UserId,
+            UserName = p.UserName,
+            UserScreenName = p.UserScreenName,
+            MediaId = m.Id,
+            MediaIndex = mediaIndex + 1,
+            MediaCount = p.Media.Count,
+            MediaWidth = m.Width,
+            MediaHeight = m.Height,
+            Extension = m.Type == "video" ? "mp4" : "jpg",
+            Content = p.Text,
+        };
+        var name = FileNameTemplate.UnicodeFilenamify(FileNameTemplate.Resolve(tpl, ctx));
+        return string.IsNullOrWhiteSpace(name) ? (p.Id + "_" + (mediaIndex + 1)) : name;
     }
 
     /// <summary>抖音媒体按模板命名。</summary>

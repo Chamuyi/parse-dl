@@ -96,12 +96,51 @@ public sealed class BiliApi
     public static readonly int[] AudioRank = { 30255, 30251, 30250, 30280, 30232, 30216 };
 
     private readonly HttpClient _http;
-    private readonly string _cookie;
+    private string _cookie;
+
+    /// <summary>
+    /// buvid3 是 B 站的设备指纹 cookie。**没有它，部分接口（尤其登录相关）
+    /// 会直接返回 HTML 风控页而不是 JSON** —— 表现为 JsonDocument.Parse 报
+    /// "'<' is an invalid start of a value"（实测踩过）。
+    /// </summary>
+    private string _buvid3 = "";
+    private bool _buvidTried;
 
     public BiliApi(string? cookie = null, HttpClient? http = null)
     {
         _cookie = cookie ?? "";
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+    }
+
+    /// <summary>取 buvid3 设备指纹（一次即可，之后复用）。失败不抛 —— 尽力而为。</summary>
+    private async Task EnsureBuvidAsync(CancellationToken ct)
+    {
+        if (_buvidTried) return;
+        _buvidTried = true;
+        try
+        {
+            using var req = NewRequest("https://" + Host + "/x/frontend/finger/spi");
+            using var resp = await _http.SendAsync(req, ct);
+            var text = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(text);
+            if (doc.RootElement.TryGetProperty("data", out var data))
+            {
+                if (data.TryGetProperty("b_3", out var b3)) _buvid3 = b3.GetString() ?? "";
+                else if (data.TryGetProperty("buvid3", out var b3b)) _buvid3 = b3b.GetString() ?? "";
+            }
+        }
+        catch
+        {
+            // 拿不到就继续 —— 不阻断主流程
+        }
+    }
+
+    /// <summary>把 buvid3 并进 Cookie 头（已有的 cookie 保留）。</summary>
+    private string EffectiveCookie()
+    {
+        if (string.IsNullOrEmpty(_buvid3)) return _cookie;
+        if (_cookie.Contains("buvid3=")) return _cookie;
+        return _cookie.Length == 0 ? ("buvid3=" + _buvid3) : (_cookie + "; buvid3=" + _buvid3);
     }
 
     private HttpRequestMessage NewRequest(string url)
@@ -112,13 +151,15 @@ public sealed class BiliApi
         req.Headers.TryAddWithoutValidation("User-Agent",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
-        if (_cookie.Length > 0) req.Headers.TryAddWithoutValidation("Cookie", _cookie);
+        var cookie = EffectiveCookie();
+        if (cookie.Length > 0) req.Headers.TryAddWithoutValidation("Cookie", cookie);
         return req;
     }
 
     /// <summary>发一次请求并取出 JSON 的 data 节点。失败重试 3 次（共 4 次尝试）。</summary>
     private async Task<JsonElement> GetDataAsync(string path, CancellationToken ct = default)
     {
+        await EnsureBuvidAsync(ct);
         var url = path.StartsWith("http") ? path : "https://" + Host + path;
         Exception? last = null;
         for (var attempt = 0; attempt < 4; attempt++)
@@ -128,6 +169,23 @@ public sealed class BiliApi
                 using var req = NewRequest(url);
                 using var resp = await _http.SendAsync(req, ct);
                 var text = await resp.Content.ReadAsStringAsync(ct);
+
+                // 风控/错误时 B 站会返回 HTML 页面，直接 Parse 会报
+                // "'<' is an invalid start of a value"，那个报错对用户毫无意义。
+                // 这里先判形状，给出可读原因。
+                var trimmed = text.TrimStart();
+                if (trimmed.Length > 0 && (trimmed[0] == (char)60 || trimmed[0] == (char)91))
+                {
+                    var isArray = trimmed[0] == (char)91;
+                    if (!isArray)
+                    {
+                        var status = (int)resp.StatusCode;
+                        throw new BiliApiException(
+                            "B 站返回了 HTML 而不是 JSON（HTTP " + status + "）。" +
+                            "通常是触发了风控，稍后再试；若持续出现，检查网络或换网络环境。");
+                    }
+                }
+
                 using var doc = JsonDocument.Parse(text);
                 var root = doc.RootElement;
                 if (root.TryGetProperty("code", out var codeEl))

@@ -32,12 +32,15 @@ public sealed class BiliLogin
 {
     private readonly BiliApi _api;
 
+    /// <summary>登录接口在 passport.bilibili.com，**不是 api.bilibili.com**。</summary>
+    public const string PassportHost = "passport.bilibili.com";
+
     public BiliLogin(BiliApi? api = null) => _api = api ?? new BiliApi();
 
     /// <summary>生成登录二维码：返回二维码图片地址与轮询用的 key。</summary>
     public async Task<BiliQrCode> GenerateQrCodeAsync(CancellationToken ct = default)
     {
-        var data = await _api.GetDataPublicAsync("/x/passport-login/web/qrcode/generate", ct);
+        var data = await _api.GetDataPublicAsync("https://" + PassportHost + "/x/passport-login/web/qrcode/generate", ct);
         var url = data.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
         var key = data.TryGetProperty("qrcode_key", out var k) ? k.GetString() ?? "" : "";
         if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(key))
@@ -48,7 +51,7 @@ public sealed class BiliLogin
     /// <summary>轮询一次登录状态。</summary>
     public async Task<BiliLoginResult> PollAsync(string qrcodeKey, CancellationToken ct = default)
     {
-        var path = "/x/passport-login/web/qrcode/poll?qrcode_key=" + Uri.EscapeDataString(qrcodeKey);
+        var path = "https://" + PassportHost + "/x/passport-login/web/qrcode/poll?qrcode_key=" + Uri.EscapeDataString(qrcodeKey);
         var data = await _api.GetDataPublicAsync(path, ct);
 
         var code = 0;

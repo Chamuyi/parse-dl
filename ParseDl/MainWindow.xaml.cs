@@ -95,6 +95,7 @@ public sealed partial class MainWindow : Window
                 SelectsOnInvoked = false,
             };
             parent.Icon = new FontIcon { Glyph = group.Glyph };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(parent, "group-" + group.Id);
             foreach (var child in group.Children)
             {
                 parent.MenuItems.Add(CreateItem(child));
@@ -122,6 +123,9 @@ public sealed partial class MainWindow : Window
             Tag = item.Id,
         };
         nvi.Icon = new FontIcon { Glyph = item.Glyph };
+        // 三个模块里都有「解析下载」「下载管理」，UIA 按名字匹配会点到第一个。
+        // 用 Tag 做自动化名称（Tag 是唯一的），既不影响显示文字，又能被精确定位。
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(nvi, item.Id);
         return nvi;
     }
 

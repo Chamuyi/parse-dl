@@ -155,8 +155,41 @@ public sealed partial class AboutPage : Page
             }
             finally { netBtn.IsEnabled = true; }
         };
+        var loginBtn2 = new Button { Content = "测试登录接口", MinWidth = 120 };
+        loginBtn2.Click += async (_, _) =>
+        {
+            loginBtn2.IsEnabled = false;
+            resultText.Text = "正在测试扫码登录接口…";
+            try
+            {
+                var login = new ParseDl.Services.Bili.BiliLogin();
+                var qr = await login.GenerateQrCodeAsync();
+                var sb3 = new System.Text.StringBuilder();
+                sb3.AppendLine("✅ 二维码生成成功");
+                sb3.AppendLine("轮询 key：" + qr.Key);
+                sb3.AppendLine("二维码地址：" + qr.Url);
+                var poll = await login.PollAsync(qr.Key);
+                sb3.AppendLine("首次轮询状态：" + poll.State + "（未扫码时应为 Waiting）");
+                resultText.Text = sb3.ToString();
+                System.IO.File.WriteAllText(
+                    System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "bili_login_probe.txt"), sb3.ToString());
+            }
+            catch (Exception ex)
+            {
+                resultText.Text = "❌ " + ex.GetType().Name + "：" + ex.Message;
+                try
+                {
+                    System.IO.File.WriteAllText(
+                        System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "bili_login_probe.txt"),
+                        "失败：" + ex);
+                }
+                catch { }
+            }
+            finally { loginBtn2.IsEnabled = true; }
+        };
         selfTest.Children.Add(runBtn);
         selfTest.Children.Add(netBtn);
+        selfTest.Children.Add(loginBtn2);
         selfTest.Children.Add(resultText);
         Root.Children.Add(UiKit.SectionCard("自测", selfTest, "离线，不联网"));
     }
