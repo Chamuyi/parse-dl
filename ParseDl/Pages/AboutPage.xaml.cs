@@ -96,7 +96,7 @@ public sealed partial class AboutPage : Page
         var runBtn = new Button { Content = "运行自测", MinWidth = 110 };
         var resultText = new TextBlock
         {
-            Text = "点上方按钮运行离线自测（文件名模板规则）",
+            Text = "点上方按钮运行离线自测（文件名模板 + B 站链接解析）",
             FontSize = 12,
             Opacity = 0.7,
             TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap,
@@ -107,7 +107,7 @@ public sealed partial class AboutPage : Page
         {
             try
             {
-                var report = FileNameTemplateSelfTest.Run();
+                var report = SelfTestSuite.RunAll();
                 resultText.Text = report;
                 var outPath = System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "selftest.txt");
                 System.IO.File.WriteAllText(outPath, report);
