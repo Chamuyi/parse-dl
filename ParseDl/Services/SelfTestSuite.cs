@@ -16,6 +16,10 @@ public static class SelfTestSuite
         sb.AppendLine(FileNameTemplateSelfTest.Run());
         sb.AppendLine("===== B 站链接解析 =====");
         sb.AppendLine(Bili.BiliLinkSelfTest.Run());
+        sb.AppendLine("===== X 时间与媒体解析 =====");
+        sb.AppendLine(X.XApiSelfTest.Run());
+        sb.AppendLine("===== 抖音解析 =====");
+        sb.AppendLine(Douyin.DouyinSelfTest.Run());
         return sb.ToString();
     }
 }

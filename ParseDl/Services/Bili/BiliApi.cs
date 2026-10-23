@@ -157,6 +157,10 @@ public sealed class BiliApi
         throw new BiliApiException($"请求失败（已重试 4 次）：{last?.Message}");
     }
 
+    /// <summary>给列表接口用的公开取数入口（复用同一套请求头与重试策略）。</summary>
+    public Task<JsonElement> GetDataPublicAsync(string path, CancellationToken ct = default)
+        => GetDataAsync(path, ct);
+
     /// <summary>取视频基本信息（含分 P 列表）。</summary>
     public async Task<BiliVideoInfo> GetVideoInfoAsync(string bvid, CancellationToken ct = default)
     {
