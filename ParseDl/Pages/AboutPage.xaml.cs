@@ -87,6 +87,39 @@ public sealed partial class AboutPage : Page
         cols.Children.Add(rightCard);
 
         Root.Children.Add(cols);
+
+        // ── 自测区块 ──────────────────────────────────────
+        // 为什么放在界面上：打包应用既透传不了命令行参数、也继承不到父进程环境变量
+        // （winapp run 会起独立进程）。一个按钮是唯一可靠的触发方式，
+        // 而且用户自己也能随时复验。
+        var selfTest = new StackPanel { Spacing = 8 };
+        var runBtn = new Button { Content = "运行自测", MinWidth = 110 };
+        var resultText = new TextBlock
+        {
+            Text = "点上方按钮运行离线自测（文件名模板规则）",
+            FontSize = 12,
+            Opacity = 0.7,
+            TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+        };
+        runBtn.Click += (_, _) =>
+        {
+            try
+            {
+                var report = FileNameTemplateSelfTest.Run();
+                resultText.Text = report;
+                var outPath = System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "selftest.txt");
+                System.IO.File.WriteAllText(outPath, report);
+            }
+            catch (Exception ex)
+            {
+                resultText.Text = "自测异常: " + ex.Message;
+            }
+        };
+        selfTest.Children.Add(runBtn);
+        selfTest.Children.Add(resultText);
+        Root.Children.Add(UiKit.SectionCard("自测", selfTest, "离线，不联网"));
     }
 
     private static string AppVersion()

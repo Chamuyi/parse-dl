@@ -36,6 +36,35 @@ public partial class App : Application
     /// <param name="args">Details about the launch request and process.</param>
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+        // 自测入口：带 --selftest 启动时只跑离线自测、把结果写文件后退出。
+        // 这样能不经界面验证纯逻辑（文件名模板等），也不会弹窗干扰用户。
+        // 双通道触发：命令行参数 + 环境变量。
+        // 为什么两套：打包应用用 winapp run 启动时透传不了命令行参数（实测
+        // UnauthorizedAccess_IODenied_NoPathName），环境变量是唯一可靠通道。
+        var cmdArgs = Environment.GetCommandLineArgs();
+        var envFlag = Environment.GetEnvironmentVariable("PARSE_DL_SELFTEST");
+        if (Array.IndexOf(cmdArgs, "--selftest") >= 0 || envFlag == "1")
+        {
+            try
+            {
+                var report = ParseDl.Services.FileNameTemplateSelfTest.Run();
+                var outPath = System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "selftest.txt");
+                System.IO.File.WriteAllText(outPath, report);
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    System.IO.File.WriteAllText(
+                        System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "selftest.txt"),
+                        "自测异常: " + ex);
+                }
+                catch { }
+            }
+            Environment.Exit(0);
+            return;
+        }
+
         // 先加载设置：材质档位与明暗要在建窗时就用上，否则会先闪一下默认值再切。
         ParseDl.Services.AppSettings.Instance.Load();
 
