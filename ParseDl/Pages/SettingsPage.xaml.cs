@@ -80,10 +80,51 @@ public sealed partial class SettingsPage : Page
         WriteLogsToggle.IsOn = cfg.WriteLogs;
     }
 
-    private void OnSaveDirChanged(object sender, TextChangedEventArgs e)
+    /// <summary>
+    /// 选文件夹 —— **必须走 FolderPicker**：打包应用直接写任意路径会被拦，
+    /// 而选择器选中的目录系统会授予访问权。选完立刻验证可写，不通就报错不保存。
+    /// </summary>
+    private async void OnPickFolderClick(object sender, RoutedEventArgs e)
     {
-        AppSettings.Instance.SaveDirBase = SaveDirBox.Text ?? "";
+        try
+        {
+            PickDirButton.IsEnabled = false;
+            var folder = await FolderPickerService.PickAsync();
+            if (folder is null) return;
+
+            var path = folder.Path;
+            var (ok, msg) = FolderPickerService.VerifyWritable(path);
+            if (!ok)
+            {
+                SaveDirStatus.Text = $"❌ 该目录不可写：{msg}";
+                SaveDirStatus.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.OrangeRed);
+                return;
+            }
+
+            AppSettings.Instance.SaveDirBase = path;
+            AppSettings.Instance.Save();
+            SaveDirBox.Text = path;
+            SaveDirStatus.Text = "✅ 已保存，立即生效";
+            SaveDirStatus.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.LightGreen);
+        }
+        catch (Exception ex)
+        {
+            SaveDirStatus.Text = $"❌ 选择失败：{ex.GetType().Name} {ex.Message}";
+            SaveDirStatus.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.OrangeRed);
+        }
+        finally
+        {
+            PickDirButton.IsEnabled = true;
+        }
+    }
+
+    private void OnClearFolderClick(object sender, RoutedEventArgs e)
+    {
+        AppSettings.Instance.SaveDirBase = "";
         AppSettings.Instance.Save();
+        SaveDirBox.Text = "";
+        SaveDirStatus.Text = "已清除，改用默认目录（数据目录\\downloads）";
+        SaveDirStatus.Foreground = null;
     }
 
     private void OnMaxConcurrentChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)

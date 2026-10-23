@@ -132,25 +132,48 @@ public sealed class Aria2Engine : IDisposable
         return false;
     }
 
+    /// <summary>最近一次目录解析的失败原因（界面与日志用）。</summary>
+    public static string LastDirError { get; private set; } = "";
+
     /// <summary>默认下载目录：设置里有就用设置，否则用 数据目录\downloads。</summary>
     public static string DefaultDir()
     {
+        LastDirError = "";
         var configured = AppSettings.Instance.SaveDirBase;
         if (!string.IsNullOrWhiteSpace(configured))
         {
             try
             {
                 System.IO.Directory.CreateDirectory(configured);
+                // 只建目录不够 —— 还要真写一次，否则权限问题会在 aria2 下载时
+                // 才暴露（实测 AppContainer 下 CreateDirectory 可能"成功"但写入失败）。
+                var probe = System.IO.Path.Combine(configured, ".write_probe");
+                System.IO.File.WriteAllText(probe, "ok");
+                System.IO.File.Delete(probe);
                 return configured;
             }
-            catch
+            catch (Exception ex)
             {
-                // 目录不可用（无权限 / 盘符不存在）时退回默认，不抛
+                // **不静默吞**：把原因记下来，设置页与日志都能看到。
+                LastDirError = $"自定义目录不可用（{configured}）：{ex.GetType().Name} {ex.Message}";
+                Log(LastDirError);
             }
         }
         var dir = System.IO.Path.Combine(AppPaths.DataDir, "downloads");
         try { System.IO.Directory.CreateDirectory(dir); } catch { }
         return dir;
+    }
+
+    /// <summary>写一行诊断日志到 数据目录\app.log（设置里关了写日志就不写）。</summary>
+    public static void Log(string message)
+    {
+        try
+        {
+            if (!AppSettings.Instance.WriteLogs) return;
+            var path = System.IO.Path.Combine(AppPaths.DataDir, "app.log");
+            System.IO.File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {message}{Environment.NewLine}");
+        }
+        catch { }
     }
 
     private static bool IsPortFree(int port)

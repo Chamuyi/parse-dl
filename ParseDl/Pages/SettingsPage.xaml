@@ -65,9 +65,15 @@
                             <TextBlock Text="默认保存目录" FontSize="14" />
                             <TextBlock Text="留空则使用 数据目录\downloads" FontSize="12" Opacity="0.6" />
                         </StackPanel>
-                        <TextBox x:Name="SaveDirBox" Grid.Column="1" MinWidth="280"
-                                 PlaceholderText="如：F:\下载" TextChanged="OnSaveDirChanged" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <TextBox x:Name="SaveDirBox" MinWidth="240" IsReadOnly="True"
+                                     PlaceholderText="未选择（用默认目录）" />
+                            <Button x:Name="PickDirButton" Content="选择文件夹" Click="OnPickFolderClick" />
+                            <Button x:Name="ClearDirButton" Content="清除" Click="OnClearFolderClick" />
+                        </StackPanel>
                     </Grid>
+                    <TextBlock x:Name="SaveDirStatus" Text="" FontSize="12" Opacity="0.75"
+                               TextWrapping="Wrap" />
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />

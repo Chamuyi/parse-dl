@@ -16,6 +16,10 @@ namespace ParseDl;
 public partial class App : Application
 {
     private Window? _window;
+
+    /// <summary>当前主窗口。文件选择器要用它的 HWND 做 InitializeWithWindow，
+    /// 否则 FolderPicker 在 WinUI 3 里会直接抛 COMException（没有窗口句柄）。</summary>
+    public static Window? MainWindow { get; private set; }
     
     /// <summary>
     /// Initializes the singleton application object.  This is the first line of authored code
@@ -36,6 +40,7 @@ public partial class App : Application
         ParseDl.Services.AppSettings.Instance.Load();
 
         _window = new MainWindow();
+        MainWindow = _window;
         _window.Activate();
     }
 }
