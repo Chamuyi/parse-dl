@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
@@ -99,6 +100,18 @@ public sealed partial class DashboardPage : Page
     {
         try
         {
+            DataDirText.Text = AppPaths.DataDir;
+
+            // 统计卡接真实台账 —— 之前全是写死的 0，用户看不出下过什么。
+            var (count, bytes) = DownloadLedger.Instance.Stats();
+            DoneCount.Text = count.ToString();
+            LedgerCount.Text = count.ToString();
+            DiskUsage.Text = DownloadItem.FormatSize(bytes);
+
+            // 进行中取当前队列里活动任务数
+            var running = DownloadStore.Instance.Items.Count(i => i.Status == AriaStatus.Active);
+            RunningCount.Text = running.ToString();
+
             DataDirText.Text = AppPaths.DataDir;
         }
         catch (Exception ex)
