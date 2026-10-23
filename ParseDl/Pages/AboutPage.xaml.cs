@@ -117,7 +117,46 @@ public sealed partial class AboutPage : Page
                 resultText.Text = "自测异常: " + ex.Message;
             }
         };
+        var netBtn = new Button { Content = "测试 B 站接口（联网）", MinWidth = 160, Margin = new Thickness(0, 0, 0, 0) };
+        netBtn.Click += async (_, _) =>
+        {
+            netBtn.IsEnabled = false;
+            resultText.Text = "正在请求 B 站…";
+            try
+            {
+                var api = new ParseDl.Services.Bili.BiliApi();
+                var info = await api.GetVideoInfoAsync("BV1xx411c7mD");
+                var sb2 = new System.Text.StringBuilder();
+                sb2.AppendLine("视频：" + info.Title);
+                sb2.AppendLine("UP：" + info.OwnerName + "（" + info.OwnerMid + "）");
+                sb2.AppendLine("分P数：" + info.Pages.Count + "  时长：" + info.DurationSec + " 秒");
+                if (info.Pages.Count > 0 && info.Pages[0].Cid is string cidStr && long.TryParse(cidStr, out var cid))
+                {
+                    var play = await api.GetPlayInfoAsync(info.Bvid, cid);
+                    sb2.AppendLine("视频流：" + play.Videos.Count + " 条，最高 " +
+                        (play.Videos.Count > 0 ? play.Videos[0].QualityLabel + " / " + play.Videos[0].Codec : "无"));
+                    sb2.AppendLine("音频流：" + play.Audios.Count + " 条，最高 " +
+                        (play.Audios.Count > 0 ? play.Audios[0].QualityLabel : "无"));
+                }
+                resultText.Text = sb2.ToString();
+                System.IO.File.WriteAllText(
+                    System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "bili_probe.txt"), sb2.ToString());
+            }
+            catch (Exception ex)
+            {
+                resultText.Text = "失败：" + ex.GetType().Name + " " + ex.Message;
+                try
+                {
+                    System.IO.File.WriteAllText(
+                        System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "bili_probe.txt"),
+                        "失败：" + ex);
+                }
+                catch { }
+            }
+            finally { netBtn.IsEnabled = true; }
+        };
         selfTest.Children.Add(runBtn);
+        selfTest.Children.Add(netBtn);
         selfTest.Children.Add(resultText);
         Root.Children.Add(UiKit.SectionCard("自测", selfTest, "离线，不联网"));
     }
