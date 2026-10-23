@@ -124,6 +124,8 @@ public sealed class ModuleSettings
     public int ScrollStepPx { get; set; } = 600;
     public int ScrollIntervalMs { get; set; } = 1200;
     public string PreferredQuality { get; set; } = "最高";
+    /// <summary>登录态 Cookie（B 站 SESSDATA 等）。空表示未登录 —— 未登录时 B 站只给 480P。</summary>
+    public string Cookie { get; set; } = "";
     public bool DownloadDanmaku { get; set; }
     public bool AudioOnly { get; set; }
 }

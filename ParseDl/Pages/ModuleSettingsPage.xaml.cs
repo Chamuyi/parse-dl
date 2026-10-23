@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 using ParseDl.Controls;
 using ParseDl.Services;
+using ParseDl.Services.Bili;
 
 namespace ParseDl.Pages;
 
@@ -98,17 +99,134 @@ public sealed partial class ModuleSettingsPage : Page
             }));
         }
 
-        Root.Children.Add(new TextBlock
+        if (_kind == ModuleKind.Bili)
         {
-            Text = "设置已实时保存到 " + AppSettings.Instance.FilePath,
-            FontSize = 12,
-            Opacity = 0.55,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 4, 0, 0),
-        });
+            Root.Children.Add(BuildLoginCard(s));
+        }
+        else
+        {
+            Root.Children.Add(new TextBlock
+            {
+                Text = "设置已实时保存到 " + AppSettings.Instance.FilePath,
+                FontSize = 12,
+                Opacity = 0.55,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 4, 0, 0),
+            });
+        }
     }
 
     private static void Save() => AppSettings.Instance.Save();
+
+    /// <summary>
+    /// B 站登录卡片 —— 扫码登录。
+    ///
+    /// 为什么放这里：**未登录只能拿 480P**，要 1080P 必须登录。登录态存
+    /// ModuleSettings.Cookie，BiliApi 会自动带上它。
+    /// </summary>
+    private UIElement BuildLoginCard(ModuleSettings s)
+    {
+        var panel = new StackPanel { Spacing = 10 };
+
+        var status = new TextBlock
+        {
+            Text = string.IsNullOrEmpty(s.Cookie)
+                ? "当前未登录（只能下载 480P 及以下）"
+                : "已登录（可下载 1080P 及以上）",
+            FontSize = 13,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        panel.Children.Add(status);
+
+        var qrImage = new Image
+        {
+            Width = 200, Height = 200,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Visibility = Visibility.Collapsed,
+        };
+        panel.Children.Add(qrImage);
+
+        var hint = new TextBlock
+        {
+            Text = "",
+            FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap,
+            Visibility = Visibility.Collapsed,
+        };
+        panel.Children.Add(hint);
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var loginBtn = new Button { Content = "扫码登录", MinWidth = 100 };
+        var logoutBtn = new Button { Content = "退出登录", MinWidth = 100 };
+        row.Children.Add(loginBtn);
+        row.Children.Add(logoutBtn);
+        panel.Children.Add(row);
+
+        var cts = new System.Threading.CancellationTokenSource();
+
+        loginBtn.Click += async (_, _) =>
+        {
+            loginBtn.IsEnabled = false;
+            status.Text = "正在获取二维码…";
+            try
+            {
+                var login = new BiliLogin();
+                var qr = await login.GenerateQrCodeAsync();
+
+                // 二维码就是一张图片地址，直接给 Image 显示
+                qrImage.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(qr.Url));
+                qrImage.Visibility = Visibility.Visible;
+                hint.Text = "请用 B 站手机客户端扫码，并在手机上确认登录";
+                hint.Visibility = Visibility.Visible;
+                status.Text = "等待扫码…";
+
+                var result = await login.WaitAsync(qr.Key, st =>
+                {
+                    // 状态推到界面 —— 用户要知道「扫了但还没确认」
+                    switch (st)
+                    {
+                        case BiliLoginState.Scanned:
+                            status.Text = "已扫码，请在手机上点击确认";
+                            break;
+                        case BiliLoginState.Expired:
+                            status.Text = "二维码已过期，请重新点扫码登录";
+                            break;
+                    }
+                }, cts.Token);
+
+                if (result.State == BiliLoginState.Confirmed && !string.IsNullOrEmpty(result.Cookie))
+                {
+                    s.Cookie = result.Cookie;
+                    Save();
+                    status.Text = "登录成功，已保存登录态（可下载 1080P 及以上）";
+                    qrImage.Visibility = Visibility.Collapsed;
+                    hint.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    status.Text = "登录未完成：" + result.State;
+                }
+            }
+            catch (Exception ex)
+            {
+                status.Text = "登录失败：" + ex.Message;
+            }
+            finally
+            {
+                loginBtn.IsEnabled = true;
+            }
+        };
+
+        logoutBtn.Click += (_, _) =>
+        {
+            s.Cookie = "";
+            Save();
+            qrImage.Visibility = Visibility.Collapsed;
+            hint.Visibility = Visibility.Collapsed;
+            status.Text = "已退出登录（只能下载 480P 及以下）";
+        };
+
+        return UiKit.SectionCard("B 站登录", panel, "1080P 及以上需要登录");
+    }
 
     private static TextBox TextBoxFor(string value, Action<string> onChange, string? placeholder = null)
     {

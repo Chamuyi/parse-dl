@@ -22,6 +22,7 @@ public sealed partial class DownloadsPage : Page
     private string _filter = "全部";
     private StackPanel? _tabPanel;
     private StackPanel? _listPanel;
+    private StackPanel? _ledgerPanel;
     private TextBlock? _emptyHint;
 
     public DownloadsPage()
@@ -94,7 +95,21 @@ public sealed partial class DownloadsPage : Page
             catch { }
         };
         actions.Children.Add(openBtn);
+
+        var clearLedgerBtn = new Button { Content = "清空历史台账", MinWidth = 120 };
+        clearLedgerBtn.Click += async (_, _) =>
+        {
+            DownloadLedger.Instance.Clear();
+            await RefreshAsync();
+        };
+        actions.Children.Add(clearLedgerBtn);
+
         Root.Children.Add(actions);
+
+        // 历史台账：aria2 的会话重启后是空的，用户要能看到「之前下过什么」。
+        // 数据来自 DownloadLedger（落盘 download_ledger.json）。
+        _ledgerPanel = new StackPanel { Spacing = 6 };
+        Root.Children.Add(UiKit.SectionCard("历史台账", _ledgerPanel, "来自 download_ledger.json"));
 
         RebuildTabs();
     }
@@ -148,6 +163,71 @@ public sealed partial class DownloadsPage : Page
         foreach (var it in items)
         {
             _listPanel.Children.Add(BuildRow(it));
+        }
+
+        RenderLedger();
+    }
+
+    /// <summary>渲染历史台账（只显示与当前模块相关的条目）。</summary>
+    private void RenderLedger()
+    {
+        if (_ledgerPanel is null) return;
+        _ledgerPanel.Children.Clear();
+
+        var entries = DownloadLedger.Instance.Query(_module, 60);
+        if (entries.Count == 0)
+        {
+            _ledgerPanel.Children.Add(new TextBlock
+            {
+                Text = "暂无历史记录。任务完成后会自动记入台账。",
+                FontSize = 13, Opacity = 0.6, TextWrapping = TextWrapping.Wrap,
+            });
+            return;
+        }
+
+        foreach (var e in entries)
+        {
+            var g = new Grid();
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var left = new StackPanel { Spacing = 2 };
+            left.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrEmpty(e.FileName) ? e.Url : e.FileName,
+                FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+            left.Children.Add(new TextBlock
+            {
+                Text = e.Status + "　" + DownloadItem.FormatSize(e.TotalBytes) + "　" + e.FinishedAt,
+                FontSize = 12, Opacity = 0.6,
+            });
+            g.Children.Add(left);
+
+            var openOne = new Button { Content = "打开位置", MinWidth = 80 };
+            var dir = e.Dir;
+            openOne.Click += (_, _) =>
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = string.IsNullOrEmpty(dir) ? Aria2Engine.DefaultDir() : dir,
+                        UseShellExecute = true,
+                    });
+                }
+                catch { }
+            };
+            Grid.SetColumn(openOne, 1);
+            g.Children.Add(openOne);
+
+            _ledgerPanel.Children.Add(new Border
+            {
+                Background = UiKit.SubtleFill,
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(10, 8, 10, 8),
+                Child = g,
+            });
         }
     }
 

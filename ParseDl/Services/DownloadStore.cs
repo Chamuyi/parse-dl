@@ -87,7 +87,9 @@ public sealed class DownloadStore
     }
 
     /// <summary>加入一条下载。</summary>
-    public async Task<(bool Ok, string Message)> AddAsync(string url, string module, string? dir = null)
+    /// <param name="outName">另存文件名（含扩展名）。为空则让 aria2 按 URL 末段命名。</param>
+    public async Task<(bool Ok, string Message)> AddAsync(
+        string url, string module, string? dir = null, string? outName = null)
     {
         if (string.IsNullOrWhiteSpace(url)) return (false, "地址为空");
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
@@ -99,10 +101,11 @@ public sealed class DownloadStore
         if (!await EnsureEngineAsync())
             return (false, "下载引擎未就绪：" + EngineMessage);
 
-        var gid = await _engine.AddUriAsync(url, dir ?? Aria2Engine.DefaultDir());
+        var gid = await _engine.AddUriAsync(url, dir ?? Aria2Engine.DefaultDir(), outName);
         if (string.IsNullOrEmpty(gid)) return (false, "aria2 拒绝该任务");
 
         var item = new DownloadItem { Gid = gid, Url = url, Module = module };
+        if (!string.IsNullOrEmpty(outName)) item.FileName = outName;
         OnUi(() => Items.Insert(0, item));
         await RefreshOnceAsync();
         return (true, "已加入队列");
@@ -163,6 +166,20 @@ public sealed class DownloadStore
                 if (!string.IsNullOrEmpty(t.FileName)) item.FileName = t.FileName;
                 if (!string.IsNullOrEmpty(t.Dir)) item.Dir = t.Dir;
             }
+            // 终态落台账：完成/失败/移除各记一笔，重启后仍能看到历史。
+            foreach (var t in tasks)
+            {
+                if (t.Status is AriaStatus.Complete or AriaStatus.Error or AriaStatus.Removed)
+                {
+                    var it = Items.FirstOrDefault(i => i.Gid == t.Gid);
+                    if (it is not null && it.Status != t.Status)
+                    {
+                        it.Status = t.Status;
+                        DownloadLedger.Instance.Record(it);
+                    }
+                }
+            }
+
             // 触发一次集合变更通知（DownloadItem 未实现 INotifyPropertyChanged，
             // 用 Replace 让列表项重绘 —— 比给每项加通知简单且够用）
             for (var i = 0; i < Items.Count; i++)
