@@ -215,6 +215,21 @@ public sealed class BiliApi
         throw new BiliApiException($"请求失败（已重试 4 次）：{last?.Message}");
     }
 
+    /// <summary>取二进制响应（弹幕 seg.so 返回 protobuf，不是 JSON）。</summary>
+    public async Task<byte[]> GetBytesAsync(string path, CancellationToken ct = default)
+    {
+        await EnsureBuvidAsync(ct);
+        var url = path.StartsWith("http") ? path : "https://" + Host + path;
+        using var req = NewRequest(url);
+        using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var status = (int)resp.StatusCode;
+            throw new BiliApiException("请求失败（HTTP " + status + "）：" + path);
+        }
+        return await resp.Content.ReadAsByteArrayAsync(ct);
+    }
+
     /// <summary>给列表接口用的公开取数入口（复用同一套请求头与重试策略）。</summary>
     public Task<JsonElement> GetDataPublicAsync(string path, CancellationToken ct = default)
         => GetDataAsync(path, ct);

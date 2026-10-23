@@ -334,6 +334,61 @@ public sealed partial class ParsePage : Page
             var (ok2, msg2) = await DownloadStore.Instance.AddAsync(audio.Url, "B 站（音频）", null, name + ".m4a");
             _status.Text += ok2 ? ("；音频已入队（" + audio.QualityLabel + "）") : ("；音频入队失败：" + msg2);
         }
+        // 附加内容：弹幕 / 字幕。它们不是 aria2 任务（是接口拉回来直接写文件），
+        // 所以在这里同步做完，失败只记状态不阻断主下载。
+        try
+        {
+            var settings = AppSettings.Instance.ForModule("bili");
+            var saveDir = Aria2Engine.DefaultDir();
+            var baseName = name;
+
+            if (settings.DownloadDanmaku)
+            {
+                var dms = await BiliDanmakuService.FetchAllAsync(
+                    new BiliApi(settings.Cookie), long.Parse(_biliPlay.Cid.ToString()));
+                if (dms.Count > 0)
+                {
+                    var xml = BiliDanmakuService.ToXml(dms, _biliPlay.Cid);
+                    var path = System.IO.Path.Combine(saveDir, baseName + ".danmaku.xml");
+                    System.IO.File.WriteAllText(path, xml, System.Text.Encoding.UTF8);
+                    _status.Text += "；弹幕 " + dms.Count + " 条已保存";
+                }
+                else
+                {
+                    _status.Text += "；弹幕为空或需要登录";
+                }
+            }
+
+            // 字幕：需要登录才有，拿不到就静默跳过（不是错误）
+            try
+            {
+                var subs = await BiliSubtitleService.ListAsync(
+                    new BiliApi(settings.Cookie), _biliInfo.Bvid, _biliPlay.Cid);
+                if (subs.Count > 0)
+                {
+                    var saved = 0;
+                    foreach (var (lang, label, url) in subs)
+                    {
+                        var sub = await BiliSubtitleService.FetchAsync(url, lang, label);
+                        if (sub.Cues.Count == 0) continue;
+                        var path = System.IO.Path.Combine(saveDir, baseName + "." + lang + ".srt");
+                        System.IO.File.WriteAllText(path, BiliSubtitleService.ToSrt(sub.Cues),
+                            System.Text.Encoding.UTF8);
+                        saved++;
+                    }
+                    if (saved > 0) _status.Text += "；字幕 " + saved + " 份已保存";
+                }
+            }
+            catch
+            {
+                // 字幕是附加项，失败不影响下载
+            }
+        }
+        catch (Exception ex)
+        {
+            _status.Text += "；附加内容失败：" + ex.Message;
+        }
+
         _status.Text += "。可到下载管理查看进度。";
     }
 
