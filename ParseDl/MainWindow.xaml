@@ -28,8 +28,13 @@
             FontWeight="SemiBold"
             IsBackButtonVisible="False"
             IsPaneToggleButtonVisible="False">
+            <!--
+              ImageIconSource 不支持 .ico（实测：设成 .ico 后左上角什么都不显示）。
+              必须用位图。这里用 48px 的方形 logo —— 标题栏图标按 16x16 逻辑像素显示，
+              48px 在高 DPI 下也够清晰。
+            -->
             <TitleBar.IconSource>
-                <ImageIconSource ImageSource="Assets/AppIcon.ico" />
+                <ImageIconSource ImageSource="Assets/AppIcon.png" />
             </TitleBar.IconSource>
             <TitleBar.Content>
                 <Grid VerticalAlignment="Center" Margin="12,0,0,0">

@@ -47,12 +47,65 @@ public sealed partial class MainWindow : Window
         var startKind = Enum.TryParse<MaterialKind>(cfg.MaterialKind, out var mk) ? mk : MaterialKind.Mica;
         _material.Apply(startKind, cfg.IsDark);
 
+        // 系统绘制的标题栏按钮（− □ ×）颜色**默认跟随系统主题**，不跟应用内主题。
+        // 实测现象：应用切浅色但系统是深色时，按钮是白色 —— 在浅色标题栏上看不见；
+        // 反之亦然。必须显式把 AppWindowTitleBar 的按钮前景/背景色对齐应用内主题。
+        ApplyTitleBarColors(cfg.IsDark);
+        RootGrid.ActualThemeChanged += (_, _) => ApplyTitleBarColors(RootGrid.ActualTheme == ElementTheme.Dark);
+
         BuildNav();
         NavFrame.Navigate(typeof(DashboardPage), this);
 
         Activated += (_, e) =>
             _material.UpdateState(RootGrid.ActualTheme == ElementTheme.Dark,
                                   e.WindowActivationState != WindowActivationState.Deactivated);
+    }
+
+    /// <summary>
+    /// 把系统标题栏按钮的颜色对齐应用内主题。
+    ///
+    /// 为什么必须手动设：AppWindowTitleBar 的 ButtonForegroundColor 默认取**系统**主题，
+    /// 与应用内 RootGrid.RequestedTheme 无关。用户报「浅色模式下三个按键不可分辨」
+    /// 就是这个原因（应用浅色 + 系统深色 → 按钮是白字，落在浅色标题栏上）。
+    ///
+    /// 背景色用透明：标题栏本身要露出材质，不能盖一层实色。
+    /// </summary>
+    private void ApplyTitleBarColors(bool isDark)
+    {
+        try
+        {
+            var tb = AppWindow.TitleBar;
+            if (tb is null) return;
+
+            // 前景：深色主题用白，浅色主题用近黑（与 WinUI 标准一致）
+            var fg = isDark
+                ? Windows.UI.Color.FromArgb(255, 255, 255, 255)
+                : Windows.UI.Color.FromArgb(255, 0, 0, 0);
+            // hover/pressed 稍微提亮/压暗，让交互有反馈
+            var hoverFg = isDark
+                ? Windows.UI.Color.FromArgb(255, 255, 255, 255)
+                : Windows.UI.Color.FromArgb(255, 0, 0, 0);
+            var transparent = Windows.UI.Color.FromArgb(0, 0, 0, 0);
+            var hoverBg = isDark
+                ? Windows.UI.Color.FromArgb(30, 255, 255, 255)
+                : Windows.UI.Color.FromArgb(20, 0, 0, 0);
+            var pressedBg = isDark
+                ? Windows.UI.Color.FromArgb(50, 255, 255, 255)
+                : Windows.UI.Color.FromArgb(35, 0, 0, 0);
+
+            tb.ButtonBackgroundColor = transparent;
+            tb.ButtonInactiveBackgroundColor = transparent;
+            tb.ButtonForegroundColor = fg;
+            tb.ButtonInactiveForegroundColor = fg;
+            tb.ButtonHoverBackgroundColor = hoverBg;
+            tb.ButtonHoverForegroundColor = hoverFg;
+            tb.ButtonPressedBackgroundColor = pressedBg;
+            tb.ButtonPressedForegroundColor = hoverFg;
+        }
+        catch
+        {
+            // 非 Win11 或旧系统上这些 API 可能不可用，忽略即可
+        }
     }
 
     /// <summary>供设置页切换材质。</summary>
