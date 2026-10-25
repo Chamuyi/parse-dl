@@ -24,7 +24,7 @@
             <StackPanel x:Name="Root"
                         Spacing="14"
                         MaxWidth="1200"
-                        HorizontalAlignment="Center" />
+                        HorizontalAlignment="Stretch" />
         </Grid>
     </ScrollViewer>
 </Page>

@@ -7,7 +7,7 @@
 
     <!-- 居中容器：内容 MaxWidth 1600，宽窗居中、窄窗占满（统一布局规则 lead 2026-10-25） -->
     <Grid>
-    <Grid Padding="24,8,24,24" RowSpacing="12" MaxWidth="1600" HorizontalAlignment="Center">
+    <Grid Padding="24,8,24,24" RowSpacing="12" MaxWidth="1600" HorizontalAlignment="Stretch">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />

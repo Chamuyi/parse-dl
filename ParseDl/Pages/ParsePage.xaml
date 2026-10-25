@@ -17,7 +17,7 @@
                   Padding="24,8,24,24">
         <Grid>
             <StackPanel x:Name="Root" Spacing="14" MaxWidth="1400"
-                        HorizontalAlignment="Center" />
+                        HorizontalAlignment="Stretch" />
         </Grid>
     </ScrollViewer>
 </Page>

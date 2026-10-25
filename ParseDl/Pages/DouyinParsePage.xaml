@@ -11,7 +11,7 @@
         但仍要避免超宽屏下无限拉伸。
     -->
     <Grid>
-    <Grid Padding="24,8,24,24" RowSpacing="12" MaxWidth="1600" HorizontalAlignment="Center">
+    <Grid Padding="24,8,24,24" RowSpacing="12" MaxWidth="1600" HorizontalAlignment="Stretch">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />

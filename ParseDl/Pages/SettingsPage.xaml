@@ -30,7 +30,7 @@
               竖直 StackPanel 的宽度由最宽子元素决定，居中后卡片宽度会跟着内容忽宽忽窄。
               Grid 会先被拉满可用宽、再受 MaxWidth 约束，下面每个卡片因此宽度一致。
             -->
-            <Grid HorizontalAlignment="Center" MaxWidth="900">
+            <Grid HorizontalAlignment="Stretch" MaxWidth="900">
                 <StackPanel x:Name="ContentRoot" Spacing="14"
                             HorizontalAlignment="Stretch" />
             </Grid>
