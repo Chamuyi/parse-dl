@@ -182,6 +182,11 @@ public sealed class TemplateField : StackPanel
         Opacity = enabled ? 1.0 : 0.45;
     }
 
+    /// <summary>挂上本字段专属的「可用变量」面板（插到「输出示例」之后）。</summary>
+    internal void AttachVariablePanel(UIElement panel)
+    {
+        Children.Add(panel);
+    }
     /// <summary>把变量插到本字段输入框的光标处（有选区则替换选区）。</summary>
     public void InsertAtCaret(string token)
     {
@@ -264,9 +269,9 @@ public sealed class TemplateEditor : UserControl
 
         _root = new StackPanel { Spacing = 16, HorizontalAlignment = HorizontalAlignment.Stretch };
 
-        // 变量面板与「恢复默认模板」固定在末尾；AddField 时把字段插到它们之前。
+
         var tail = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Stretch };
-        tail.Children.Add(BuildVariablePanel());
+        // 变量面板已下沉到每个字段内部（见 AddField），这里只剩「恢复默认模板」。
         tail.Children.Add(BuildRestoreRow());
         _root.Children.Add(tail);
 
@@ -280,14 +285,24 @@ public sealed class TemplateEditor : UserControl
     public event EventHandler<TemplateFieldValueChangedEventArgs>? FieldChanged;
 
     /// <summary>添加一个模板字段（文件夹模板 / 文件名模板），返回它的句柄。</summary>
+    /// <remarks>
+    /// **2026-10-26 用户要求「做的和原来一样，点击展开，点变量插入」**：
+    /// 原项目（lib/widgets/download_section.dart 的 TemplateRow + FileNameTemplateInput）
+    /// 是**每个模板框各带一份「可用变量」可展开面板**，点哪个框下面的「插入」就插到哪个框；
+    /// 不是两个框共用一个面板靠焦点猜。现在改成同一形态。
+    /// </remarks>
     public TemplateField AddField(TemplateFieldOptions options, string initialValue)
     {
         var field = new TemplateField(options, initialValue);
         field.Input.GotFocus += (_, _) => _lastFocused = field;
         field.ValueChanged += (_, e) => FieldChanged?.Invoke(this, e);
 
+        // 每个字段自带一份变量面板：把「插入」直接绑到这个字段，不依赖焦点。
+        var panel = BuildVariablePanelFor(field);
+        field.AttachVariablePanel(panel);
+
         _fields.Add(field);
-        // 插到末尾的变量面板之前，保证字段永远排在面板上方
+        // 插到末尾的「恢复默认模板」之前
         _root.Children.Insert(_root.Children.Count - 1, field);
         return field;
     }
@@ -321,7 +336,7 @@ public sealed class TemplateEditor : UserControl
 
     // ── 变量面板 ────────────────────────────────────────────
 
-    private UIElement BuildVariablePanel()
+    private UIElement BuildVariablePanelFor(TemplateField target)
     {
         var head = new StackPanel
         {
@@ -369,7 +384,7 @@ public sealed class TemplateEditor : UserControl
         });
 
         var list = new StackPanel { Spacing = 4, HorizontalAlignment = HorizontalAlignment.Stretch };
-        foreach (var v in _vars) list.Children.Add(BuildVarRow(v));
+        foreach (var v in _vars) list.Children.Add(BuildVarRow(v, target));
         body.Children.Add(list);
 
         var paramHint = BuildParamHint();
@@ -407,7 +422,7 @@ public sealed class TemplateEditor : UserControl
         };
     }
 
-    private UIElement BuildVarRow(TemplateVarInfo v)
+    private UIElement BuildVarRow(TemplateVarInfo v, TemplateField target)
     {
         var row = new Grid { ColumnSpacing = 8 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(210) });
@@ -447,7 +462,7 @@ public sealed class TemplateEditor : UserControl
             Padding = new Thickness(10, 2, 10, 2),
         };
         AutomationProperties.SetName(insert, "插入变量 " + v.Name);
-        insert.Click += (_, _) => InsertToken(v.Token);
+        insert.Click += (_, _) => target.InsertAtCaret(v.Token);
         Grid.SetColumn(insert, 2);
         row.Children.Add(insert);
 

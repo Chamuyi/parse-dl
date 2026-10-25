@@ -86,6 +86,10 @@ public static class SettingRows
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(16),
+            // **必须显式 Stretch**（2026-10-26 实测）：父级若依赖内容定宽（StackPanel），
+            // 卡片会和父级互相等待，最终整列收缩到内容宽（实测 476px，可用宽 1300），
+            // 看着既不居中也很空。显式 Stretch + 父级 Grid 才能真正铺满。
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Child = stack,
         };
     }

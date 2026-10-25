@@ -63,6 +63,12 @@ public sealed class AppSettings
     // ── 其它 ──────────────────────────────────────────
     public bool WriteLogs { get; set; } = true;
 
+    /// <summary>
+    /// 日志保留天数（2026-10-26 用户要求「日志增加自动删除，可以选择时间删除或者不删除」）。
+    /// 0 = 不自动删除；大于 0 = 启动时清掉超过这么多天的日志文件。
+    /// </summary>
+    public int LogRetentionDays { get; set; } = 0;
+
     /// <summary>启动时自动检查更新（对齐 AppOptions.autoCheckUpdate）。</summary>
     public bool AutoCheckUpdate { get; set; } = true;
 
@@ -103,6 +109,7 @@ public sealed class AppSettings
             MaterialKind = loaded.MaterialKind;
             IsDark = loaded.IsDark;
             WriteLogs = loaded.WriteLogs;
+            LogRetentionDays = loaded.LogRetentionDays;
             // 2026-10-24 新增的一批字段集中在这一处读，减少与并行分支的合并冲突
             LoadExtras(loaded);
 

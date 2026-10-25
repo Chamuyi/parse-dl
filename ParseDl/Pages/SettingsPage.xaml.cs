@@ -69,12 +69,37 @@ public sealed partial class SettingsPage : Page
     };
 
     private string _currentCategory = "appearance";
+
+    /// <summary>内容区可用宽度（SyncWidth 里算出来）。卡片显式用这个宽度。</summary>
+    private double _contentWidth = 900;
     private bool _built;
 
     public SettingsPage()
     {
         InitializeComponent();
-        Loaded += (_, _) => { if (!_built) RenderCategory(_currentCategory); };
+        // 宽度同步：把外层容器宽度定死成 ScrollViewer 的视口宽。
+        // 不做这一步，ScrollViewer 的内容宿主会把 Stretch 退化成「按内容宽」，
+        // 卡片永远只有 476px（实测），既不居中也很空。
+        Loaded += (_, _) =>
+        {
+            SyncWidth();
+            if (!_built) RenderCategory(_currentCategory);
+        };
+        RootScroll.SizeChanged += (_, _) => SyncWidth();
+    }
+
+    /// <summary>把 WidthHost 宽度同步成 ScrollViewer 视口宽（减掉 Padding）。</summary>
+    private void SyncWidth()
+    {
+        var w = RootScroll.ActualWidth - RootScroll.Padding.Left - RootScroll.Padding.Right;
+        if (w <= 0) return;
+        WidthHost.Width = w;
+        var target = Math.Min(w, 900);
+        if (Math.Abs(target - _contentWidth) > 0.5)
+        {
+            _contentWidth = target;
+            if (_built) RenderCategory(_currentCategory);
+        }
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -104,30 +129,33 @@ public sealed partial class SettingsPage : Page
     {
         if (ContentRoot is null) return;
         ContentRoot.Children.Clear();
+        // ContentRoot 现在是 Grid（不是 StackPanel）：每加一个子元素要配一行 Auto，
+        // 否则所有卡片会叠在第 0 行上。清空时把行定义也重置。
+        ContentRoot.RowDefinitions.Clear();
 
         // 页头固定写「设置」，分类名由顶部的 SelectorBar 表达 ——
         // 两处都写分类名（「外观设置」+ 选中的「外观」）是同一句话说两遍。
-        ContentRoot.Children.Add(UiKit.PageHeader("设置", SubtitleOf(id), "\uE713"));
+        AddRow(UiKit.PageHeader("设置", SubtitleOf(id), "\uE713"));
 
         switch (id)
         {
             case "appearance":
-                ContentRoot.Children.Add(BuildAppearance());
+                AddRow(BuildAppearance());
                 break;
             case "download":
-                ContentRoot.Children.Add(BuildDownload());
+                AddRow(BuildDownload());
                 break;
             case "proxy":
-                ContentRoot.Children.Add(BuildProxy());
+                AddRow(BuildProxy());
                 break;
             case "logs":
-                ContentRoot.Children.Add(BuildLogs());
+                AddRow(BuildLogs());
                 break;
             case "data":
-                ContentRoot.Children.Add(BuildDataDir());
+                AddRow(BuildDataDir());
                 break;
             default:
-                ContentRoot.Children.Add(BuildAbout());
+                AddRow(BuildAbout());
                 break;
         }
         _built = true;
@@ -710,6 +738,52 @@ public sealed partial class SettingsPage : Page
         info.Children.Add(open);
         panel.Children.Add(SettingRows.Card("日志", "运行日志落点", info));
 
+        // ── 自动删除（用户 2026-10-26：「日志增加自动删除，可以选择时间删除或者不删除」）
+        var cleanPanel = new StackPanel { Spacing = 10 };
+
+        var options = new[] { "不自动删除", "保留 1 天", "保留 3 天", "保留 7 天", "保留 30 天" };
+        var dayValues = new[] { 0, 1, 3, 7, 30 };
+        var combo = new ComboBox { MinWidth = 180 };
+        foreach (var o in options) combo.Items.Add(o);
+        var idx0 = Array.IndexOf(dayValues, cfg.LogRetentionDays);
+        combo.SelectedIndex = idx0 >= 0 ? idx0 : 0;
+        AutomationProperties.SetName(combo, "日志保留策略");
+
+        var status = new TextBlock { FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap };
+        void RefreshStatus()
+        {
+            var d = AppSettings.Instance.LogRetentionDays;
+            status.Text = d <= 0
+                ? "当前：不自动删除，日志会一直留着。"
+                : $"当前：超过 {d} 天的日志会在下次启动时自动删除。";
+        }
+        RefreshStatus();
+
+        combo.SelectionChanged += (_, _) =>
+        {
+            var i2 = combo.SelectedIndex;
+            if (i2 < 0 || i2 >= dayValues.Length) return;
+            AppSettings.Instance.LogRetentionDays = dayValues[i2];
+            AppSettings.Instance.Save();
+            RefreshStatus();
+        };
+
+        var cleanNow = new Button { Content = "立即清理过期日志", MinWidth = 150 };
+        AutomationProperties.SetName(cleanNow, "立即清理过期日志");
+        var cleanResult = new TextBlock { FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap };
+        cleanNow.Click += (_, _) =>
+        {
+            var n = Aria2Engine.PurgeOldLogs();
+            cleanResult.Text = n > 0 ? $"已删除 {n} 个过期日志文件。" : "没有需要清理的日志（策略为「不自动删除」时不会删任何文件）。";
+        };
+
+        cleanPanel.Children.Add(SettingRows.Description("日志按下面的策略自动清理；选「不自动删除」则一直保留。"));
+        cleanPanel.Children.Add(combo);
+        cleanPanel.Children.Add(status);
+        cleanPanel.Children.Add(cleanNow);
+        cleanPanel.Children.Add(cleanResult);
+        panel.Children.Add(SettingRows.Card("自动清理", "按保留天数删除旧日志", cleanPanel));
+
         return panel;
     }
 
@@ -839,5 +913,28 @@ public sealed partial class SettingsPage : Page
         panel.Children.Add(SettingRows.Card("关于", "版本与许可", info));
 
         return panel;
+    }
+
+    /// <summary>
+    /// 往 ContentRoot（Grid）里加一行。ContentRoot 用 Grid 而不是 StackPanel，
+    /// 是为了让卡片能撑满 MaxWidth —— 竖直 StackPanel 的宽度由最宽子元素决定，
+    /// 会和卡片的 Stretch 互相等待，最终整列收缩到内容宽度（实测只有 476px）。
+    /// </summary>
+    private void AddRow(UIElement child)
+    {
+        var row = ContentRoot.RowDefinitions.Count;
+        ContentRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        if (child is FrameworkElement fe)
+        {
+            Grid.SetRow(fe, row);
+            // **显式设宽度**（2026-10-26 实测，第 5 次才定案）：
+            // SettingRows.Card 内部是 StackPanel，而 StackPanel 的宽度 = 最宽子元素宽度；
+            // 它作为 Grid 的 Auto 行子元素时，父级不给它定宽，于是整条链一路按内容宽收缩
+            // （实测卡片 476px，可用宽 1223）。所有 HorizontalAlignment 写法都救不了。
+            // 唯一可靠做法：直接把宽度数值写死到子元素上。
+            fe.HorizontalAlignment = HorizontalAlignment.Stretch;
+            fe.Width = _contentWidth;
+        }
+        ContentRoot.Children.Add(child);
     }
 }

@@ -353,6 +353,9 @@ public sealed partial class BiliSettingsPage : Page
     {
         var panel = new StackPanel { Spacing = 12 };
 
+        // **2026-10-26 用户要求「做的和原来一样，点击展开，点变量插入」**：
+        // 原项目是**每个模板框各带一份「可用变量」可展开面板**，点哪个框下面的
+        // 「插入」就插到哪个框 —— 不是两框共用一份靠焦点猜。现在改成同一形态。
         _dirTplBox = TemplateBox(Cfg.DirTemplate, BiliConfig.DefaultDirTemplate,
             v => { Cfg.DirTemplate = v; Save(); RefreshTemplates(); },
             "留空则直接存到保存目录下");
@@ -361,6 +364,7 @@ public sealed partial class BiliSettingsPage : Page
             out _dirPreview));
         _dirPreview = new TextBlock { FontSize = 11.5, Opacity = 0.7, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
         panel.Children.Add(_dirPreview);
+        panel.Children.Add(BuildVarsPanel(_dirTplBox));
 
         panel.Children.Add(SettingRows.Divider());
 
@@ -372,17 +376,16 @@ public sealed partial class BiliSettingsPage : Page
             out _namePreview));
         _namePreview = new TextBlock { FontSize = 11.5, Opacity = 0.7, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
         panel.Children.Add(_namePreview);
+        panel.Children.Add(BuildVarsPanel(_nameTplBox));
 
-        panel.Children.Add(BuildVarsPanel());
         panel.Children.Add(new TextBlock
         {
             Text = "改动会自动保存", FontSize = 11.5, Opacity = 0.55,
         });
 
-        Root.Children.Add(SettingRows.Card("命名模板", "可展开变量面板，点变量插到当前聚焦的框", panel));
+        Root.Children.Add(SettingRows.Card("命名模板", "每个模板框各带一份可展开变量面板，点「插入」就插到该框", panel));
         RefreshTemplates();
     }
-
     private TextBox TemplateBox(string value, string defaultValue, Action<string> onChange, string placeholder)
     {
         var box = new TextBox
@@ -426,7 +429,7 @@ public sealed partial class BiliSettingsPage : Page
     /// 点一个变量 → 把 %NAME% 插到**当前聚焦的模板框**的光标位置。
     /// 没有聚焦框时插到文件模板（那是用户最常改的那个）。
     /// </summary>
-    private UIElement BuildVarsPanel()
+    private UIElement BuildVarsPanel(TextBox target)
     {
         var grid = new WrapPanel2 { };
         foreach (var v in BiliTemplate.Vars)
@@ -441,7 +444,7 @@ public sealed partial class BiliSettingsPage : Page
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(btn, "变量 " + v.Name);
             ToolTipService.SetToolTip(btn, v.Desc + (v.Params is null ? "" : "（参数：" + v.Params + "）"));
             var token = "%" + v.Name + "%";
-            btn.Click += (_, _) => InsertToken(token);
+            btn.Click += (_, _) => InsertTokenTo(target, token);
             grid.Children.Add(btn);
         }
 
@@ -465,6 +468,20 @@ public sealed partial class BiliSettingsPage : Page
         return expander;
     }
 
+    /// <summary>把 token 插到**指定**模板框的光标处（每框自带面板，目标明确，不靠焦点猜）。</summary>
+    private static void InsertTokenTo(TextBox box, string token)
+    {
+        if (box is null) return;
+        var text = box.Text ?? "";
+        var start = box.SelectionStart;
+        if (start < 0 || start > text.Length) start = text.Length;
+        var len = box.SelectionLength;
+        if (len > 0) text = text.Remove(start, Math.Min(len, text.Length - start));
+        box.Text = text.Insert(start, token);
+        box.SelectionStart = start + token.Length;
+        box.SelectionLength = 0;
+        box.Focus(FocusState.Programmatic);
+    }
     /// <summary>把 token 插到当前聚焦框的光标处；没有聚焦框就落到文件模板。</summary>
     private void InsertToken(string token)
     {

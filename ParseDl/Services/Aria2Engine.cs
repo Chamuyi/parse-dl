@@ -167,6 +167,39 @@ public sealed class Aria2Engine : IDisposable
         return dir;
     }
 
+
+    /// <summary>
+    /// 按保留天数清理日志文件（用户 2026-10-26 要求「日志增加自动删除」）。
+    /// 保留天数 0 = 不删除。返回删掉的文件数，供设置页显示。
+    /// </summary>
+    public static int PurgeOldLogs()
+    {
+        var days = AppSettings.Instance.LogRetentionDays;
+        if (days <= 0) return 0;
+        var dir = System.IO.Path.Combine(AppPaths.DataDir, "logs");
+        if (!System.IO.Directory.Exists(dir)) return 0;
+
+        var cutoff = DateTime.Now.AddDays(-days);
+        var removed = 0;
+        try
+        {
+            foreach (var f in System.IO.Directory.EnumerateFiles(dir))
+            {
+                try
+                {
+                    if (System.IO.File.GetLastWriteTime(f) < cutoff)
+                    {
+                        System.IO.File.Delete(f);
+                        removed++;
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+        if (removed > 0) Log("[日志清理] 删除 " + removed + " 个超过 " + days + " 天的日志文件");
+        return removed;
+    }
     /// <summary>写一行诊断日志到 数据目录\app.log（设置里关了写日志就不写）。</summary>
     public static void Log(string message)
     {

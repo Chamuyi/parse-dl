@@ -68,6 +68,9 @@ public partial class App : Application
         // 先加载设置：材质档位与明暗要在建窗时就用上，否则会先闪一下默认值再切。
         ParseDl.Services.AppSettings.Instance.Load();
 
+        // 按「日志保留天数」清理旧日志（0 = 不删）。
+        try { ParseDl.Services.Aria2Engine.PurgeOldLogs(); } catch { }
+
         _window = new MainWindow();
         MainWindow = _window;
         _window.Activate();

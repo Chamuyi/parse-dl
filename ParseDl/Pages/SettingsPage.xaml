@@ -6,33 +6,43 @@
     Background="Transparent">
 
     <!--
-      分类切换已挪到**主侧边栏**（用户 2026-10-26：「做成下载功能这样的点击展开」）：
-      「全局设置」在主导航里是可展开分组，六个分类是它的子项，与「X 下载 / 抖音解析下载 /
-      B 站下载」完全同一种交互。页面内不再有任何分类控件，只按导航传进来的分类 id 渲染内容。
-
-      历史：2026-10-25 一度做成页面内顶部横向 SelectorBar（因为用户先否掉了「页面内左侧
-      竖栏」）；2026-10-26 用户要求并进主导航，于是彻底删掉页内分类器。
+      分类切换在**主侧边栏**（用户 2026-10-26「做成下载功能这样的点击展开」）：
+      「全局设置」是可展开分组，六个分类做子项。页内没有任何分类控件。
     -->
     <Grid>
-        <!--
-          内容区：横向滚动**必须显式关掉**。
-          WinUI 的 ScrollViewer 默认横向 Enabled，会给子内容无限宽去测量，
-          于是 HorizontalAlignment=Center / MaxWidth 全部失效 —— 表现为内容一路贴到左边、
-          或者被拉出视口截断（用户 2026-10-25 报的就是这个）。
-          关掉横向滚动后，子内容按视口宽测量，居中才真正居中。
-        -->
-        <ScrollViewer VerticalScrollBarVisibility="Auto"
+        <ScrollViewer x:Name="RootScroll"
+                      VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled"
                       HorizontalScrollMode="Disabled"
                       Padding="24,12,24,24">
             <!--
-              MaxWidth 与 Center 放在**外层 Grid** 上，而不是直接放 StackPanel：
-              竖直 StackPanel 的宽度由最宽子元素决定，居中后卡片宽度会跟着内容忽宽忽窄。
-              Grid 会先被拉满可用宽、再受 MaxWidth 约束，下面每个卡片因此宽度一致。
+              **居中做法（2026-10-26 第三次修正，前两次都错）**：
+              前两次分别写成「Center + MaxWidth」和「Stretch + MaxWidth」，实测卡片都只有
+              476px（可用宽 1223），既不居中也很空。原因不是对齐属性，而是**父级宽度不确定**：
+              ScrollViewer 的 ContentPresenter 在内容自然宽度小于视口时，会把子元素的
+              Stretch 退化成「按内容宽」，于是 MaxWidth 永远用不满。
+
+              可靠做法：外层 Grid 显式绑定到 ScrollViewer 的视口宽度（Width 绑定 ActualWidth），
+              这样它一定有确定宽度；内层再用 Center + MaxWidth 才真正居中。
+              宽度由代码在 SizeChanged 里同步（见 SettingsPage.xaml.cs 的 SyncWidth）。
             -->
-            <Grid HorizontalAlignment="Stretch" MaxWidth="900">
-                <StackPanel x:Name="ContentRoot" Spacing="14"
-                            HorizontalAlignment="Stretch" />
+            <Grid x:Name="WidthHost" HorizontalAlignment="Left">
+                <!--
+                  内层同时用 **Width 绑定 + MaxWidth**：
+                  Width 取 WidthHost 的实际宽度（真实数值，不依赖内容测量），
+                  MaxWidth 把它封顶到 900；HorizontalAlignment=Center 让它居中。
+                  这是唯一可靠的组合 —— 只写 Stretch 会退化成按内容宽（实测卡片 476px），
+                  只写 Center 也会按内容宽收缩。
+                -->
+                <Grid HorizontalAlignment="Center" MaxWidth="900"
+                      Width="{Binding ActualWidth, ElementName=WidthHost}">
+                    <Grid x:Name="ContentRoot" RowSpacing="14"
+                          HorizontalAlignment="Stretch">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                    </Grid>
+                </Grid>
             </Grid>
         </ScrollViewer>
     </Grid>
