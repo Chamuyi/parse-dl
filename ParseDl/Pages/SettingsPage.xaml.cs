@@ -80,10 +80,25 @@ public sealed partial class SettingsPage : Page
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
-        _host = e.Parameter as MainWindow;
+        // 两种入参都接：新形态是 SettingsNavArgs（带分类 id），
+        // 旧的直接传 MainWindow 也兼容（默认落到「外观」）。
+        switch (e.Parameter)
+        {
+            case SettingsNavArgs args:
+                _host = args.Host;
+                if (CategoryIds.Contains(args.Category)) _currentCategory = args.Category;
+                break;
+            case MainWindow host:
+                _host = host;
+                break;
+        }
         _built = false;
         RenderCategory(_currentCategory);
     }
+
+    /// <summary>合法分类 id 集合（与 NavModel.SettingsGroup 的子项一一对应）。</summary>
+    private static readonly HashSet<string> CategoryIds =
+        new(Categories.Select(c => c.Id), StringComparer.Ordinal);
 
     private void RenderCategory(string id)
     {
