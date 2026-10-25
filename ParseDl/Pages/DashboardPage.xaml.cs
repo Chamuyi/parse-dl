@@ -134,9 +134,13 @@ public sealed partial class DashboardPage : Page
 
         if (narrow)
         {
-            Grid.SetRow(RightStack, 1);
+            // 窄窗：右栏整块下移到第 2 行（第 1 行留给「最近活动」）。
+            // RowSpan 必须显式归 1 —— 宽窗时它是 2（跨「快捷开始」+「最近活动」两行），
+            // 不归位的话右栏会跨到第 2 行上与「最近活动」**重叠**（实测出现过文字叠字）。
+            Grid.SetRow(RightStack, 2);
             Grid.SetColumn(RightStack, 0);
             Grid.SetColumnSpan(RightStack, 2);
+            Grid.SetRowSpan(RightStack, 1);
             RightCol.Width = new GridLength(0);
         }
         else
@@ -144,6 +148,8 @@ public sealed partial class DashboardPage : Page
             Grid.SetRow(RightStack, 0);
             Grid.SetColumn(RightStack, 1);
             Grid.SetColumnSpan(RightStack, 1);
+            // 宽窗：右栏跨「快捷开始」+「最近活动」两行，把左下方那块空白吃掉。
+            Grid.SetRowSpan(RightStack, 2);
             RightCol.Width = new GridLength(340);
         }
     }

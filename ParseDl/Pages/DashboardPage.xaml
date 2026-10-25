@@ -109,6 +109,8 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <!-- 窄窗时右栏（模块状态/下载引擎/环境）要落到第 3 行，见 ApplyResponsive -->
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <!--
