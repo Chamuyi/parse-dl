@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="ParseDl.Pages.DouyinAutoPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="Transparent">
+
+    <Grid Padding="24,8,24,24" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel x:Name="HeaderHost" Grid.Row="0" />
+
+        <!-- 工具栏 -->
+        <Border Grid.Row="1"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8" Padding="12">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Button x:Name="StartButton" Grid.Column="0" Content="开始"
+                        MinWidth="90" Style="{ThemeResource AccentButtonStyle}"
+                        Click="OnStartClick" />
+                <Button x:Name="StopButton" Grid.Column="1" Content="停止"
+                        MinWidth="90" IsEnabled="False" Click="OnStopClick" />
+                <Button x:Name="ClearInputButton" Grid.Column="2" Content="清空名单"
+                        MinWidth="90" Click="OnClearInputClick" />
+                <TextBlock x:Name="ProgressText" Grid.Column="3" Text=""
+                           FontSize="13" Opacity="0.8" TextWrapping="Wrap"
+                           VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="2" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="380" />
+                <ColumnDefinition Width="*" MinWidth="320" />
+            </Grid.ColumnDefinitions>
+
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="12">
+                    <StackPanel x:Name="TargetCardHost" />
+                    <StackPanel x:Name="OptionCardHost" />
+                    <StackPanel x:Name="TaskCardHost" />
+                    <StackPanel x:Name="LogCardHost" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <Border Grid.Column="1"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8">
+                <Grid>
+                    <WebView2 x:Name="Web" />
+                    <TextBlock x:Name="WebPlaceholder" Text="内嵌浏览器正在初始化…"
+                               FontSize="13" Opacity="0.7" Margin="16"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               TextWrapping="Wrap" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Page>
