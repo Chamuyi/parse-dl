@@ -82,9 +82,15 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
+            <!--
+              **左右比例 3:2**（用户 2026-10-26：「Web 有点小，右侧抓取太大了」）。
+              原来是 1:1 —— 抖音网页在窄栏里只露出中间一小块，而右栏选项区本来就撑不满、留白多。
+              左边是干活主区（浏览、滚动、点作品），右边只是选项 + 结果网格。
+              用星号比例而不是固定像素，窄窗时两边一起缩，不会把右栏挤没。
+            -->
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="3*" />
+                <ColumnDefinition Width="2*" />
             </Grid.ColumnDefinitions>
 
             <!-- 左：内嵌浏览器 -->

@@ -6,213 +6,216 @@
     Background="Transparent">
 
     <!--
-      布局要点（用户 2026-10-25 投诉「内容都在最左边 / 在最右边还被截断」的根因）：
-      ScrollViewer 默认 HorizontalScrollMode=Enabled，会按**无限宽**测量子内容，
-      于是 Stretch 的子面板被拉到 MaxWidth 后靠右溢出、Left 的被收缩贴左。
-      这里显式关掉横向滚动 + 用 Grid 居中容器，宽窗下居中、窄窗下占满。
+      **2026-10-26 重排：整页铺满窗口**（用户报「页面都没铺满」）。
+
+      旧版把整页塞进一个 ScrollViewer 里，内容高度由内容决定 —— 于是浏览器区只占
+      MinHeight=620 那么高，下面留一大片空白，右栏也短。这跟「解析下载」这个页面的
+      实际用法也不符：这页的浏览器和抓取面板都应该是**撑满可视区**的，需要滚动的
+      只有右栏的结果列表。
+
+      现在的结构：
+        Grid（撑满窗口）
+          Row 0 Auto  —— 页面标题
+          Row 1 Auto  —— 浏览器工具栏（地址栏那一条）
+          Row 2 *     —— 主体：左 WebView2 + 右抓取面板，撑满剩余高度
+      外层不再有 ScrollViewer（页面本身不滚），右栏结果列表自己滚。
     -->
-    <ScrollViewer
-        VerticalScrollBarVisibility="Auto"
-        HorizontalScrollBarVisibility="Disabled"
-        HorizontalScrollMode="Disabled"
-        Padding="24,8,24,24">
-        <Grid>
-            <Grid x:Name="Root"
-                  HorizontalAlignment="Stretch"
-                  MaxWidth="1500"
-                  RowSpacing="12">
+    <Grid x:Name="Root" RowSpacing="12" Padding="24,8,24,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel x:Name="HeaderHost" Grid.Row="0" />
+
+        <!-- 浏览器工具栏：← → ⟳ 🏠 + 地址栏（照原项目形态） -->
+        <Border Grid.Row="1"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8" Padding="10">
+            <Grid ColumnSpacing="6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Button x:Name="BackButton" Grid.Column="0" Width="36" Height="32" Padding="0" ToolTipService.ToolTip="后退" Click="OnBackClick">
+                    <FontIcon Glyph="&#xE72B;" FontSize="14" />
+                </Button>
+                <Button x:Name="ForwardButton" Grid.Column="1" Width="36" Height="32" Padding="0" ToolTipService.ToolTip="前进" Click="OnForwardClick">
+                    <FontIcon Glyph="&#xE72A;" FontSize="14" />
+                </Button>
+                <Button x:Name="ReloadButton" Grid.Column="2" Width="36" Height="32" Padding="0" ToolTipService.ToolTip="刷新" Click="OnReloadClick">
+                    <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                </Button>
+                <Button x:Name="HomeButton" Grid.Column="3" Width="36" Height="32" Padding="0" ToolTipService.ToolTip="回到 B 站首页" Click="OnHomeClick">
+                    <FontIcon Glyph="&#xE80F;" FontSize="14" />
+                </Button>
+                <TextBox x:Name="UrlBox" Grid.Column="4" Height="32"
+                         VerticalContentAlignment="Center"
+                         KeyDown="OnUrlKeyDown" />
+            </Grid>
+        </Border>
+
+        <!-- 主体：左浏览器（3）右抓取面板（2），撑满剩余高度 -->
+        <Grid Grid.Row="2" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*" />
+                <ColumnDefinition Width="2*" MinWidth="360" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="0">
+                <Grid>
+                    <WebView2 x:Name="Web" />
+                    <!-- WebView2 没就绪/失败时的占位（别让用户对着空白发呆） -->
+                    <Border x:Name="WebFallback" Visibility="Collapsed"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                                    Spacing="8" Padding="24">
+                            <FontIcon Glyph="&#xE774;" FontSize="28" Opacity="0.5" />
+                            <TextBlock x:Name="WebFallbackText" Text="内嵌浏览器正在准备…"
+                                       FontSize="13" Opacity="0.75"
+                                       TextWrapping="Wrap" TextAlignment="Center"
+                                       MaxWidth="420" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Column="1" RowSpacing="8">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <StackPanel x:Name="HeaderHost" Grid.Row="0" />
-
-                <!-- 浏览器工具栏：← → ⟳ 🏠 + 地址栏（照原项目形态） -->
-                <Border Grid.Row="1"
+                <!-- 登录状态条 + 刷新 -->
+                <Border Grid.Row="0"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1" CornerRadius="8" Padding="10">
-                    <Grid ColumnSpacing="6">
+                        BorderThickness="1" CornerRadius="8" Padding="10,8">
+                    <Grid ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <Button x:Name="BackButton" Grid.Column="0" Width="36" Height="32" Padding="0" ToolTipService.ToolTip="后退" Click="OnBackClick">
-                            <FontIcon Glyph="&#xE72B;" FontSize="14" />
-                        </Button>
-                        <Button x:Name="ForwardButton" Grid.Column="1" Width="36" Height="32" Padding="0" ToolTipService.ToolTip="前进" Click="OnForwardClick">
-                            <FontIcon Glyph="&#xE72A;" FontSize="14" />
-                        </Button>
-                        <Button x:Name="ReloadButton" Grid.Column="2" Width="36" Height="32" Padding="0" ToolTipService.ToolTip="刷新" Click="OnReloadClick">
+                        <FontIcon Grid.Column="0" Glyph="&#xE77B;" FontSize="14"
+                                  VerticalAlignment="Center" Opacity="0.8" />
+                        <TextBlock x:Name="LoginText" Grid.Column="1"
+                                   Text="登录状态还没检测"
+                                   FontSize="12.5" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                        <Button x:Name="LoginRefreshButton" Grid.Column="2" Width="30" Height="26" Padding="0" ToolTipService.ToolTip="重新检测登录状态" Click="OnCheckLoginClick">
                             <FontIcon Glyph="&#xE72C;" FontSize="14" />
                         </Button>
-                        <Button x:Name="HomeButton" Grid.Column="3" Width="36" Height="32" Padding="0" ToolTipService.ToolTip="回到 B 站首页" Click="OnHomeClick">
-                            <FontIcon Glyph="&#xE80F;" FontSize="14" />
-                        </Button>
-                        <TextBox x:Name="UrlBox" Grid.Column="4" Height="32"
-                                 VerticalContentAlignment="Center"
-                                 KeyDown="OnUrlKeyDown" />
                     </Grid>
                 </Border>
 
-                <!-- 左：内嵌浏览器；右：抓取面板 -->
-                <Grid Grid.Row="2" ColumnSpacing="12" MinHeight="620">
+                <!-- 抓当前页 / 抓正在播 -->
+                <Grid Grid.Row="1" ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="3*" />
-                        <ColumnDefinition Width="2*" MinWidth="360" MaxWidth="520" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-
-                    <Border Grid.Column="0"
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1" CornerRadius="8" Padding="0">
-                        <Grid>
-                            <WebView2 x:Name="Web" />
-                            <!-- WebView2 没就绪/失败时的占位（别让用户对着空白发呆） -->
-                            <Border x:Name="WebFallback" Visibility="Collapsed"
-                                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
-                                            Spacing="8" Padding="24">
-                                    <FontIcon Glyph="&#xE774;" FontSize="28" Opacity="0.5" />
-                                    <TextBlock x:Name="WebFallbackText" Text="内嵌浏览器正在准备…"
-                                               FontSize="13" Opacity="0.75"
-                                               TextWrapping="Wrap" TextAlignment="Center"
-                                               MaxWidth="420" />
-                                </StackPanel>
-                            </Border>
-                        </Grid>
-                    </Border>
-
-                    <Grid Grid.Column="1" RowSpacing="8">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-
-                        <!-- 登录状态条 + 刷新 -->
-                        <Border Grid.Row="0"
-                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                BorderThickness="1" CornerRadius="8" Padding="10,8">
-                            <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <FontIcon Grid.Column="0" Glyph="&#xE77B;" FontSize="14"
-                                          VerticalAlignment="Center" Opacity="0.8" />
-                                <TextBlock x:Name="LoginText" Grid.Column="1"
-                                           Text="登录状态还没检测"
-                                           FontSize="12.5" VerticalAlignment="Center"
-                                           TextTrimming="CharacterEllipsis" />
-                                <Button x:Name="LoginRefreshButton" Grid.Column="2" Width="30" Height="26" Padding="0" ToolTipService.ToolTip="重新检测登录状态" Click="OnCheckLoginClick">
-                                        <FontIcon Glyph="&#xE72C;" FontSize="14" />
-                                    </Button>
-                            </Grid>
-                        </Border>
-
-                        <!-- 抓当前页 / 抓正在播 -->
-                        <Grid Grid.Row="1" ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Button x:Name="GrabPageButton" Grid.Column="0"
-                                    HorizontalAlignment="Stretch" Height="34"
-                                    Content="抓当前页" Click="OnGrabPageClick"
-                                    ToolTipService.ToolTip="把左边正在看的这一页交给解析" />
-                            <Button x:Name="GrabPlayingButton" Grid.Column="1"
-                                    HorizontalAlignment="Stretch" Height="34"
-                                    Content="抓正在播" Click="OnGrabPlayingClick"
-                                    ToolTipService.ToolTip="读页面里正在播放的那一条（多P时比网址更准）" />
-                        </Grid>
-
-                        <!-- 链接输入 + 放大镜 -->
-                        <Grid Grid.Row="2" ColumnSpacing="6">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBox x:Name="LinkBox" Grid.Column="0" Height="34"
-                                     VerticalContentAlignment="Center"
-                                     PlaceholderText="粘这条稿件的链接 / BV 号 / b23.tv 短链"
-                                     KeyDown="OnLinkKeyDown" />
-                            <Button x:Name="ParseButton" Grid.Column="1" Width="38" Height="34" Padding="0" ToolTipService.ToolTip="解析这条链接" Click="OnParseClick">
-                                        <FontIcon Glyph="&#xE721;" FontSize="14" />
-                                    </Button>
-                        </Grid>
-
-                        <!-- 状态行（解析中 / 失败原因 / 入队结果） -->
-                        <TextBlock x:Name="StatusText" Grid.Row="2"
-                                   Text="" Visibility="Collapsed"
-                                   FontSize="12" Opacity="0.8"
-                                   TextWrapping="Wrap" Margin="0,6,0,0" />
-
-                        <!-- 结果区（可滚动） -->
-                        <ScrollViewer Grid.Row="3"
-                                      VerticalScrollBarVisibility="Auto"
-                                      HorizontalScrollBarVisibility="Disabled"
-                                      HorizontalScrollMode="Disabled">
-                            <Grid>
-                                <StackPanel x:Name="ResultHost" Spacing="6"
-                                            HorizontalAlignment="Stretch" />
-
-                                <!-- 空态：照原项目文案 -->
-                                <StackPanel x:Name="EmptyState" Spacing="8"
-                                            VerticalAlignment="Center"
-                                            HorizontalAlignment="Center"
-                                            Padding="16">
-                                    <FontIcon Glyph="&#xE714;" FontSize="26" Opacity="0.45" />
-                                    <TextBlock Text="还没有解析结果" FontSize="13.5"
-                                               FontWeight="SemiBold"
-                                               HorizontalAlignment="Center" />
-                                    <TextBlock Text="在左边打开一条稿件，点「抓当前页」或「抓正在播」；也可以把链接粘到上面再解析。"
-                                               FontSize="12" Opacity="0.65"
-                                               TextWrapping="Wrap" TextAlignment="Center"
-                                               MaxWidth="320" LineHeight="19" />
-                                </StackPanel>
-                            </Grid>
-                        </ScrollViewer>
-
-                        <!-- 底部：全选 / 全不选 / 上限 + 开始下载 -->
-                        <StackPanel Grid.Row="4" Spacing="6">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <Button x:Name="SelectAllButton" Grid.Column="0"
-                                        Content="全部选中" FontSize="11.5"
-                                        Padding="8,2" MinHeight="26"
-                                        Click="OnSelectAllClick" />
-                                <Button x:Name="SelectNoneButton" Grid.Column="1"
-                                        Content="全部取消" FontSize="11.5"
-                                        Padding="8,2" MinHeight="26"
-                                        Margin="6,0,0,0"
-                                        Click="OnSelectNoneClick" />
-                                <TextBlock x:Name="CapText" Grid.Column="3"
-                                           Text="上限 最高可用" FontSize="11"
-                                           Opacity="0.55" VerticalAlignment="Center" />
-                            </Grid>
-                            <Button x:Name="DownloadButton" HorizontalAlignment="Stretch"
-                                    Height="36" Content="开始下载"
-                                    Style="{ThemeResource AccentButtonStyle}"
-                                    Click="OnDownloadClick" />
-                        </StackPanel>
-                    </Grid>
+                    <Button x:Name="GrabPageButton" Grid.Column="0"
+                            HorizontalAlignment="Stretch" Height="34"
+                            Content="抓当前页" Click="OnGrabPageClick"
+                            ToolTipService.ToolTip="把左边正在看的这一页交给解析" />
+                    <Button x:Name="GrabPlayingButton" Grid.Column="1"
+                            HorizontalAlignment="Stretch" Height="34"
+                            Content="抓正在播" Click="OnGrabPlayingClick"
+                            ToolTipService.ToolTip="读页面里正在播放的那一条（多P时比网址更准）" />
                 </Grid>
+
+                <!-- 链接输入 + 放大镜 -->
+                <Grid Grid.Row="2" ColumnSpacing="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="LinkBox" Grid.Column="0" Height="34"
+                             VerticalContentAlignment="Center"
+                             PlaceholderText="粘这条稿件的链接 / BV 号 / b23.tv 短链"
+                             KeyDown="OnLinkKeyDown" />
+                    <Button x:Name="ParseButton" Grid.Column="1" Width="38" Height="34" Padding="0" ToolTipService.ToolTip="解析这条链接" Click="OnParseClick">
+                        <FontIcon Glyph="&#xE721;" FontSize="14" />
+                    </Button>
+                </Grid>
+
+                <!-- 结果区（可滚动）+ 状态行 -->
+                <Grid Grid.Row="3">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="StatusText" Grid.Row="0"
+                               Text="" Visibility="Collapsed"
+                               FontSize="12" Opacity="0.8"
+                               TextWrapping="Wrap" Margin="0,0,0,6" />
+
+                    <ScrollViewer Grid.Row="1"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  HorizontalScrollMode="Disabled">
+                        <Grid>
+                            <StackPanel x:Name="ResultHost" Spacing="6"
+                                        HorizontalAlignment="Stretch" />
+
+                            <!-- 空态：照原项目文案 -->
+                            <StackPanel x:Name="EmptyState" Spacing="8"
+                                        VerticalAlignment="Center"
+                                        HorizontalAlignment="Center"
+                                        Padding="16">
+                                <FontIcon Glyph="&#xE714;" FontSize="26" Opacity="0.45" />
+                                <TextBlock Text="还没有解析结果" FontSize="13.5"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center" />
+                                <TextBlock Text="在左边打开一条稿件，点「抓当前页」或「抓正在播」；也可以把链接粘到上面再解析。"
+                                           FontSize="12" Opacity="0.65"
+                                           TextWrapping="Wrap" TextAlignment="Center"
+                                           MaxWidth="320" LineHeight="19" />
+                            </StackPanel>
+                        </Grid>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- 底部：全选 / 全不选 / 上限 + 开始下载 -->
+                <StackPanel Grid.Row="4" Spacing="6">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="SelectAllButton" Grid.Column="0"
+                                Content="全部选中" FontSize="11.5"
+                                Padding="8,2" MinHeight="26"
+                                Click="OnSelectAllClick" />
+                        <Button x:Name="SelectNoneButton" Grid.Column="1"
+                                Content="全部取消" FontSize="11.5"
+                                Padding="8,2" MinHeight="26"
+                                Margin="6,0,0,0"
+                                Click="OnSelectNoneClick" />
+                        <TextBlock x:Name="CapText" Grid.Column="3"
+                                   Text="上限 最高可用" FontSize="11"
+                                   Opacity="0.55" VerticalAlignment="Center" />
+                    </Grid>
+                    <Button x:Name="DownloadButton" HorizontalAlignment="Stretch"
+                            Height="36" Content="开始下载"
+                            Style="{ThemeResource AccentButtonStyle}"
+                            Click="OnDownloadClick" />
+                </StackPanel>
             </Grid>
         </Grid>
-    </ScrollViewer>
+    </Grid>
 </Page>

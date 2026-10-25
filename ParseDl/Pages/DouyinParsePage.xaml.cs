@@ -106,10 +106,14 @@ public sealed partial class DouyinParsePage : Page
 
         if (wide)
         {
-            BodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            // **左右 3:2**（用户 2026-10-26：「Web 有点小，右侧抓取太大了」）。
+            // 原来这里是 1:1 —— 抖音网页在窄栏里只露出中间一小块，而右栏选项区
+            // 本来就撑不满、留白多。左边是干活主区，右边只是选项 + 结果网格。
+            // 注意：这段在**代码**里，XAML 里改列宽会被这里覆盖（踩过一次）。
+            BodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
             BodyGrid.ColumnDefinitions.Add(new ColumnDefinition
             {
-                Width = new GridLength(1, GridUnitType.Star),
+                Width = new GridLength(2, GridUnitType.Star),
                 MinWidth = 380,
             });
             BodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });

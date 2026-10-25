@@ -415,21 +415,27 @@ public sealed class TemplateEditor : UserControl
         return new Expander
         {
             Header = head,
-            IsExpanded = true,
+            IsExpanded = false,   // 用户 2026-10-26：变量模板默认隐藏，展开后才是原来那样
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Content = body,
         };
     }
 
+    /// <summary>
+    /// 一行变量：**整行就是一个按钮，点哪儿都是插入**。
+    ///
+    /// 用户 2026-10-26：「点击变量插入，而不是一个额外的插入键」。
+    /// 所以不再放独立的「插入」按钮，而是把整行做成可点的 Button ——
+    /// 视觉上是「%TOKEN%  说明」两列，点哪都能插。
+    /// </summary>
     private UIElement BuildVarRow(TemplateVarInfo v, TemplateField target)
     {
-        var row = new Grid { ColumnSpacing = 8 };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(210) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var content = new Grid { ColumnSpacing = 10 };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(210) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        row.Children.Add(new TextBlock
+        content.Children.Add(new TextBlock
         {
             Text = v.Token,
             FontSize = 12,
@@ -453,22 +459,24 @@ public sealed class TemplateEditor : UserControl
             VerticalAlignment = VerticalAlignment.Center,
         };
         Grid.SetColumn(desc, 1);
-        row.Children.Add(desc);
+        content.Children.Add(desc);
 
-        var insert = new Button
+        // 整行做成按钮：Padding 压小、背景透明，看着仍像一行文字，但整行可点。
+        var row = new Button
         {
-            Content = "插入",
-            FontSize = 12,
-            Padding = new Thickness(10, 2, 10, 2),
+            Content = content,
+            Padding = new Thickness(8, 4, 8, 4),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(4),
         };
-        AutomationProperties.SetName(insert, "插入变量 " + v.Name);
-        insert.Click += (_, _) => target.InsertAtCaret(v.Token);
-        Grid.SetColumn(insert, 2);
-        row.Children.Add(insert);
-
+        AutomationProperties.SetName(row, "插入变量 " + v.Name);
+        ToolTipService.SetToolTip(row, "点击插入 " + v.Token);
+        row.Click += (_, _) => target.InsertAtCaret(v.Token);
         return row;
     }
-
     /// <summary>
     /// 「参数格式」提示行 —— 例子从本平台变量表里挑第一个带参数的变量生成，
     /// 所以 X 设置里举的是 X 的例子、抖音设置里举的是抖音的例子，不写死变量名。
