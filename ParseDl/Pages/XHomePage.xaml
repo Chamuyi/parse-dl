@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="ParseDl.Pages.XHomePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="Transparent">
+
+    <!--
+      X 主页：本页刻意**不含任何 WebView** —— 用户信息与作品列表全部由
+      Services/X/XHomeApi.cs 通过 GraphQL / REST 请求取回，形态与 Flutter 版
+      lib/pages/homepage_page.dart 一致。内容在 code-behind 里构建
+      （与 ModuleSettingsPage / DownloadsPage 同一做法）。
+    -->
+    <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Auto" Padding="24,8,24,24">
+        <StackPanel x:Name="Root" Spacing="14" MaxWidth="1200" HorizontalAlignment="Left" />
+    </ScrollViewer>
+</Page>

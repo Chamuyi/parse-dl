@@ -26,6 +26,8 @@ public static class SelfTestSuite
         sb.AppendLine(Bili.BiliAdditionalSelfTest.Run());
         sb.AppendLine("===== X 时间与媒体解析 =====");
         sb.AppendLine(X.XApiSelfTest.Run());
+        sb.AppendLine("===== X 主页（输入/分页/登录）=====");
+        sb.AppendLine(X.XHomeSelfTest.Run());
         sb.AppendLine("===== 抖音解析 =====");
         sb.AppendLine(Douyin.DouyinSelfTest.Run());
         return sb.ToString();

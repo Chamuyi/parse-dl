@@ -13,6 +13,8 @@ public sealed record XMedia
     public string Type { get; init; } = "image";
     /// <summary>已归一化为原图/原视频的直链。</summary>
     public string Url { get; init; } = "";
+    /// <summary>缩略图直链（网格预览用）。图片取小尺寸，视频/GIF 取封面帧。</summary>
+    public string PreviewUrl { get; init; } = "";
     public int? Width { get; init; }
     public int? Height { get; init; }
 }
@@ -119,11 +121,23 @@ public static class XApi
 
             foreach (var ins in instructions.EnumerateArray())
             {
-                if (!ins.TryGetProperty("entries", out var entries)) continue;
+                // 翻页时媒体会被追加到已有 module（TimelineAddToModule）
+                if (ins.TryGetProperty("moduleItems", out var moduleItems) &&
+                    moduleItems.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var it in moduleItems.EnumerateArray()) TakeTweet(it, posts);
+                    continue;
+                }
+
+                if (!ins.TryGetProperty("entries", out var entries) ||
+                    entries.ValueKind != JsonValueKind.Array) continue;
+
                 foreach (var entry in entries.EnumerateArray())
                 {
-                    if (entry.TryGetProperty("content", out var ec) &&
-                        ec.TryGetProperty("entryType", out var et) &&
+                    if (!entry.TryGetProperty("content", out var ec) ||
+                        ec.ValueKind != JsonValueKind.Object) continue;
+
+                    if (ec.TryGetProperty("entryType", out var et) &&
                         et.GetString() == "TimelineTimelineCursor" &&
                         ec.TryGetProperty("cursorType", out var ct) &&
                         ct.GetString() == "Bottom")
@@ -132,11 +146,16 @@ public static class XApi
                         continue;
                     }
 
-                    if (!TryDig(entry, out var tweet, "content", "itemContent", "tweet_results", "result"))
+                    // **UserMedia 的媒体推文通常包在 TimelineTimelineModule 里**
+                    // （原版就是先找 module 再取 content.items）—— 漏掉它会一条媒体都解析不出来。
+                    if (ec.TryGetProperty("items", out var items) &&
+                        items.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var it in items.EnumerateArray()) TakeTweet(it, posts);
                         continue;
+                    }
 
-                    var post = ParseTweet(tweet);
-                    if (post is not null) posts.Add(post);
+                    TakeTweet(ec, posts);
                 }
             }
         }
@@ -186,6 +205,10 @@ public static class XApi
                     var mid = m.TryGetProperty("id_str", out var mId) ? mId.GetString() ?? "" : "";
                     var type = m.TryGetProperty("type", out var mt) ? mt.GetString() ?? "photo" : "photo";
 
+                    // 缩略图：视频/GIF 用封面帧（media_url_https 就是封面），图片取 small 尺寸
+                    var thumbRaw = m.TryGetProperty("media_url_https", out var muth)
+                        ? muth.GetString() ?? "" : "";
+
                     var url = "";
                     if (type == "video" || type == "animated_gif")
                     {
@@ -218,7 +241,12 @@ public static class XApi
                         if (oi.TryGetProperty("height", out var oh)) h = oh.GetInt32();
                     }
 
-                    media.Add(new XMedia { Id = mid, Type = type, Url = url, Width = w, Height = h });
+                    media.Add(new XMedia
+                    {
+                        Id = mid, Type = type, Url = url,
+                        PreviewUrl = ThumbnailUrl(thumbRaw),
+                        Width = w, Height = h,
+                    });
                 }
             }
 
@@ -230,6 +258,155 @@ public static class XApi
             };
         }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// 从「一个可能装着推文的节点」里取推文并加进结果。
+    ///
+    /// 兼容三种形态（Flutter 版同样都要认，否则一条媒体都解析不出来）：
+    ///   ① entry.content.itemContent.tweet_results.result（单条 entry）
+    ///   ② module.items[].item.itemContent.tweet_results.result（媒体推文默认包在 module 里）
+    ///   ③ 节点本身就是 itemContent / tweet_results
+    /// 另外 TweetWithVisibilityResults 是 X 给「可见性受限推文」加的包装层，要剥掉。
+    /// </summary>
+    private static void TakeTweet(JsonElement node, List<XPost> posts)
+    {
+        if (node.ValueKind != JsonValueKind.Object) return;
+
+        if (!TryDig(node, out var tweet, "itemContent", "tweet_results", "result") &&
+            !TryDig(node, out tweet, "tweet_results", "result"))
+        {
+            // ②：module item 的形式是 { item: { itemContent: … } }
+            if (!TryDig(node, out var item, "item") ||
+                !TryDig(item, out tweet, "itemContent", "tweet_results", "result"))
+                return;
+        }
+        if (tweet.ValueKind != JsonValueKind.Object) return;
+
+        if (tweet.TryGetProperty("__typename", out var tn) &&
+            tn.GetString() == "TweetWithVisibilityResults" &&
+            tweet.TryGetProperty("tweet", out var inner) &&
+            inner.ValueKind == JsonValueKind.Object)
+        {
+            tweet = inner;
+        }
+
+        var post = ParseTweet(tweet);
+        if (post is not null) posts.Add(post);
+    }
+
+    /// <summary>
+    /// 缩略图 URL：X 的图片直链靠 name 参数取尺寸（small / medium / large / orig）。
+    /// 非 pbs.twimg.com 的地址原样返回（视频封面也是 pbs 上的图，规则相同）。
+    /// </summary>
+    public static string ThumbnailUrl(string? url, string size = "small")
+    {
+        if (string.IsNullOrWhiteSpace(url)) return "";
+        var u = url.Replace("http://", "https://");
+        if (!u.Contains("pbs.twimg.com")) return u;
+        if (Regex.IsMatch(u, "[?&]name=[^&]+"))
+            return Regex.Replace(u, "([?&])name=[^&]+", "$1name=" + size);
+        return u + (u.Contains((char)63) ? "&" : "?") + "name=" + size;
+    }
+
+    /// <summary>
+    /// REST v1.1 `statuses/user_timeline.json` 的解析（GraphQL 不可用时的降级路径）。
+    ///
+    /// v1.1 的结构与 GraphQL 完全不同：数组根、媒体在 extended_entities.media[]、
+    /// 视频地址在 video_info.variants。**不要**拿它去喂 ParseTimeline。
+    /// </summary>
+    public static XTimelinePage ParseTimelineV11(JsonElement root)
+    {
+        var posts = new List<XPost>();
+        if (root.ValueKind != JsonValueKind.Array) return new XTimelinePage();
+
+        foreach (var t in root.EnumerateArray())
+        {
+            try
+            {
+                if (t.ValueKind != JsonValueKind.Object) continue;
+                var id = t.TryGetProperty("id_str", out var rid) ? rid.GetString() ?? "" : "";
+                if (string.IsNullOrEmpty(id)) continue;
+
+                var text = "";
+                if (t.TryGetProperty("full_text", out var ft)) text = ft.GetString() ?? "";
+                else if (t.TryGetProperty("text", out var tx)) text = tx.GetString() ?? "";
+                var createdAt = t.TryGetProperty("created_at", out var ca)
+                    ? ParseTwitterTime(ca.GetString()) : null;
+
+                var userId = ""; var userName = ""; var screenName = "";
+                if (TryDig(t, out var user, "user"))
+                {
+                    userId = user.TryGetProperty("id_str", out var uid) ? uid.GetString() ?? "" : "";
+                    userName = user.TryGetProperty("name", out var un) ? un.GetString() ?? "" : "";
+                    screenName = user.TryGetProperty("screen_name", out var sn) ? sn.GetString() ?? "" : "";
+                }
+
+                var media = new List<XMedia>();
+                var hasMedia = TryDig(t, out var arr, "extended_entities", "media") ||
+                               TryDig(t, out arr, "entities", "media");
+                if (hasMedia && arr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var m in arr.EnumerateArray())
+                    {
+                        if (m.ValueKind != JsonValueKind.Object) continue;
+                        var mid = m.TryGetProperty("id_str", out var mId) ? mId.GetString() ?? "" : "";
+                        var type = m.TryGetProperty("type", out var mt) ? mt.GetString() ?? "photo" : "photo";
+                        var thumb = m.TryGetProperty("media_url_https", out var mu) ? mu.GetString() ?? "" : "";
+
+                        string url;
+                        if (type is "video" or "animated_gif")
+                        {
+                            var best = default(JsonElement);
+                            if (TryDig(m, out var variants, "video_info", "variants") &&
+                                variants.ValueKind == JsonValueKind.Array)
+                            {
+                                best = variants.EnumerateArray()
+                                    .Where(v => v.TryGetProperty("content_type", out var ctv) &&
+                                                (ctv.GetString() ?? "").Contains("mp4"))
+                                    .OrderByDescending(v => v.TryGetProperty("bitrate", out var br) ? br.GetInt32() : 0)
+                                    .FirstOrDefault();
+                            }
+                            url = best.ValueKind == JsonValueKind.Object &&
+                                  best.TryGetProperty("url", out var bu) ? bu.GetString() ?? "" : "";
+                            type = type == "animated_gif" ? "gif" : "video";
+                        }
+                        else
+                        {
+                            url = NormalizeImageUrl(thumb);
+                        }
+                        if (string.IsNullOrEmpty(url)) continue;
+
+                        int? w = null; int? h = null;
+                        if (TryDig(m, out var size, "sizes", "large"))
+                        {
+                            if (size.TryGetProperty("w", out var ww)) w = ww.GetInt32();
+                            if (size.TryGetProperty("h", out var hh)) h = hh.GetInt32();
+                        }
+
+                        media.Add(new XMedia
+                        {
+                            Id = mid, Type = type, Url = url,
+                            PreviewUrl = ThumbnailUrl(thumb),
+                            Width = w, Height = h,
+                        });
+                    }
+                }
+
+                posts.Add(new XPost
+                {
+                    Id = id, CreatedAt = createdAt, Text = text,
+                    UserId = userId, UserName = userName, UserScreenName = screenName,
+                    Media = media,
+                });
+            }
+            catch
+            {
+                // 单条坏数据不拖垮整页
+            }
+        }
+
+        return new XTimelinePage { Posts = posts, NextCursor = null };
     }
 
     /// <summary>逐层下钻取子节点，任一层缺失返回 false（不抛）。</summary>
