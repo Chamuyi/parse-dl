@@ -16,6 +16,14 @@ public static class SelfTestSuite
         sb.AppendLine(FileNameTemplateSelfTest.Run());
         sb.AppendLine("===== B 站链接解析 =====");
         sb.AppendLine(Bili.BiliLinkSelfTest.Run());
+        sb.AppendLine("===== B 站 wbi 签名 =====");
+        sb.AppendLine(Bili.BiliWbiSelfTest.Run());
+        sb.AppendLine("===== B 站配置（档位映射） =====");
+        sb.AppendLine(Bili.BiliConfigSelfTest.Run());
+        sb.AppendLine("===== B 站选流决策 =====");
+        sb.AppendLine(Bili.BiliDownloadPlanSelfTest.Run());
+        sb.AppendLine("===== B 站附加文件契约 =====");
+        sb.AppendLine(Bili.BiliAdditionalSelfTest.Run());
         sb.AppendLine("===== X 时间与媒体解析 =====");
         sb.AppendLine(X.XApiSelfTest.Run());
         sb.AppendLine("===== 抖音解析 =====");

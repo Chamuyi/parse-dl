@@ -21,12 +21,19 @@ public sealed record BiliDanmaku(double TimeSec, int Mode, int FontSize, long Co
 /// </summary>
 public static class BiliDanmakuService
 {
-    /// <summary>取一段弹幕（protobuf 原始字节）。段不存在时返回空数组，不报错。</summary>
+    /// <summary>
+    /// 取一段弹幕（protobuf 原始字节）。段不存在时返回空数组，不报错。
+    /// **走 wbi 签名**：未签名的 seg.so 会被风控（表现为 code=-403 或 HTML 页）。
+    /// </summary>
     public static async Task<byte[]> FetchSegmentAsync(
         BiliApi api, long cid, int segmentIndex, CancellationToken ct = default)
     {
-        var path = $"/x/v2/dm/wbi/web/seg.so?type=1&oid={cid}&segment_index={segmentIndex}";
-        return await api.GetBytesAsync(path, ct);
+        return await api.GetSignedBytesAsync("/x/v2/dm/wbi/web/seg.so", new Dictionary<string, string?>
+        {
+            ["type"] = "1",
+            ["oid"] = cid.ToString(),
+            ["segment_index"] = segmentIndex.ToString(),
+        }, ct);
     }
 
     /// <summary>拉全部弹幕。段数未知时一直拉到返回空为止（上限防死循环）。</summary>

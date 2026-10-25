@@ -34,14 +34,10 @@ public sealed partial class ParsePage : Page
     private TextBox? _input;
     private TextBlock? _status;
     private StackPanel? _resultPanel;
-    private ComboBox? _qualityBox;
     private Button? _downloadBtn;
     private BiliVideoInfo? _biliInfo;
     private BiliPlayInfo? _biliPlay;
     private BiliApi? _biliApi;
-    private BiliListApi? _listApi;
-    private List<BiliListItem> _batchItems = new();
-    private StackPanel? _batchPanel;
 
     private sealed record Profile(
         string Title, string Subtitle, string Glyph, string Badge,
@@ -138,8 +134,9 @@ public sealed partial class ParsePage : Page
         {
             notes.Children.Add(Bullet("已支持：BV 号 / 完整链接 / b23.tv 短链，解析稿件信息"));
             notes.Children.Add(Bullet("已支持：列出全部清晰度与音频档位，选中后可入队下载"));
-            notes.Children.Add(Bullet("未登录只能取 480P；1080P 及以上需要登录（登录功能待接）"));
-            notes.Children.Add(Bullet("未支持：合集 / 系列 / 收藏夹批量（接口已实现，界面待接）"));
+            notes.Children.Add(Bullet("未登录只能取 480P；1080P 及以上需要登录（到「B 站设置」页扫码）"));
+            notes.Children.Add(Bullet("下载完成后自动把视频流与音频流合并成成品 mp4（容器与开关在 B 站设置页）"));
+            notes.Children.Add(Bullet("合集 / 系列 / 收藏夹 / UP 主投稿 → 到「批量下载」页勾选批量入队"));
         }
         else if (_kind == ParseKind.Douyin)
         {
@@ -176,13 +173,28 @@ public sealed partial class ParsePage : Page
         if (ok) _input.Text = "";
     }
 
+
+    // ── B 站解析 ─────────────────────────────────────────────
+
+    /// <summary>
+    /// 解析一条 B 站链接。
+    ///
+    /// 修 bug（2026-10-25）三处：
+    ///  1. av 号被拒：原实现直接返回「当前只支持 BV 号解析（av 号待接）」，
+    ///     而 BiliLink 明明已经解析出了 Aid。现在 aid 也能解析（view 接口支持 aid）；
+    ///  2. 合集 / 系列 / 收藏夹 / UP 主空间被塞进本页：原实现自己拉列表、自己
+    ///     批量入队，与「批量下载」页重复且缺省选与节流。现在统一导到批量下载页；
+    ///  3. 链接里有 p 参数（分P）时被忽略：原实现永远取第 0 个分P。
+    ///     现在按链接里的 p 预选对应分P。
+    /// </summary>
     private async Task ParseBiliAsync()
     {
         if (_input is null || _status is null || _resultPanel is null) return;
         var raw = _input.Text?.Trim() ?? "";
         _status.Text = "正在解析…";
         _resultPanel.Children.Clear();
-        _biliInfo = null; _biliPlay = null;
+        _biliInfo = null;
+        _biliPlay = null;
 
         var target = raw;
         if (BiliLink.IsShortLink(raw))
@@ -199,33 +211,30 @@ public sealed partial class ParsePage : Page
         var refInfo = BiliLink.Parse(target);
         if (refInfo is null)
         {
-            _status.Text = "认不出这条链接。支持 BV 号、完整视频链接、b23.tv 短链、合集/系列/收藏夹/UP 主空间。";
+            _status.Text = "认不出这条链接。支持 BV 号 / av 号 / 完整视频链接 / b23.tv 短链；" +
+                           "合集、系列、收藏夹、UP 主空间请到「批量下载」页。";
             return;
         }
 
-        // 列表链接走批量流程
         if (refInfo.IsList || refInfo.Mid is not null)
         {
-            await LoadBatchListAsync(refInfo);
+            _status.Text = "这是列表类链接（合集 / 系列 / 收藏夹 / UP 主空间）。" +
+                           "请到左侧「B 站下载 → 批量下载」页，那里可以勾选并批量入队。";
             return;
         }
 
         if (!refInfo.IsVideo)
         {
-            _status.Text = "认不出这条链接。支持 BV 号、完整视频链接、b23.tv 短链、合集/系列/收藏夹/UP 主空间。";
+            _status.Text = "认不出这条链接。支持 BV 号 / av 号 / 完整视频链接 / b23.tv 短链。";
             return;
         }
 
         try
         {
-            _biliApi = new BiliApi(AppSettings.Instance.ForModule("bili").Cookie);
-            if (string.IsNullOrEmpty(refInfo.Bvid))
-            {
-                _status.Text = "当前只支持 BV 号解析（av 号待接）";
-                return;
-            }
+            Cfg.Load();
+            _biliApi = new BiliApi(Cfg.Cookie);
 
-            _biliInfo = await _biliApi.GetVideoInfoAsync(refInfo.Bvid);
+            _biliInfo = await _biliApi.GetVideoInfoAsync(refInfo.Bvid, refInfo.Aid);
             var info = _biliInfo;
 
             _resultPanel.Children.Add(new TextBlock
@@ -235,33 +244,70 @@ public sealed partial class ParsePage : Page
             });
             _resultPanel.Children.Add(new TextBlock
             {
-                Text = "UP：" + info.OwnerName + "　分P：" + info.Pages.Count
-                       + "　时长：" + FormatDur(info.DurationSec),
-                FontSize = 12, Opacity = 0.7,
+                Text = "UP：" + info.OwnerName + "　分P：" + info.Pages.Count +
+                       "　时长：" + FormatDur(info.DurationSec) +
+                       "　" + (Cfg.IsLoggedIn ? "已登录" : "未登录（最高只能取 480P）"),
+                FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap,
             });
 
+            // 分P 选择：链接里带 ?p=N 时预选第 N 个（1 基 → 0 基）
+            var initialPage = 0;
+            if (refInfo.PartIndex is int part && part >= 1 && part <= info.Pages.Count)
+                initialPage = part - 1;
+
+            ComboBox? pageBox = null;
             if (info.Pages.Count > 1)
             {
-                var pageBox = new ComboBox { MinWidth = 340, HorizontalAlignment = HorizontalAlignment.Left };
+                pageBox = new ComboBox { MinWidth = 420, HorizontalAlignment = HorizontalAlignment.Left };
                 foreach (var pg in info.Pages) pageBox.Items.Add("P" + pg.Page + "　" + pg.Title);
-                pageBox.SelectedIndex = 0;
+                pageBox.SelectedIndex = initialPage;
                 _resultPanel.Children.Add(new TextBlock { Text = "选择分 P", FontSize = 12, Opacity = 0.6 });
                 _resultPanel.Children.Add(pageBox);
-                pageBox.SelectionChanged += async (_, _) =>
-                {
-                    if (_biliApi is not null) await LoadStreamsAsync(_biliApi, info, pageBox.SelectedIndex);
-                };
             }
+
+            // 画质上限：与 Flutter 版一致 —— 这里选的是**上限**，实际档位由账号权限决定
+            var qualityRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+            qualityRow.Children.Add(new TextBlock
+            {
+                Text = "画质上限", FontSize = 12, Opacity = 0.7,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            var qualityBox = new ComboBox { MinWidth = 200 };
+            var qualityValues = Enum.GetValues<BiliQuality>();
+            foreach (var q in qualityValues) qualityBox.Items.Add(BiliConfig.LabelOf(q));
+            qualityBox.SelectedIndex = Array.IndexOf(qualityValues, Cfg.Quality);
+            if (qualityBox.SelectedIndex < 0) qualityBox.SelectedIndex = 0;
+            qualityRow.Children.Add(qualityBox);
+            _resultPanel.Children.Add(qualityRow);
 
             _downloadBtn = new Button
             {
-                Content = "下载选中清晰度", MinWidth = 140, IsEnabled = false,
+                Content = "下载选中清晰度", MinWidth = 150, IsEnabled = false,
                 HorizontalAlignment = HorizontalAlignment.Left,
             };
             _downloadBtn.Click += async (_, _) => await EnqueueSelectedAsync();
             _resultPanel.Children.Add(_downloadBtn);
 
-            await LoadStreamsAsync(_biliApi, info, 0);
+            _streamPageIndex = initialPage;
+            if (pageBox is not null)
+            {
+                pageBox.SelectionChanged += async (_, _) =>
+                {
+                    if (_biliApi is not null && pageBox.SelectedIndex >= 0)
+                        await LoadStreamsAsync(_biliApi, info, pageBox.SelectedIndex);
+                };
+            }
+            qualityBox.SelectionChanged += async (_, _) =>
+            {
+                if (qualityBox.SelectedIndex >= 0)
+                {
+                    Cfg.Quality = qualityValues[qualityBox.SelectedIndex];
+                    Cfg.Save();
+                }
+                if (_biliApi is not null) await LoadStreamsAsync(_biliApi, info, _streamPageIndex);
+            };
+
+            await LoadStreamsAsync(_biliApi, info, initialPage);
             _status.Text = "解析成功";
         }
         catch (Exception ex)
@@ -270,10 +316,21 @@ public sealed partial class ParsePage : Page
         }
     }
 
+    /// <summary>当前选中的分P 下标（0 基）—— 画质上限改了就按它重取。</summary>
+    private int _streamPageIndex;
+
+    /// <summary>
+    /// 取某分P 的播放地址并按设置选流。
+    ///
+    /// 必须如实报告实际拿到的档位：用户选了 1080P60 但只拿到 1080P 是正常结果
+    /// （B 站按账号权限裁），瞒着他说「已按 1080P60 下载」就是说谎。
+    /// </summary>
     private async Task LoadStreamsAsync(BiliApi api, BiliVideoInfo info, int pageIndex)
     {
         if (_status is null || _resultPanel is null) return;
         if (pageIndex < 0 || pageIndex >= info.Pages.Count) return;
+        _streamPageIndex = pageIndex;
+
         var page = info.Pages[pageIndex];
         if (page.Cid is not string cidStr || !long.TryParse(cidStr, out var cid))
         {
@@ -283,31 +340,75 @@ public sealed partial class ParsePage : Page
 
         try
         {
-            _biliPlay = await api.GetPlayInfoAsync(info.Bvid, cid);
+            _biliPlay = await api.GetPlayInfoAsync(info.Bvid, cid, BiliConfig.QnOf(Cfg.Quality), info.Aid);
             var play = _biliPlay;
+            var pair = BiliDownloadPlan.Plan(play, Cfg.Quality, Cfg.Codec);
 
-            _qualityBox = new ComboBox { MinWidth = 380, HorizontalAlignment = HorizontalAlignment.Left };
-            foreach (var v in play.Videos)
+            // 清掉上一次的流信息块 —— 分P 或上限变化后必须重画，
+            // 否则每切一次分P 就往上叠一块（原实现叠了满屏的清晰度列表）。
+            for (var i = _resultPanel.Children.Count - 1; i >= 0; i--)
             {
-                var label = v.QualityLabel + (v.Codec.Length > 0 ? " / " + v.Codec : "");
-                _qualityBox.Items.Add(label + "　" + FormatSize(v.SizeBytes));
+                if (_resultPanel.Children[i] is FrameworkElement fe && fe.Tag is string tag &&
+                    tag == "stream-info")
+                    _resultPanel.Children.RemoveAt(i);
             }
-            if (play.Videos.Count > 0) _qualityBox.SelectedIndex = 0;
 
-            _resultPanel.Children.Add(new TextBlock
+            var box = new StackPanel { Spacing = 6, Tag = "stream-info" };
+
+            if (!pair.Usable)
             {
-                Text = "视频清晰度（" + play.Videos.Count + " 条）",
-                FontSize = 12, Opacity = 0.6,
-            });
-            _resultPanel.Children.Add(_qualityBox);
-            _resultPanel.Children.Add(new TextBlock
+                box.Children.Add(new TextBlock
+                {
+                    Text = pair.Message ?? "取不到可下载的流",
+                    FontSize = 13, TextWrapping = TextWrapping.Wrap,
+                    Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                        Windows.UI.Color.FromArgb(255, 214, 90, 90)),
+                });
+            }
+            else
             {
-                Text = play.Audios.Count > 0
-                    ? ("音频档位：" + string.Join(" / ", play.Audios.Select(a => a.QualityLabel)))
-                    : "无独立音频流",
-                FontSize = 12, Opacity = 0.6, TextWrapping = TextWrapping.Wrap,
-            });
-            if (_downloadBtn is not null) _downloadBtn.IsEnabled = play.Videos.Count > 0;
+                var actualLabel = play.Videos
+                    .FirstOrDefault(v => v.QualityId == pair.VideoQn)?.QualityLabel ?? ("Q" + pair.VideoQn);
+                var capLabel = BiliConfig.LabelOf(Cfg.Quality);
+                var degraded = Cfg.Quality != BiliQuality.Highest &&
+                               !string.Equals(actualLabel, capLabel, StringComparison.OrdinalIgnoreCase);
+                box.Children.Add(new TextBlock
+                {
+                    Text = "实际档位：" + actualLabel +
+                           (pair.VideoCodec.Length > 0 ? " / " + pair.VideoCodec : "") +
+                           (pair.Video is not null ? "　" + FormatSize(pair.Video.SizeBytes) : "") +
+                           (degraded ? "（上限 " + capLabel + " 没取到，B 站按账号权限只给到这一档）" : ""),
+                    FontSize = 13, TextWrapping = TextWrapping.Wrap,
+                });
+                box.Children.Add(new TextBlock
+                {
+                    Text = pair.Audio is not null
+                        ? ("音频：" + pair.Audio.QualityLabel + "　" + FormatSize(pair.Audio.SizeBytes) +
+                           (pair.NeedsMerge
+                               ? "　→ 下载完成后自动合并成 " + BiliConfig.IdOf(Cfg.Container).ToUpperInvariant()
+                               : ""))
+                        : "音频：无独立音轨（这个文件本身就是完整成品，不需要合并）",
+                    FontSize = 12, Opacity = 0.65, TextWrapping = TextWrapping.Wrap,
+                });
+                box.Children.Add(new TextBlock
+                {
+                    Text = "候选：" + string.Join(" / ", play.Videos.Select(v =>
+                        v.QualityLabel + (v.Codec.Length > 0 ? "-" + v.Codec : ""))),
+                    FontSize = 11, Opacity = 0.5, TextWrapping = TextWrapping.Wrap,
+                });
+                if (!Cfg.MergeAfterDownload && pair.NeedsMerge)
+                {
+                    box.Children.Add(new TextBlock
+                    {
+                        Text = "提示：自动合并当前是关的，两条流下完不会自动合成品。" +
+                               "可在 B 站设置页打开，或在那里点「扫描并合并待处理」。",
+                        FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap,
+                    });
+                }
+            }
+
+            _resultPanel.Children.Add(box);
+            if (_downloadBtn is not null) _downloadBtn.IsEnabled = pair.Usable;
         }
         catch (Exception ex)
         {
@@ -315,265 +416,119 @@ public sealed partial class ParsePage : Page
         }
     }
 
+    /// <summary>
+    /// 入队选中清晰度。
+    ///
+    /// 修 bug（2026-10-25）四处：
+    ///  1. 两条流落成同名的 .mp4 / .m4a：原实现视频写 name.mp4、音频写 name.m4a，
+    ///     而自动合并靠「同一 base 名配对」，同 base 又同名会让产物覆盖视频源。
+    ///     现在按契约落成 name.video.m4s / name.audio.m4s；
+    ///  2. 音频只取 Audios[0]：那是按 id 排的（30216 的 id 更小却更差）。
+    ///     现在走 BiliDownloadPlan，按码率取最高；
+    ///  3. 没有音频流时照样只下视频：DASH 的视频流单独不是可播放文件，
+    ///     下一个 0 秒空壳比明确报错更坏。现在判不可用并如实说明；
+    ///  4. 附加文件在这里同步做完：弹幕/字幕/封面/章节/元数据现在走
+    ///     BiliAdditionalRunner，失败进「没拿到」清单而不是静默吞。
+    /// </summary>
     private async Task EnqueueSelectedAsync()
     {
-        if (_biliPlay is null || _qualityBox is null || _status is null || _biliInfo is null) return;
-        var idx = _qualityBox.SelectedIndex;
-        if (idx < 0 || idx >= _biliPlay.Videos.Count) return;
+        if (_biliPlay is null || _status is null || _biliInfo is null) return;
+        var play = _biliPlay;
+        var info = _biliInfo;
+        var pageIndex = _streamPageIndex;
+        var pageTitle = pageIndex >= 0 && pageIndex < info.Pages.Count ? info.Pages[pageIndex].Title : info.Title;
+        var pageNo = pageIndex >= 0 && pageIndex < info.Pages.Count ? info.Pages[pageIndex].Page : 1;
 
-        var video = _biliPlay.Videos[idx];
-        var name = MakeFileName();
-
-        var (ok, msg) = await DownloadStore.Instance.AddAsync(video.Url, "B 站", null, name + ".mp4");
-        _status.Text = ok ? ("视频已入队（" + video.QualityLabel + "）") : ("视频入队失败：" + msg);
-
-        // 音视频分离的稿件必须单独下音频，否则下下来没声音
-        if (ok && _biliPlay.Audios.Count > 0)
+        var pair = BiliDownloadPlan.Plan(play, Cfg.Quality, Cfg.Codec);
+        if (!pair.Usable)
         {
-            var audio = _biliPlay.Audios[0];
-            var (ok2, msg2) = await DownloadStore.Instance.AddAsync(audio.Url, "B 站（音频）", null, name + ".m4a");
-            _status.Text += ok2 ? ("；音频已入队（" + audio.QualityLabel + "）") : ("；音频入队失败：" + msg2);
+            _status.Text = "不能入队：" + (pair.Message ?? "没取到可下载的流");
+            return;
         }
-        // 附加内容：弹幕 / 字幕。它们不是 aria2 任务（是接口拉回来直接写文件），
-        // 所以在这里同步做完，失败只记状态不阻断主下载。
+
+        var saveDir = Cfg.ResolvedSaveDir;
+        var outBase = MakeOutBase(info, pageTitle, pageNo, pair);
+        _status.Text = "正在入队…";
+
+        // ── 主产物：视频流（durl 退化路径直接一个成品文件）───────────────
+        var videoName = pair.IsDash
+            ? BiliDownloadPlan.VideoStreamName(outBase)
+            : BiliDownloadPlan.MergedName(outBase, Cfg.Container);
+        var (ok, msg) = await DownloadStore.Instance.AddAsync(pair.Video!.Url, "B 站", saveDir, videoName);
+        if (!ok) { _status.Text = "视频入队失败：" + msg; return; }
+
+        var notes = new List<string> { "视频已入队（" + pair.Video.QualityLabel + "）" };
+
+        // ── 音频流：DASH 必须两条一起下，否则下下来没声音 ──────────────
+        if (pair.IsDash && pair.Audio is not null)
+        {
+            var (ok2, msg2) = await DownloadStore.Instance.AddAsync(
+                pair.Audio.Url, "B 站（音频）", saveDir, BiliDownloadPlan.AudioStreamName(outBase));
+            if (ok2) notes.Add("音频已入队（" + pair.Audio.QualityLabel + "）");
+            else notes.Add("音频入队失败：" + msg2 + "（只下视频会没有声音）");
+        }
+
+        // ── 附加文件：不走 aria2，接口拉回来直接写盘 ──────────────────
         try
         {
-            var settings = AppSettings.Instance.ForModule("bili");
-            var saveDir = Aria2Engine.DefaultDir();
-            var baseName = name;
-
-            if (settings.DownloadDanmaku)
-            {
-                var dms = await BiliDanmakuService.FetchAllAsync(
-                    new BiliApi(settings.Cookie), long.Parse(_biliPlay.Cid.ToString()));
-                if (dms.Count > 0)
-                {
-                    var xml = BiliDanmakuService.ToXml(dms, _biliPlay.Cid);
-                    var path = System.IO.Path.Combine(saveDir, baseName + ".danmaku.xml");
-                    System.IO.File.WriteAllText(path, xml, System.Text.Encoding.UTF8);
-                    _status.Text += "；弹幕 " + dms.Count + " 条已保存";
-                }
-                else
-                {
-                    _status.Text += "；弹幕为空或需要登录";
-                }
-            }
-
-            // 字幕：需要登录才有，拿不到就静默跳过（不是错误）
-            try
-            {
-                var subs = await BiliSubtitleService.ListAsync(
-                    new BiliApi(settings.Cookie), _biliInfo.Bvid, _biliPlay.Cid);
-                if (subs.Count > 0)
-                {
-                    var saved = 0;
-                    foreach (var (lang, label, url) in subs)
-                    {
-                        var sub = await BiliSubtitleService.FetchAsync(url, lang, label);
-                        if (sub.Cues.Count == 0) continue;
-                        var path = System.IO.Path.Combine(saveDir, baseName + "." + lang + ".srt");
-                        System.IO.File.WriteAllText(path, BiliSubtitleService.ToSrt(sub.Cues),
-                            System.Text.Encoding.UTF8);
-                        saved++;
-                    }
-                    if (saved > 0) _status.Text += "；字幕 " + saved + " 份已保存";
-                }
-            }
-            catch
-            {
-                // 字幕是附加项，失败不影响下载
-            }
+            var outcome = await BiliAdditionalRunner.ProduceAsync(
+                new BiliApi(Cfg.Cookie), Cfg, saveDir, outBase, info, play.Cid,
+                pageTitle, pageNo);
+            if (outcome.Written.Count > 0)
+                notes.Add("附加文件 " + outcome.Written.Count + " 个：" + string.Join("、", outcome.Written));
+            if (outcome.Missing.Count > 0)
+                notes.Add("没拿到：" + string.Join("、", outcome.Missing));
         }
         catch (Exception ex)
         {
-            _status.Text += "；附加内容失败：" + ex.Message;
+            notes.Add("附加文件失败：" + ex.Message);
         }
 
-        _status.Text += "。可到下载管理查看进度。";
+        if (pair.NeedsMerge)
+        {
+            notes.Add(Cfg.MergeAfterDownload
+                ? "下载完成后会自动合并为 " + outBase + "." + BiliConfig.IdOf(Cfg.Container)
+                : "已关闭自动合并，到 B 站设置页可手动补跑");
+        }
+
+        _status.Text = string.Join("；", notes) + "。可到下载管理查看进度。";
     }
 
     /// <summary>
-    /// 列表批量下载 —— 合集 / 系列 / 收藏夹 / UP 主投稿。
+    /// 按模板算 base 名（不含扩展名）—— 两条流与合并产物共用它，配对全靠这个名字。
     ///
-    /// 为什么单独一条路径：列表里每个稿件的播放地址都要**单独请求** playurl，
-    /// 不能靠一次请求拿全，所以这里必须逐条、带节流（否则触发风控）。
+    /// 模板里可能带 %EXT%（渲染成 mp4），base 名必须把这段尾巴剥掉，
+    /// 否则会落成「冬天.mp4.video.m4s」，配对扫描就认不出来了。
     /// </summary>
-    private async Task LoadBatchListAsync(BiliRef refInfo)
+    private string MakeOutBase(BiliVideoInfo info, string pageTitle, int pageNo, BiliStreamPair pair)
     {
-        if (_status is null || _resultPanel is null) return;
-        _status.Text = "正在加载列表…";
-
-        try
-        {
-            _listApi ??= new BiliListApi(new BiliApi(AppSettings.Instance.ForModule("bili").Cookie));
-
-            BiliListPage page;
-            var kind = "";
-            if (refInfo.SeasonId is long seasonId && refInfo.Mid is long mid1)
-            {
-                page = await _listApi.GetSeasonArchivesAsync(mid1, seasonId);
-                kind = "合集";
-            }
-            else if (refInfo.SeriesId is long seriesId && refInfo.Mid is long mid2)
-            {
-                page = await _listApi.GetSeriesArchivesAsync(mid2, seriesId);
-                kind = "系列";
-            }
-            else if (refInfo.FavId is long favId)
-            {
-                page = await _listApi.GetFavAsync(favId);
-                kind = "收藏夹";
-            }
-            else if (refInfo.Mid is long mid3)
-            {
-                page = await _listApi.GetSpaceVideosAsync(mid3);
-                kind = "UP 主投稿";
-            }
-            else
-            {
-                _status.Text = "列表链接里缺少必要参数（合集要 mid+season_id，系列要 mid+series_id）";
-                return;
-            }
-
-            _batchItems = page.Items.ToList();
-            if (_batchItems.Count == 0)
-            {
-                _status.Text = "列表" + kind + "是空的（或该收藏夹不公开）";
-                return;
-            }
-
-            _resultPanel.Children.Add(new TextBlock
-            {
-                Text = kind + "：共 " + _batchItems.Count + " 个稿件"
-                       + (page.Total > _batchItems.Count ? "（接口报告总数 " + page.Total + "，本页 " + _batchItems.Count + "）" : ""),
-                FontSize = 15, FontWeight = FontWeights.SemiBold,
-            });
-
-            _batchPanel = new StackPanel { Spacing = 4 };
-            foreach (var it in _batchItems)
-            {
-                var cb = new CheckBox
-                {
-                    Content = it.Title + "　" + FormatDur(it.DurationSec),
-                    IsChecked = true,
-                    FontSize = 13,
-                };
-                _batchPanel.Children.Add(cb);
-            }
-            _resultPanel.Children.Add(_batchPanel);
-
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            var selectAll = new Button { Content = "全选", MinWidth = 80 };
-            selectAll.Click += (_, _) =>
-            {
-                foreach (var c in _batchPanel!.Children.OfType<CheckBox>()) c.IsChecked = true;
-            };
-            var selectNone = new Button { Content = "全不选", MinWidth = 80 };
-            selectNone.Click += (_, _) =>
-            {
-                foreach (var c in _batchPanel!.Children.OfType<CheckBox>()) c.IsChecked = false;
-            };
-            var batchBtn = new Button
-            {
-                Content = "批量下载选中", MinWidth = 130,
-                Style = (Style)Application.Current.Resources["AccentButtonStyle"],
-            };
-            batchBtn.Click += async (_, _) => await EnqueueBatchAsync(batchBtn);
-            row.Children.Add(selectAll);
-            row.Children.Add(selectNone);
-            row.Children.Add(batchBtn);
-            _resultPanel.Children.Add(row);
-
-            _status.Text = "列表加载成功。默认全选，点「批量下载选中」逐条入队。";
-        }
-        catch (Exception ex)
-        {
-            _status.Text = "加载列表失败：" + ex.Message;
-        }
-    }
-
-    /// <summary>
-    /// 批量入队：逐条取播放地址再入队。
-    /// **必须节流** —— 列表里每个稿件都要单独请求 playurl，连着打会被 B 站风控。
-    /// </summary>
-    private async Task EnqueueBatchAsync(Button trigger)
-    {
-        if (_batchPanel is null || _status is null || _listApi is null) return;
-        var boxes = _batchPanel.Children.OfType<CheckBox>().ToList();
-        var picked = new List<BiliListItem>();
-        for (var i = 0; i < boxes.Count && i < _batchItems.Count; i++)
-            if (boxes[i].IsChecked == true) picked.Add(_batchItems[i]);
-
-        if (picked.Count == 0) { _status.Text = "没有选中任何稿件"; return; }
-
-        trigger.IsEnabled = false;
-        var interval = Math.Max(300, AppSettings.Instance.ForModule("bili").RequestIntervalMs);
-        var api = new BiliApi(AppSettings.Instance.ForModule("bili").Cookie);
-        var ok = 0; var fail = 0;
-
-        for (var i = 0; i < picked.Count; i++)
-        {
-            var it = picked[i];
-            _status.Text = "批量入队 " + (i + 1) + "/" + picked.Count + "：" + it.Title;
-            try
-            {
-                var info = await api.GetVideoInfoAsync(it.Bvid);
-                if (info.Pages.Count == 0) { fail++; continue; }
-                var cid = info.Pages[0].Cid;
-                if (cid is not string cidStr || !long.TryParse(cidStr, out var cidVal)) { fail++; continue; }
-
-                var play = await api.GetPlayInfoAsync(it.Bvid, cidVal);
-                if (play.Videos.Count == 0) { fail++; continue; }
-
-                var settings = AppSettings.Instance.ForModule("bili");
-                var tpl = string.IsNullOrWhiteSpace(settings.FileNameTemplate)
-                    ? "%BILI_TITLE%-%POST_ID%" : settings.FileNameTemplate;
-                var ctx = new TemplateContext
-                {
-                    PostId = it.Bvid, MediaId = it.Bvid,
-                    UserName = info.OwnerName, BiliTitle = it.Title,
-                };
-                var name = FileNameTemplate.UnicodeFilenamify(FileNameTemplate.Resolve(tpl, ctx));
-                if (string.IsNullOrWhiteSpace(name)) name = it.Bvid;
-
-                var (a, _) = await DownloadStore.Instance.AddAsync(play.Videos[0].Url, "B 站", null, name + ".mp4");
-                if (!a) { fail++; continue; }
-                ok++;
-
-                if (play.Audios.Count > 0)
-                {
-                    await DownloadStore.Instance.AddAsync(play.Audios[0].Url, "B 站（音频）", null, name + ".m4a");
-                }
-            }
-            catch
-            {
-                fail++;
-            }
-
-            if (i < picked.Count - 1) await Task.Delay(interval);
-        }
-
-        _status.Text = "批量入队完成：成功 " + ok + "，失败 " + fail + "。可到下载管理查看进度。";
-        trigger.IsEnabled = true;
-    }
-
-    /// <summary>按模板生成文件名（B 站默认用 标题-BV号）。</summary>
-    private string MakeFileName()
-    {
-        var info = _biliInfo!;
-        var settings = AppSettings.Instance.ForModule("bili");
-        var tpl = string.IsNullOrWhiteSpace(settings.FileNameTemplate)
-            ? "%BILI_TITLE%-%POST_ID%" : settings.FileNameTemplate;
+        var tpl = string.IsNullOrWhiteSpace(Cfg.FileNameTemplate)
+            ? "%BILI_TITLE%-%POST_ID%" : Cfg.FileNameTemplate;
+        var title = string.IsNullOrWhiteSpace(pageTitle) || info.Pages.Count <= 1
+            ? info.Title
+            : (info.Title + "-" + pageTitle);
         var ctx = new TemplateContext
         {
             PostId = info.Bvid,
-            UserName = info.OwnerName,
             MediaId = info.Bvid,
-            BiliTitle = info.Title,
+            UserId = info.OwnerMid.ToString(),
+            UserName = info.OwnerName,
+            UserScreenName = info.OwnerName,
+            BiliTitle = title,
+            BiliPageIndex = pageNo,
+            BiliQuality = BiliApi.QualityNames.TryGetValue(pair.VideoQn, out var ql) ? ql : "",
+            MediaIndex = 1,
+            PostTime = info.PubDateUnix > 0
+                ? DateTimeOffset.FromUnixTimeSeconds(info.PubDateUnix).LocalDateTime
+                : null,
+            Extension = "mp4",
         };
-        var f = FileNameTemplate.UnicodeFilenamify(FileNameTemplate.Resolve(tpl, ctx));
-        return string.IsNullOrWhiteSpace(f) ? info.Bvid : f;
+        var rendered = FileNameTemplate.UnicodeFilenamify(FileNameTemplate.Resolve(tpl, ctx));
+        if (string.IsNullOrWhiteSpace(rendered)) rendered = info.Bvid;
+        return BiliDownloadPlan.BaseNameFromFileName(rendered);
     }
+
+    private BiliConfig Cfg => BiliConfig.Instance;
 
     private static string FormatDur(int sec)
     {
@@ -591,6 +546,7 @@ public sealed partial class ParsePage : Page
         return v.ToString("0.#") + " " + units[i];
     }
 }
+
 
 /// <summary>导航参数：告诉 ParsePage 该显示哪个模块。</summary>
 public sealed record ParseNavArgs(ParseKind Kind, MainWindow Host);
