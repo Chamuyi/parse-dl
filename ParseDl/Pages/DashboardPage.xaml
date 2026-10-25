@@ -111,7 +111,13 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                <!--
+                  VerticalAlignment="Top" 必须写：左栏卡片比右栏（模块状态 + 下载引擎
+                  + 环境）矮，Grid 默认 Stretch 会把左卡拉到与右栏等高，于是「快捷开始」
+                  下方空出一大片 —— 这正是用户报的「留白过大」。
+                -->
+                <Border Grid.Column="0" VerticalAlignment="Top"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="16">
                     <StackPanel Spacing="12">

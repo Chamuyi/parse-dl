@@ -477,6 +477,38 @@ public sealed partial class SettingsPage : Page
             : "设置文件尚未生成 —— 还没有改过任何设置。"));
         panel.Children.Add(SettingRows.Card("设置文件", "settings.json", filePanel));
 
+        // ── 下载台账：清空入口 ──────────────────────────────────
+        // 这个动作原来错放在「X 下载管理」页里（用户 2026-10-24 需求第④条
+        // 明确点名 X 不该有它）。它是**全局**动作 —— 台账跨三个模块共用一份
+        // DownloadLedger，所以入口放在全局设置的数据目录分类下，且必须二次确认。
+        var ledgerPanel = new StackPanel { Spacing = 8 };
+        ledgerPanel.Children.Add(SettingRows.Description(
+            "当前台账共 " + DownloadLedger.Instance.Stats().Count + " 条记录（三个模块共用）。清空只删台账，不动已下载的文件。"));
+
+        var clearLedger = new Button { Content = "清空下载台账", MinWidth = 140 };
+        AutomationProperties.SetName(clearLedger, "ClearLedgerButton");
+        var ledgerStatus = new TextBlock { FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap };
+        clearLedger.Click += async (_, _) =>
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "清空下载台账？",
+                Content = "将删除 " + DownloadLedger.Instance.Stats().Count + " 条台账记录。已下载到磁盘的文件不会被删除；" +
+                          "清空后「跳过已下载」会重新下载这些内容。",
+                PrimaryButtonText = "清空",
+                CloseButtonText = "取消",
+                DefaultButton = ContentDialogButton.Close,
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            var n = DownloadLedger.Instance.Stats().Count;
+            DownloadLedger.Instance.Clear();
+            ledgerStatus.Text = $"已清空 {n} 条台账记录。";
+        };
+        ledgerPanel.Children.Add(clearLedger);
+        ledgerPanel.Children.Add(ledgerStatus);
+        panel.Children.Add(SettingRows.Card("下载台账", "跨模块共用的已下载记录", ledgerPanel));
+
         return panel;
     }
 

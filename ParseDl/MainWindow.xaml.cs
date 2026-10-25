@@ -231,46 +231,51 @@ public sealed partial class MainWindow : Window
                 NavFrame.Navigate(typeof(AboutPage), this);
                 break;
 
-            // X 主页与抖音解析：自动抓取需要内嵌浏览器（公开接口拿不到数据）
+            // X 主页：**不再用 WebView**（用户 2026-10-24 需求第③条）。
+            // 走 Flutter 原项目 homepage_page.dart 的形态：输入用户 → 解析作品
+            // 列表 → 勾选 → 按模板入队。抖音解析仍走 BrowsePage（它确实要靠内嵌
+            // 浏览器做滚动抓取）。
             case "home":
-                NavFrame.Navigate(typeof(BrowsePage), new BrowseNavArgs(BrowseKind.X, this));
+                NavFrame.Navigate(typeof(XHomePage), this);
                 break;
             case "douyin":
-                NavFrame.Navigate(typeof(BrowsePage), new BrowseNavArgs(BrowseKind.Douyin, this));
+                NavFrame.Navigate(typeof(DouyinParsePage), this);
                 break;
             case "bili":
-            case "bili-batch":
                 NavFrame.Navigate(typeof(ParsePage), new ParseNavArgs(ParseKind.Bili, this));
                 break;
+            case "bili-batch":
+                NavFrame.Navigate(typeof(BiliBatchPage), this);
+                break;
 
-            // 三个模块的下载管理页共用 DownloadsPage
+            // 三个模块的下载管理页共用 DownloadsPage，但形态按模块分家
+            // （DownloadFeed 提供各自的 Tab 集合/空态/历史标题/合并开关）。
             case "download-management":
-                NavFrame.Navigate(typeof(DownloadsPage), "X 媒体");
+                NavFrame.Navigate(typeof(DownloadsPage), DownloadModuleKind.X);
                 break;
             case "douyin-downloads":
-                NavFrame.Navigate(typeof(DownloadsPage), "抖音");
+                NavFrame.Navigate(typeof(DownloadsPage), DownloadModuleKind.Douyin);
                 break;
             case "bili-downloads":
-                NavFrame.Navigate(typeof(DownloadsPage), "B 站");
+                NavFrame.Navigate(typeof(DownloadsPage), DownloadModuleKind.Bili);
                 break;
 
-            // 自动执行 / 自动下载 共用 AutoTaskPage
             case "auto-task":
                 NavFrame.Navigate(typeof(AutoTaskPage), "x");
                 break;
             case "douyin-auto":
-                NavFrame.Navigate(typeof(AutoTaskPage), "douyin");
+                NavFrame.Navigate(typeof(DouyinAutoPage), this);
                 break;
 
-            // 三个模块设置页共用 ModuleSettingsPage
+            // 三个模块各有独立设置页（内容量差得远，不能共用）
             case "x-settings":
-                NavFrame.Navigate(typeof(ModuleSettingsPage), ModuleKind.X);
+                NavFrame.Navigate(typeof(XSettingsPage), this);
                 break;
             case "douyin-settings":
-                NavFrame.Navigate(typeof(ModuleSettingsPage), ModuleKind.Douyin);
+                NavFrame.Navigate(typeof(DouyinSettingsPage), this);
                 break;
             case "bili-settings":
-                NavFrame.Navigate(typeof(ModuleSettingsPage), ModuleKind.Bili);
+                NavFrame.Navigate(typeof(BiliSettingsPage), this);
                 break;
 
             default:

@@ -176,6 +176,17 @@ public sealed class DownloadStore
                     {
                         it.Status = t.Status;
                         DownloadLedger.Instance.Record(it);
+
+                        // 完成即触发 B 站音视频自动合并（用户 2026-10-24 需求第⑤条：
+                        // 合并必须自动化，不能让用户再点一次按钮）。
+                        // 只有 B 站那一路是 dash 分离流（.video.m4s + .audio.m4s），
+                        // X/抖音拿到的本来就是整段文件，NotifyFileReadyAsync 内部
+                        // 按落名契约判断，配不上对就立刻返回，不会误合并。
+                        if (t.Status == AriaStatus.Complete && !string.IsNullOrEmpty(it.FileName))
+                        {
+                            var full = System.IO.Path.Combine(it.Dir, it.FileName);
+                            _ = ParseDl.Services.Bili.BiliMergePipeline.Instance.NotifyFileReadyAsync(full);
+                        }
                     }
                 }
             }
