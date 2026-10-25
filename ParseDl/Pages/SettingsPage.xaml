@@ -5,112 +5,32 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,8,24,24">
-        <StackPanel Spacing="16" MaxWidth="1000" HorizontalAlignment="Left">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <!-- 左侧分类栏：固定宽度，与主侧边栏（200）明显区分，不抢主栏的视觉层级 -->
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-            <Grid Margin="0,0,0,8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Border Width="48" Height="48" CornerRadius="8"
-                        Background="{ThemeResource AccentFillColorDefaultBrush}"
-                        VerticalAlignment="Top">
-                    <FontIcon Glyph="&#xE713;" FontSize="22"
-                              Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
-                </Border>
-                <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="2">
-                    <TextBlock Text="全局设置" FontSize="28" FontWeight="SemiBold" />
-                    <TextBlock Text="外观 · 窗口材质 · 明暗" FontSize="14" Opacity="0.7" />
-                </StackPanel>
-            </Grid>
+        <!--
+          左侧分类。
+          用 ListView 而不是 NavigationView：NavigationView 自带一级导航语义（返回键、
+          面包屑、层级标题），而这里是**同一页内的分类**，两层导航语义叠在一起会让人
+          以为「设置」还有下一级。ListView 只有选中态，语义正好。
+        -->
+        <Border Grid.Column="0" Width="196" Margin="16,8,0,16"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8" Padding="6">
+            <ListView x:Name="CategoryList"
+                      SelectionMode="Single"
+                      SelectionChanged="OnCategoryChanged"
+                      Background="Transparent"
+                      BorderThickness="0" />
+        </Border>
 
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16">
-                <StackPanel Spacing="12">
-                    <TextBlock Text="窗口材质" FontSize="16" FontWeight="SemiBold" />
-                    <TextBlock Text="四档全部由 Windows App SDK 官方合成控制器绘制"
-                               FontSize="12" Opacity="0.65" />
-                    <StackPanel x:Name="MaterialPanel" Spacing="8" />
-                    <TextBlock x:Name="MaterialStatus" Text="" FontSize="12" Opacity="0.7" />
-                </StackPanel>
-            </Border>
-
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16">
-                <StackPanel Spacing="12">
-                    <TextBlock Text="主题" FontSize="16" FontWeight="SemiBold" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <RadioButton x:Name="DarkRadio" Content="深色" GroupName="theme"
-                                     Checked="OnThemeChecked" />
-                        <RadioButton x:Name="LightRadio" Content="浅色" GroupName="theme"
-                                     Checked="OnThemeChecked" />
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16">
-                <StackPanel Spacing="12">
-                    <TextBlock Text="下载" FontSize="16" FontWeight="SemiBold" />
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Spacing="2" VerticalAlignment="Center">
-                            <TextBlock Text="默认保存目录" FontSize="14" />
-                            <TextBlock Text="留空则使用 数据目录\downloads" FontSize="12" Opacity="0.6" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                            <TextBox x:Name="SaveDirBox" MinWidth="240" IsReadOnly="True"
-                                     PlaceholderText="未选择（用默认目录）" />
-                            <Button x:Name="PickDirButton" Content="选择文件夹" Click="OnPickFolderClick" />
-                            <Button x:Name="ClearDirButton" Content="清除" Click="OnClearFolderClick" />
-                        </StackPanel>
-                    </Grid>
-                    <TextBlock x:Name="SaveDirStatus" Text="" FontSize="12" Opacity="0.75"
-                               TextWrapping="Wrap" />
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Spacing="2" VerticalAlignment="Center">
-                            <TextBlock Text="并发上限" FontSize="14" />
-                            <TextBlock Text="aria2 同时下载的任务数（1-16）" FontSize="12" Opacity="0.6" />
-                        </StackPanel>
-                        <NumberBox x:Name="MaxConcurrentBox" Grid.Column="1" MinWidth="160"
-                                   Minimum="1" Maximum="16" SpinButtonPlacementMode="Compact"
-                                   ValueChanged="OnMaxConcurrentChanged" />
-                    </Grid>
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Spacing="2" VerticalAlignment="Center">
-                            <TextBlock Text="写运行日志" FontSize="14" />
-                            <TextBlock Text="关掉可减少磁盘写入" FontSize="12" Opacity="0.6" />
-                        </StackPanel>
-                        <ToggleSwitch x:Name="WriteLogsToggle" Grid.Column="1" Toggled="OnWriteLogsToggled" />
-                    </Grid>
-                </StackPanel>
-            </Border>
-
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="数据目录" FontSize="16" FontWeight="SemiBold" />
-                    <TextBlock x:Name="DataDirText" Text="-" FontSize="12"
-                               IsTextSelectionEnabled="True" TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
-
-        </StackPanel>
-    </ScrollViewer>
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="16,8,24,24">
+            <StackPanel x:Name="ContentRoot" Spacing="14" MaxWidth="900" HorizontalAlignment="Left" />
+        </ScrollViewer>
+    </Grid>
 </Page>

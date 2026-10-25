@@ -1,0 +1,877 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using Microsoft.UI.Text;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Navigation;
+using ParseDl.Controls;
+using ParseDl.Services;
+using Windows.ApplicationModel.DataTransfer;
+
+namespace ParseDl.Pages;
+
+/// <summary>
+/// X 下载设置页 —— 对齐 Flutter 版 lib/pages/settings_page.dart 的
+/// `SettingsScope.xDownload` 分支（账号 → 接口缓存 → 下载），
+/// 外加 lib/widgets/account_section.dart 的账号与登录。
+///
+/// ### 分区顺序（与 Flutter 版逐条对应）
+/// 1. 账号 —— 登录状态、auth_token / ct0、智能导入、保存并验证、退出登录
+/// 2. 下载 —— 保存目录、文件夹模板、文件名模板（全部占位符 + 实时预览）、
+///    并发、请求间隔、跳过已下载
+/// 3. 筛选 —— 媒体类型、时间范围
+/// 4. 接口缓存 —— 排障说明（WinUI 版尚未实现 queryId 缓存，如实标注）
+///
+/// 所有改动**立即写盘**（AppSettings.Save），不依赖「保存」按钮 ——
+/// 这是模块设置页既有约定，登录态也不例外。
+/// </summary>
+public sealed partial class XSettingsPage : Page
+{
+    private const string ModuleKey = "x";
+
+    /// <summary>X 公开的 Bearer token（所有 X 客户端共用同一个，非密钥）。</summary>
+    private const string Bearer =
+        "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+
+    private const string DefaultNameTpl =
+        "%POST_TIME% %USER_SCREEN_NAME% %POST_ID%-%MEDIA_INDEX%%EXT%";
+
+    /// <summary>X 侧可用变量（与 Flutter 版 kXVarNames 逐条一致，不含其它平台术语）。</summary>
+    private static readonly (string Name, string Desc)[] XTemplateVars =
+    {
+        ("POST_ID", "推文 ID"),
+        ("POST_TIME", "推文发布时间（加 ,d=1 只取日期）"),
+        ("USER_ID", "用户 ID"),
+        ("USER_NAME", "用户昵称"),
+        ("USER_SCREEN_NAME", "用户名（@ 后面的那串）"),
+        ("MEDIA_ID", "媒体资源 ID"),
+        ("MEDIA_WIDTH", "媒体宽度"),
+        ("MEDIA_HEIGHT", "媒体高度"),
+        ("MEDIA_INDEX", "同一条推文里的第几个媒体"),
+        ("MEDIA_TYPE", "媒体类型（video / image / gif）"),
+        ("CONTENT", "推文正文（加 ,t=32 截断 32 字）"),
+        ("TAGS", "推文标签"),
+        ("EXT", "扩展名（含点）"),
+    };
+
+    private ModuleSettings S => AppSettings.Instance.ForModule(ModuleKey);
+
+    private TextBox _authTokenBox = null!;
+    private TextBox _ct0Box = null!;
+    private TextBlock _loginStatus = null!;
+    private TextBlock _loginHint = null!;
+    private Border _loginBadge = null!;
+    private TextBlock _loginBadgeText = null!;
+    private Button _verifyButton = null!;
+    private Button _logoutButton = null!;
+    private TextBox _dirTplBox = null!;
+    private TextBox _nameTplBox = null!;
+    private TextBlock _previewText = null!;
+    private TextBox _saveDirBox = null!;
+    private TextBlock _saveDirStatus = null!;
+    private bool _applying;
+
+    public XSettingsPage()
+    {
+        InitializeComponent();
+    }
+
+    protected override void OnNavigatedTo(NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        Build();
+    }
+
+    // ── 页面构建 ────────────────────────────────────────────
+
+    private void Build()
+    {
+        Root.Children.Clear();
+        Root.Children.Add(UiKit.PageHeader("X 下载设置", "账号 · 下载 · 接口缓存", "\uE9E9"));
+
+        Root.Children.Add(BuildAccountCard());
+        Root.Children.Add(BuildDownloadCard());
+        Root.Children.Add(BuildFilterCard());
+        Root.Children.Add(BuildCacheCard());
+
+        RefreshLoginVisual();
+        UpdatePreview();
+    }
+
+    // ── ① 账号 ──────────────────────────────────────────────
+
+    private UIElement BuildAccountCard()
+    {
+        var panel = new StackPanel { Spacing = 12 };
+
+        // 登录状态行：左侧标题 + 副题，右侧一枚胶囊徽章（对齐 account_section 的 _StatusRow）
+        var statusGrid = new Grid();
+        statusGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        statusGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var statusTexts = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        statusTexts.Children.Add(new TextBlock { Text = "登录状态", FontSize = 14 });
+        _loginHint = new TextBlock { Text = "尚未登录", FontSize = 12, Opacity = 0.6, TextWrapping = TextWrapping.Wrap };
+        statusTexts.Children.Add(_loginHint);
+        statusGrid.Children.Add(statusTexts);
+
+        _loginBadgeText = new TextBlock { Text = "未登录", FontSize = 12 };
+        _loginBadge = new Border
+        {
+            Background = SettingRows.SubtleFill,
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(10, 4, 10, 4),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = _loginBadgeText,
+        };
+        Grid.SetColumn(_loginBadge, 1);
+        statusGrid.Children.Add(_loginBadge);
+        panel.Children.Add(statusGrid);
+
+        _loginStatus = new TextBlock { Text = "", FontSize = 12, TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
+        panel.Children.Add(_loginStatus);
+
+        // auth_token / ct0 两个必填框
+        _authTokenBox = new TextBox
+        {
+            Text = S.AuthToken,
+            PlaceholderText = "auth_token —— 十六进制字符串（约 40 位）",
+            FontFamily = new FontFamily("Consolas"),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_authTokenBox, "auth_token");
+        _authTokenBox.TextChanged += (_, _) => OnCookieChanged();
+        panel.Children.Add(SettingRows.Row("auth_token", "身份令牌。DevTools → Application → Cookies → x.com → auth_token 的 Value。", _authTokenBox));
+
+        _ct0Box = new TextBox
+        {
+            Text = S.Ct0,
+            PlaceholderText = "ct0 —— 32 位十六进制（CSRF token）",
+            FontFamily = new FontFamily("Consolas"),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_ct0Box, "ct0");
+        _ct0Box.TextChanged += (_, _) => OnCookieChanged();
+        panel.Children.Add(SettingRows.Row("ct0", "CSRF token，必须是 32 位十六进制；X 会校验格式。", _ct0Box));
+
+        // 操作行
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var openButton = new Button { Content = "在浏览器登录" };
+        openButton.Click += async (_, _) => await OpenLoginPageAsync();
+        actions.Children.Add(openButton);
+
+        var importButton = new Button { Content = "智能导入完整 cookie" };
+        importButton.Click += async (_, _) => await ImportFromClipboardAsync();
+        actions.Children.Add(importButton);
+
+        _verifyButton = new Button { Content = "保存并验证", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+        _verifyButton.Click += async (_, _) => await VerifyAsync();
+        actions.Children.Add(_verifyButton);
+
+        _logoutButton = new Button { Content = "退出登录" };
+        _logoutButton.Click += (_, _) => Logout();
+        actions.Children.Add(_logoutButton);
+        panel.Children.Add(actions);
+
+        // 合并后的完整 cookie 一览（对齐 account_section.dart 的 FieldRow 那一行）：
+        // 只读展示 + 复制，方便用户核对「到底存进去了什么」。
+        var cookieRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var cookieBox = new TextBox
+        {
+            IsReadOnly = true,
+            MinWidth = 360,
+            FontFamily = new FontFamily("Consolas"),
+            Text = MaskCookie(),
+        };
+        AutomationProperties.SetName(cookieBox, "merged-cookie");
+        cookieRow.Children.Add(cookieBox);
+        var copyBtn = new Button { Content = "复制" };
+        copyBtn.Click += (_, _) =>
+        {
+            try
+            {
+                var dp = new DataPackage();
+                dp.SetText(S.MergedCookie);
+                Clipboard.SetContent(dp);
+                _loginStatus.Text = "已复制完整 cookie";
+            }
+            catch (Exception ex)
+            {
+                _loginStatus.Text = "复制失败：" + ex.Message;
+            }
+        };
+        cookieRow.Children.Add(copyBtn);
+        panel.Children.Add(SettingRows.Row("完整 cookie", "除 auth_token / ct0 外的其它字段会原样保留 —— 原版 X-Spider 发的就是整段 cookie。", cookieRow));
+
+        // 获取方式说明
+        var help = new Border
+        {
+            Background = SettingRows.SubtleFill,
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(12, 10, 12, 10),
+            Child = new TextBlock
+            {
+                Text = "获取方式：点「在浏览器登录」登录 x.com → 按 F12 → Application → Cookies → x.com → " +
+                       "找到 auth_token 与 ct0 两行，双击 Value 列复制值，分别填到上面两个框。\n" +
+                       "省事做法：把整段 cookie（或直接从 DevTools 复制的多行内容）粘进任一框，会自动拆分出这两个值。",
+                FontSize = 11.5,
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18,
+            },
+        };
+        panel.Children.Add(help);
+
+        return SettingRows.Card("账号", "登录状态、cookie 输入与验证", panel);
+    }
+
+    /// <summary>两个框任一改动 → 立即落盘（保留其它 cookie 字段）。</summary>
+    private void OnCookieChanged()
+    {
+        if (_applying) return;
+        var raw = _authTokenBox.Text.Trim() + "\n" + _ct0Box.Text.Trim();
+
+        // 整段 cookie 被粘进某一个框 → 尝试自动拆分
+        var parsed = ParseCookie(raw);
+        if (parsed is not null)
+        {
+            var at = _authTokenBox.Text.Trim();
+            var ct0 = _ct0Box.Text.Trim();
+            if ((parsed.Value.At != at || parsed.Value.Ct0 != ct0) &&
+                (at.Contains((char)61) || at.Contains((char)59) || ct0.Contains((char)61) || ct0.Contains((char)59)))
+            {
+                _applying = true;
+                _authTokenBox.Text = parsed.Value.At;
+                _ct0Box.Text = parsed.Value.Ct0;
+                _applying = false;
+                RememberExtras(raw);
+                _loginStatus.Text = "已自动拆分 auth_token 与 ct0";
+            }
+        }
+
+        S.AuthToken = _authTokenBox.Text.Trim();
+        S.Ct0 = _ct0Box.Text.Trim();
+        AppSettings.Instance.Save();
+        RefreshLoginVisual();
+    }
+
+    /// <summary>
+    /// 从各种粘贴格式里解析 (auth_token, ct0)。
+    /// 规则与 Flutter 版 account_section.dart 的 _parseCookie 一致：
+    /// 分号/换行/Tab 都当分隔符，容忍 `cookie: ` 前缀、引号与 DevTools 表格形态。
+    /// </summary>
+    private static (string At, string Ct0)? ParseCookie(string raw)
+    {
+        var text = (raw ?? "").Trim();
+        if (text.Length == 0) return null;
+
+        string? at = null, ct0 = null;
+        foreach (var part in Regex.Split(text, "[;\\r\\n\\t]+"))
+        {
+            var s = part.Trim();
+            if (s.Length == 0) continue;
+            var i = s.IndexOf((char)61);
+            if (i <= 0) continue;
+            var k = s[..i].Trim().ToLowerInvariant();
+            var colon = k.LastIndexOf((char)58);
+            if (colon >= 0) k = k[(colon + 1)..].Trim();
+            var v = s[(i + 1)..].Trim().Replace("\"", "");
+            if (k == "auth_token" && v.Length > 0 && at is null) at = v;
+            if (k == "ct0" && v.Length > 0 && ct0 is null) ct0 = v;
+        }
+
+        // DevTools 表格形态：标签与值之间是 Tab / 空格 / 冒号，**没有等号**。
+        // 这一支必须单独处理 —— 实测「从 DevTools 整段复制的表格」全是这个形状，
+        // 只靠上面的 k=v 分支会一个都取不到（2026-10-24 自测：10 例里这一例 FAIL）。
+        at ??= ValueAfterLabel(text, "auth_token");
+        ct0 ??= ValueAfterLabel(text, "ct0");
+
+        var lower = text.ToLowerInvariant();
+        if (ct0 is null && lower.Contains("ct0"))
+        {
+            var m = Regex.Match(lower, "[0-9a-f]{32}");
+            if (m.Success) ct0 = m.Value;
+        }
+        if (at is null && lower.Contains("auth_token"))
+        {
+            var m = Regex.Match(lower, "[0-9a-f]{35,80}");
+            if (m.Success && m.Value != ct0) at = m.Value;
+        }
+
+        if (at is null || ct0 is null || at == ct0) return null;
+        return (at, ct0);
+    }
+
+    /// <summary>
+    /// 取标签之后第一个「像值」的片段（Tab / 空格 / 等号 / 冒号分隔都容忍）。
+    /// 对应 Flutter 版 account_section.dart 的 `_valueAfterLabel`。
+    ///
+    /// 用字符常量拼分隔符而不是写转义：本项目反复踩过「TS/C# 双层转义把 \t 写坏」的坑，
+    /// 用 (char)9 / (char)58 这类常量在两边都不会被改写。
+    /// </summary>
+    private static string? ValueAfterLabel(string text, string label)
+    {
+        var idx = text.ToLowerInvariant().IndexOf(label, StringComparison.Ordinal);
+        if (idx < 0) return null;
+        var rest = text[(idx + label.Length)..];
+        rest = rest.TrimStart(new[] { (char)32, (char)9, (char)61, (char)58 });
+        var m = Regex.Match(rest, "^([^;,\t ]+)");
+        if (!m.Success) return null;
+        var v = m.Groups[1].Value.Trim().Trim((char)34);
+        if (v.Length == 0) return null;
+        var lower = v.ToLowerInvariant();
+        if (lower == "ct0" || lower == "auth_token") return null;
+        return v;
+    }
+
+    /// <summary>记住 auth_token / ct0 之外的其它 cookie 字段（原版发整段 cookie）。</summary>
+    private void RememberExtras(string raw)
+    {
+        var keep = new List<string>();
+        foreach (var part in Regex.Split(raw, "[;\\r\\n\\t]+"))
+        {
+            var s = part.Trim();
+            var i = s.IndexOf((char)61);
+            if (i <= 0) continue;
+            var k = s[..i].Trim().ToLowerInvariant();
+            var colon = k.LastIndexOf((char)58);
+            if (colon >= 0) k = k[(colon + 1)..].Trim();
+            if (k.Length == 0 || k == "auth_token" || k == "ct0") continue;
+            if (!Regex.IsMatch(k, "^[a-z0-9_.\\-]+$")) continue;
+            keep.Add(s);
+        }
+        if (keep.Count == 0) return;
+        var merged = string.Join("; ", keep.Distinct());
+        S.ExtraCookies = merged;
+        AppSettings.Instance.Save();
+    }
+
+    private async Task ImportFromClipboardAsync()
+    {
+        try
+        {
+            var data = Clipboard.GetContent();
+            if (!data.Contains(StandardDataFormats.Text))
+            {
+                _loginStatus.Text = "剪贴板为空";
+                return;
+            }
+            // **不要**用 .GetAwaiter().GetResult() 同步等：剪贴板是 WinRT 异步 API，
+            // 在 UI 线程上同步阻塞有死锁风险（实测过同类调用偶发卡住）。
+            var text = await data.GetTextAsync();
+            var parsed = ParseCookie(text);
+            if (parsed is null)
+            {
+                _loginStatus.Text = "剪贴板里没有同时找到 auth_token 与 ct0";
+                return;
+            }
+            _applying = true;
+            _authTokenBox.Text = parsed.Value.At;
+            _ct0Box.Text = parsed.Value.Ct0;
+            _applying = false;
+            RememberExtras(text);
+            S.AuthToken = parsed.Value.At;
+            S.Ct0 = parsed.Value.Ct0;
+            AppSettings.Instance.Save();
+            RefreshLoginVisual();
+            _loginStatus.Text = "已从剪贴板导入 auth_token 与 ct0，点击「保存并验证」确认登录";
+        }
+        catch (Exception ex)
+        {
+            _loginStatus.Text = "剪贴板访问失败：" + ex.Message;
+        }
+    }
+
+    private static async Task OpenLoginPageAsync()
+    {
+        try
+        {
+            await Windows.System.Launcher.LaunchUriAsync(new Uri("https://x.com/login"));
+        }
+        catch
+        {
+            // 没有默认浏览器等情况：静默 —— 用户可自行打开，页面上的说明已给出路径
+        }
+    }
+
+    /// <summary>
+    /// 保存并验证：先落盘，再打 X 的 REST v1.1 `account/verify_credentials.json`。
+    ///
+    /// 为什么用 v1.1 而不是 GraphQL：v1.1 的 queryId 不会轮换（实测返回 401 而非 404，
+    /// 说明端点稳定存在），而 GraphQL 的 doc_id 每 2~4 周换一次。
+    /// 验证失败**不删凭据** —— 网络不通与凭据失效要分开，否则一次断网就把用户的登录态抹了。
+    /// </summary>
+    private async Task VerifyAsync()
+    {
+        var at = _authTokenBox.Text.Trim();
+        var ct0 = _ct0Box.Text.Trim();
+
+        if (at.Length == 0 || ct0.Length == 0)
+        {
+            _loginStatus.Text = "❌ auth_token 和 ct0 都要填";
+            return;
+        }
+        if (!Regex.IsMatch(ct0, "^[0-9a-fA-F]{32}$"))
+        {
+            _loginStatus.Text = $"❌ ct0 必须是 32 位十六进制（当前 {ct0.Length} 位）";
+            return;
+        }
+        if (at.Length < 20)
+        {
+            _loginStatus.Text = $"❌ auth_token 看起来不完整（当前 {at.Length} 位）";
+            return;
+        }
+
+        S.AuthToken = at;
+        S.Ct0 = ct0;
+        AppSettings.Instance.Save();
+
+        _verifyButton.IsEnabled = false;
+        _loginStatus.Text = "正在验证…";
+        try
+        {
+            var screenName = await FetchScreenNameAsync(at, ct0);
+            if (screenName is null)
+            {
+                _loginStatus.Text = "⚠ 已保存，但没能确认登录状态（请检查网络或代理）";
+            }
+            else
+            {
+                S.LastVerifiedUser = screenName;
+                AppSettings.Instance.Save();
+                _loginStatus.Text = $"✅ 已登录 @{screenName}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _loginStatus.Text = "❌ 验证失败：" + ex.Message;
+        }
+        finally
+        {
+            _verifyButton.IsEnabled = true;
+            RefreshLoginVisual();
+        }
+    }
+
+    /// <summary>调 verify_credentials 取 @screen_name；失败抛异常，拿不到名字返回 null。</summary>
+    private static async Task<string?> FetchScreenNameAsync(string authToken, string ct0)
+    {
+        var handler = new HttpClientHandler { UseCookies = false };
+        var cfg = AppSettings.Instance;
+        if (cfg.ProxyEnable && !cfg.ProxyUseSystem && !string.IsNullOrWhiteSpace(cfg.ProxyUrl))
+        {
+            handler.Proxy = new System.Net.WebProxy(cfg.ProxyUrl.Trim());
+            handler.UseProxy = true;
+        }
+
+        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
+        using var req = new HttpRequestMessage(HttpMethod.Get,
+            "https://api.x.com/1.1/account/verify_credentials.json?skip_status=true&include_entities=false");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Bearer);
+        req.Headers.TryAddWithoutValidation("Cookie", $"auth_token={authToken}; ct0={ct0}");
+        req.Headers.TryAddWithoutValidation("x-csrf-token", ct0);
+        req.Headers.TryAddWithoutValidation("User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36");
+
+        using var res = await http.SendAsync(req);
+        var body = await res.Content.ReadAsStringAsync();
+        if (!res.IsSuccessStatusCode)
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}（cookie 可能已失效）");
+
+        var m = Regex.Match(body, "\"screen_name\"\\s*:\\s*\"([^\"]+)\"");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    private void Logout()
+    {
+        S.AuthToken = "";
+        S.Ct0 = "";
+        S.ExtraCookies = "";
+        S.LastVerifiedUser = "";
+        AppSettings.Instance.Save();
+        _applying = true;
+        _authTokenBox.Text = "";
+        _ct0Box.Text = "";
+        _applying = false;
+        _loginStatus.Text = "已退出登录";
+        RefreshLoginVisual();
+    }
+
+    /// <summary>掩码展示当前 cookie（不把令牌明文铺在界面上）。</summary>
+    private string MaskCookie() =>
+        S.HasCredentials ? "auth_token=" + new string((char)8226, 12) + "; ct0=" + new string((char)8226, 12) : "（未设置）";
+
+    /// <summary>刷新登录状态行与按钮可用性。</summary>
+    private void RefreshLoginVisual()
+    {
+        var has = S.HasCredentials;
+        var verified = S.LastVerifiedUser;
+
+        _loginBadgeText.Text = verified.Length > 0 ? "已登录" : (has ? "未验证" : "未登录");
+        _loginBadge.Background = verified.Length > 0 ? SettingRows.AccentFill : SettingRows.SubtleFill;
+        _loginHint.Text = verified.Length > 0
+            ? $"已登录 @{verified}"
+            : (has ? "已保存凭据，尚未联网验证" : "尚未登录（抓取媒体需要登录）");
+        _logoutButton.IsEnabled = has;
+    }
+
+    // ── ② 下载 ──────────────────────────────────────────────
+
+    private UIElement BuildDownloadCard()
+    {
+        var panel = new StackPanel { Spacing = 14 };
+
+        // 保存目录
+        var dirRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        _saveDirBox = new TextBox
+        {
+            Text = string.IsNullOrEmpty(S.SaveDir) ? AppSettings.Instance.SaveDirBase : S.SaveDir,
+            IsReadOnly = true,
+            MinWidth = 320,
+            PlaceholderText = "未选择（用全局默认目录）",
+        };
+        dirRow.Children.Add(_saveDirBox);
+        var pickBtn = new Button { Content = "选择文件夹" };
+        pickBtn.Click += async (_, _) => await PickDirAsync();
+        dirRow.Children.Add(pickBtn);
+        var clearBtn = new Button { Content = "清除" };
+        clearBtn.Click += (_, _) =>
+        {
+            S.SaveDir = "";
+            AppSettings.Instance.Save();
+            // 清除后显示**实际会生效的那个目录**（全局值），不是一句空 ——
+            // 空的输入框会被读成「没有下载目录」（Flutter 版 2026-10-15 就踩过这条）。
+            var global = AppSettings.Instance.SaveDirBase;
+            _saveDirBox.Text = global;
+            _saveDirStatus.Text = global.Length == 0
+                ? "已清除，改用数据目录\\downloads"
+                : "已清除本模块设置，改回全局保存目录";
+        };
+        dirRow.Children.Add(clearBtn);
+        panel.Children.Add(SettingRows.Row("保存目录", "留空则使用全局默认目录（数据目录\\downloads）", dirRow));
+
+        _saveDirStatus = new TextBlock { Text = "", FontSize = 12, Opacity = 0.75, TextWrapping = TextWrapping.Wrap };
+        panel.Children.Add(_saveDirStatus);
+
+        panel.Children.Add(SettingRows.Divider());
+
+        // 文件夹模板
+        _dirTplBox = new TextBox
+        {
+            Text = S.DirTemplate,
+            PlaceholderText = "%USER_SCREEN_NAME%",
+            FontFamily = new FontFamily("Consolas"),
+        };
+        _dirTplBox.TextChanged += (_, _) => OnTemplateChanged();
+        panel.Children.Add(SettingRows.Row("文件夹模板",
+            "留空则直接存到保存目录下。建议只用「用户 / 推文」级变量，逐文件变量会让每条媒体各建一个文件夹。",
+            _dirTplBox));
+
+        // 文件名模板
+        _nameTplBox = new TextBox
+        {
+            Text = string.IsNullOrEmpty(S.FileNameTemplate) ? DefaultNameTpl : S.FileNameTemplate,
+            PlaceholderText = DefaultNameTpl,
+            FontFamily = new FontFamily("Consolas"),
+        };
+        _nameTplBox.TextChanged += (_, _) => OnTemplateChanged();
+        panel.Children.Add(SettingRows.Row("文件名模板",
+            "留空则使用「媒体ID_时间戳.扩展名」。改动会自动保存。",
+            _nameTplBox));
+
+        // 全部占位符说明 + 点一下插入
+        panel.Children.Add(BuildVarTable());
+
+        // 实时预览
+        _previewText = new TextBlock
+        {
+            Text = "-",
+            FontSize = 12.5,
+            FontFamily = new FontFamily("Consolas"),
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        };
+        var previewInner = new StackPanel { Spacing = 4 };
+        previewInner.Children.Add(new TextBlock { Text = "输出示例", FontSize = 12, Opacity = 0.6 });
+        previewInner.Children.Add(_previewText);
+        var previewBox = new Border
+        {
+            Background = SettingRows.SubtleFill,
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(12, 10, 12, 10),
+            Child = previewInner,
+        };
+        panel.Children.Add(previewBox);
+
+        panel.Children.Add(SettingRows.Divider());
+
+        // 并发 / 请求间隔 / 跳过已下载
+        panel.Children.Add(SettingRows.Number("并发上限",
+            "aria2 同时下载的任务数（1-16）。三个模块共用同一个下载引擎，这里是全局值。",
+            AppSettings.Instance.MaxConcurrent, 1, 16,
+            v => { AppSettings.Instance.MaxConcurrent = (int)v; AppSettings.Instance.Save(); }));
+
+        panel.Children.Add(SettingRows.Number("请求间隔（毫秒）",
+            "每次抓取之间的间隔。太小容易触发 X 的限流。",
+            S.RequestIntervalMs, 200, 10000,
+            v => { S.RequestIntervalMs = (int)v; AppSettings.Instance.Save(); }));
+
+        panel.Children.Add(SettingRows.Switch("跳过已下载",
+            "同一条推文重复下载时自动跳过已经存在的文件。",
+            S.SkipDownloaded,
+            v => { S.SkipDownloaded = v; AppSettings.Instance.Save(); }));
+
+        return SettingRows.Card("下载", "保存路径、文件夹 / 文件名模板、同名文件处理", panel);
+    }
+
+    /// <summary>可用变量表：每个变量一行（名字 + 说明），点「插入」追加到文件名模板光标处。</summary>
+    private UIElement BuildVarTable()
+    {
+        var wrap = new StackPanel { Spacing = 6 };
+        wrap.Children.Add(new TextBlock { Text = "可用变量", FontSize = 13, FontWeight = FontWeights.SemiBold });
+        wrap.Children.Add(new TextBlock
+        {
+            Text = "用百分号包住变量名，如 %USER_SCREEN_NAME%。尖括号包住的是可选段：段内变量为空时整段（含字面字符）丢弃。" +
+                   "带参数写作 %CONTENT,t=32% / %POST_TIME,d=1%。",
+            FontSize = 12,
+            Opacity = 0.62,
+            TextWrapping = TextWrapping.Wrap,
+            LineHeight = 18,
+        });
+
+        var grid = new StackPanel { Spacing = 4 };
+        foreach (var (name, desc) in XTemplateVars)
+        {
+            var row = new Grid { ColumnSpacing = 8 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(190) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            row.Children.Add(new TextBlock
+            {
+                Text = "%" + name + "%",
+                FontSize = 12,
+                FontFamily = new FontFamily("Consolas"),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+
+            var d = new TextBlock
+            {
+                Text = desc,
+                FontSize = 12,
+                Opacity = 0.62,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(d, 1);
+            row.Children.Add(d);
+
+            var insert = new Button { Content = "插入", FontSize = 12, Padding = new Thickness(10, 2, 10, 2) };
+            var token = "%" + name + "%";
+            insert.Click += (_, _) => InsertToken(token);
+            Grid.SetColumn(insert, 2);
+            row.Children.Add(insert);
+
+            grid.Children.Add(row);
+        }
+        wrap.Children.Add(grid);
+
+        var restore = new Button { Content = "恢复默认模板" };
+        restore.Click += (_, _) =>
+        {
+            _nameTplBox.Text = DefaultNameTpl;
+            S.FileNameTemplate = DefaultNameTpl;
+            AppSettings.Instance.Save();
+            UpdatePreview();
+        };
+        wrap.Children.Add(restore);
+
+        return wrap;
+    }
+
+    /// <summary>把变量插到文件名模板框的光标处（无光标则追加到末尾）。</summary>
+    private void InsertToken(string token)
+    {
+        var text = _nameTplBox.Text ?? "";
+        var start = _nameTplBox.SelectionStart;
+        if (start < 0 || start > text.Length) start = text.Length;
+        var len = _nameTplBox.SelectionLength;
+        if (len < 0 || start + len > text.Length) len = 0;
+        _nameTplBox.Text = text.Remove(start, len).Insert(start, token);
+        _nameTplBox.SelectionStart = start + token.Length;
+    }
+
+    private void OnTemplateChanged()
+    {
+        S.DirTemplate = _dirTplBox.Text ?? "";
+        S.FileNameTemplate = _nameTplBox.Text ?? "";
+        AppSettings.Instance.Save();
+        UpdatePreview();
+    }
+
+    /// <summary>
+    /// 实时预览：用一条示例推文展开两个模板。
+    /// 复用 FileNameTemplate 引擎（与真正下载时同一份实现），预览与实际产出不可能漂移。
+    /// </summary>
+    private void UpdatePreview()
+    {
+        if (_previewText is null) return;
+        var ctx = new TemplateContext
+        {
+            PostId = "1734567890123456789",
+            PostTime = new DateTime(2024, 1, 20, 21, 15, 36),
+            UserId = "1234567890",
+            UserName = "示例作者",
+            UserScreenName = "example_user",
+            MediaId = "1734567890123456799",
+            MediaWidth = 1920,
+            MediaHeight = 1080,
+            MediaType = "image",
+            Extension = ".jpg",
+            MediaIndex = 1,
+            MediaCount = 4,
+            Content = "这是一条示例推文的正文内容，用来演示 CONTENT 变量与截断参数。",
+        };
+
+        var dir = FileNameTemplate.Resolve(_dirTplBox.Text ?? "", ctx).Trim();
+        var name = FileNameTemplate.Resolve(_nameTplBox.Text ?? "", ctx).Trim();
+        if (name.Length == 0) name = "（文件名为空，将回退为 媒体ID_时间戳.扩展名）";
+        _previewText.Text = dir.Length == 0 ? name : dir + "\\" + name;
+    }
+
+    private async Task PickDirAsync()
+    {
+        try
+        {
+            var folder = await FolderPickerService.PickAsync();
+            if (folder is null) return;
+            var (ok, msg) = FolderPickerService.VerifyWritable(folder.Path);
+            if (!ok)
+            {
+                _saveDirStatus.Text = "❌ 该目录不可写：" + msg;
+                return;
+            }
+            S.SaveDir = folder.Path;
+            AppSettings.Instance.Save();
+            _saveDirBox.Text = folder.Path;
+            _saveDirStatus.Text = "✅ 已保存，立即生效";
+        }
+        catch (Exception ex)
+        {
+            _saveDirStatus.Text = "❌ 选择失败：" + ex.GetType().Name + " " + ex.Message;
+        }
+    }
+
+    // ── ③ 筛选 ──────────────────────────────────────────────
+
+    private UIElement BuildFilterCard()
+    {
+        var panel = new StackPanel { Spacing = 12 };
+
+        // 媒体类型
+        var types = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        var current = (S.MediaTypeFilter ?? "").Split((char)44, StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim().ToLowerInvariant()).ToHashSet();
+
+        foreach (var (id, label) in new[] { ("video", "视频"), ("image", "图片"), ("gif", "GIF") })
+        {
+            var cb = new CheckBox { Content = label, IsChecked = current.Contains(id), Tag = id, MinWidth = 0 };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(cb, label);
+            cb.Checked += (_, _) => ToggleMediaType(id, true);
+            cb.Unchecked += (_, _) => ToggleMediaType(id, false);
+            types.Children.Add(cb);
+        }
+        panel.Children.Add(SettingRows.Row("媒体类型", "不勾选任何一项表示不限类型。", types));
+
+        panel.Children.Add(SettingRows.Divider());
+
+        // 时间范围
+        var rangePanel = new StackPanel { Spacing = 8 };
+
+        var enableRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = SettingRows.InlineGap };
+        enableRow.Children.Add(new TextBlock { Text = "启用时间范围", FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
+        var rangeToggle = new ToggleSwitch { IsOn = S.TimeRangeEnabled, OnContent = "", OffContent = "", MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(rangeToggle, "启用时间范围");
+        enableRow.Children.Add(rangeToggle);
+        rangePanel.Children.Add(enableRow);
+        rangePanel.Children.Add(SettingRows.Description("只下载发布时间落在区间内的推文。到达下界后停止继续翻页。"));
+
+        // StackPanel 没有 IsEnabled（那是 Control 的成员），所以逐个控件设。
+        var dates = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+
+        var fromPicker = new CalendarDatePicker
+        {
+            PlaceholderText = "起始日期",
+            DateFormat = "{year.full}-{month.integer(2)}-{day.integer(2)}",
+            MinWidth = 180,
+        };
+        if (DateTime.TryParse(S.DateFrom, out var df)) fromPicker.Date = df;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(fromPicker, "起始日期");
+        fromPicker.DateChanged += (_, e) =>
+        {
+            S.DateFrom = e.NewDate?.ToString("yyyy-MM-dd") ?? "";
+            AppSettings.Instance.Save();
+        };
+        dates.Children.Add(fromPicker);
+
+        dates.Children.Add(new TextBlock { Text = "至", VerticalAlignment = VerticalAlignment.Center, Opacity = 0.7 });
+
+        var toPicker = new CalendarDatePicker
+        {
+            PlaceholderText = "结束日期",
+            DateFormat = "{year.full}-{month.integer(2)}-{day.integer(2)}",
+            MinWidth = 180,
+        };
+        if (DateTime.TryParse(S.DateTo, out var dt)) toPicker.Date = dt;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toPicker, "结束日期");
+        toPicker.DateChanged += (_, e) =>
+        {
+            S.DateTo = e.NewDate?.ToString("yyyy-MM-dd") ?? "";
+            AppSettings.Instance.Save();
+        };
+        dates.Children.Add(toPicker);
+
+        fromPicker.IsEnabled = S.TimeRangeEnabled;
+        toPicker.IsEnabled = S.TimeRangeEnabled;
+
+        rangeToggle.Toggled += (_, _) =>
+        {
+            S.TimeRangeEnabled = rangeToggle.IsOn;
+            AppSettings.Instance.Save();
+            fromPicker.IsEnabled = rangeToggle.IsOn;
+            toPicker.IsEnabled = rangeToggle.IsOn;
+        };
+
+        rangePanel.Children.Add(dates);
+        panel.Children.Add(rangePanel);
+
+        return SettingRows.Card("筛选", "媒体类型与时间范围", panel);
+    }
+
+    private void ToggleMediaType(string id, bool on)
+    {
+        var set = (S.MediaTypeFilter ?? "").Split((char)44, StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim().ToLowerInvariant()).ToHashSet();
+        if (on) set.Add(id); else set.Remove(id);
+        // 固定顺序输出，避免每次点击都改字符串形状（便于人读 JSON）
+        S.MediaTypeFilter = string.Join(",", new[] { "video", "image", "gif" }.Where(set.Contains));
+        AppSettings.Instance.Save();
+    }
+
+    // ── ④ 接口缓存 ──────────────────────────────────────────
+
+    private UIElement BuildCacheCard()
+    {
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(SettingRows.Description(
+            "X 的 GraphQL 接口标识（queryId）每 2~4 周轮换一次，过期后表现为「搜不到用户」或「加载不出媒体」。" +
+            "WinUI 版目前尚未实现 queryId 缓存 —— 抓取链路本身还在等 WebView2 内嵌落地，" +
+            "所以这里只作说明，没有可点的清理按钮（不摆一个点了没反应的按钮）。"));
+        return SettingRows.Card("接口缓存", "X 接口标识缓存（排障）", panel);
+    }
+}
