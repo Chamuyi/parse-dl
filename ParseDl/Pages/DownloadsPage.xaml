@@ -4,7 +4,108 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,8,24,24">
-        <StackPanel x:Name="Root" Spacing="12" MaxWidth="1400" HorizontalAlignment="Stretch" />
-    </ScrollViewer>
+
+    <!--
+        下载管理（X / 抖音 / B 站 三模式共用本页，形态由 DownloadFeed 决定）。
+        行结构：页头 / Tab 条 / 工具栏 / 任务卡（占满剩余高度）/ 历史台账。
+    -->
+    <Grid Padding="24,8,24,24" RowSpacing="12"
+          MaxWidth="1400" HorizontalAlignment="Stretch">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ① 页头（UiKit.PageHeader 运行时生成后塞进来） -->
+        <Grid x:Name="HeaderHost" Grid.Row="0" />
+
+        <!--
+            ② Tab 条 —— 用 WinUI 官方分段控件 SelectorBar，不再自绘 Button。
+            自绘 Button 塞进 Border 会被挤压：容器窄时按钮 Padding/MinWidth 收缩，
+            文字被裁掉，「下载中」「错误」因此完全看不见。SelectorBar 是官方分段
+            控件，自带等宽布局、选中下划线与键盘导航，六个 Tab 常驻可见。
+            它单独装在一张卡片里、宽度按内容取（左对齐），不与下面的任务卡混排。
+        -->
+        <Border Grid.Row="1"
+                HorizontalAlignment="Left"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8" Padding="6,2,6,2">
+            <!-- 外面再套一层横向滚动：窗口被拉窄时可横向滚，绝不挤压裁剪文字。 -->
+            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                          HorizontalScrollMode="Enabled"
+                          VerticalScrollBarVisibility="Disabled"
+                          VerticalScrollMode="Disabled">
+                <SelectorBar x:Name="TabSelector" SelectionChanged="OnTabSelectionChanged" />
+            </ScrollViewer>
+        </Border>
+
+        <!-- ③ 工具栏（不在卡里）。按钮集合按模块裁剪：合并音视频只有 B 站才有； -->
+        <!--    清空历史台账不在这里 —— 那是全局动作，归全局设置。 -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="RetryAllButton" Content="重试全部" MinWidth="110"
+                    Visibility="Collapsed" Click="OnRetryAllClick" />
+            <Button x:Name="PauseAllButton" Content="全部暂停" MinWidth="100"
+                    Click="OnPauseAllClick" />
+            <Button x:Name="ResumeAllButton" Content="全部继续" MinWidth="100"
+                    Click="OnResumeAllClick" />
+            <Button x:Name="ClearCompletedButton" Content="清除已完成" MinWidth="110"
+                    Click="OnClearCompletedClick" />
+            <Button x:Name="OpenDirButton" Content="打开下载目录" MinWidth="120"
+                    Click="OnOpenDirClick" />
+            <Button x:Name="MergeButton" Content="合并音视频" MinWidth="110"
+                    Visibility="Collapsed" Click="OnMergeClick" />
+            <TextBlock x:Name="ToolbarHint" VerticalAlignment="Center"
+                       FontSize="12" Opacity="0.6" Margin="4,0,0,0" />
+        </StackPanel>
+
+        <!-- ④ 任务卡 -->
+        <Border Grid.Row="3"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8" Padding="14">
+            <Grid RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border x:Name="EngineBanner" Grid.Row="0" Visibility="Collapsed"
+                        Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
+                        CornerRadius="6" Padding="12,8">
+                    <TextBlock x:Name="EngineBannerText" FontSize="12.5" TextWrapping="Wrap"
+                               Text="aria2 未启动，请稍候或重启应用" />
+                </Border>
+
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="TaskPanel" Spacing="8" />
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- ⑤ 历史台账（各模块一份，标题与空态由 feed 提供） -->
+        <Border Grid.Row="4"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8" Padding="14">
+            <StackPanel Spacing="10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="HistoryTitleText" Text="下载历史" FontSize="16"
+                               FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="1" Text="来自 download_ledger.json"
+                               FontSize="12" Opacity="0.6" VerticalAlignment="Center" />
+                </Grid>
+                <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="HistoryPanel" Spacing="6" />
+                </ScrollViewer>
+            </StackPanel>
+        </Border>
+    </Grid>
 </Page>
