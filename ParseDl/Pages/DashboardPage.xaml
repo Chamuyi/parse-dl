@@ -145,7 +145,7 @@
                     </StackPanel>
                 </Border>
 
-                <StackPanel Grid.Row="0" Grid.Column="1" Spacing="16" x:Name="RightStack">
+                <StackPanel Grid.Row="0" Grid.Column="1" Grid.RowSpan="2" Spacing="16" x:Name="RightStack">
                     <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                             BorderThickness="1" CornerRadius="8" Padding="16">
@@ -200,20 +200,21 @@
                         </StackPanel>
                     </Border>
                 </StackPanel>
-            </Grid>
 
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16">
-                <StackPanel Spacing="10">
-                    <Grid>
-                        <TextBlock Text="最近活动" FontSize="16" FontWeight="SemiBold" />
-                        <TextBlock Text="来自下载任务" FontSize="12" Opacity="0.6"
-                                   HorizontalAlignment="Right" />
-                    </Grid>
-                    <TextBlock Text="还没有下载任务" FontSize="13" Opacity="0.6" Margin="0,8,0,8" />
-                </StackPanel>
-            </Border>
+                <!-- 「最近活动」原来排在整页最末尾。右栏（模块状态 + 下载引擎 + 环境）比左栏（快捷开始）高得多，把整个 Grid 撑高后左下方空出一大片 —— 用户报的「怎么空这么大一块，把内容填充上去啊」就是这块。现挪到第 1 行第 0 列，右栏跨两行，空白被内容吃掉。 -->
+                <Border Grid.Row="1" Grid.Column="0" VerticalAlignment="Top" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16">
+                    <StackPanel Spacing="10">
+                        <Grid>
+                            <TextBlock Text="最近活动" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="来自下载任务" FontSize="12" Opacity="0.6"
+                                       HorizontalAlignment="Right" />
+                        </Grid>
+                        <TextBlock Text="还没有下载任务" FontSize="13" Opacity="0.6" Margin="0,8,0,8" />
+                    </StackPanel>
+                </Border>
+            </Grid>
 
         </StackPanel>
     </ScrollViewer>
