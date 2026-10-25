@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Diagnostics;
 using System.IO;
 using Microsoft.UI.Text;
@@ -12,6 +13,9 @@ using ParseDl.Controls;
 using ParseDl.Services;
 
 namespace ParseDl.Pages;
+
+/// <summary>导航到全局设置时带的参数：宿主窗口 + 要显示的分类 id。</summary>
+public sealed record SettingsNavArgs(MainWindow Host, string Category);
 
 /// <summary>
 /// 全局设置 —— 顶部横向分类 + 居中列内容。
@@ -34,10 +38,6 @@ public sealed partial class SettingsPage : Page
     private MainWindow? _host;
     private bool _suppressThemeEvent;
     private bool _suppressMaterialEvent;
-
-    /// <summary>构建 / 切换分类期间置 true，避免 SelectorBar 的 SelectionChanged 递归重入。</summary>
-    private bool _suppressCategoryEvent;
-
     /// <summary>主题色预设色板的容器（应用后重建，刷新「当前选中」的标记）。</summary>
     private Grid? _accentBoard;
 
@@ -74,7 +74,6 @@ public sealed partial class SettingsPage : Page
     public SettingsPage()
     {
         InitializeComponent();
-        BuildCategoryBar();
         Loaded += (_, _) => { if (!_built) RenderCategory(_currentCategory); };
     }
 
@@ -84,32 +83,6 @@ public sealed partial class SettingsPage : Page
         _host = e.Parameter as MainWindow;
         _built = false;
         RenderCategory(_currentCategory);
-    }
-
-    // ── 顶部分类（SelectorBar）─────────────────────────────
-
-    private void BuildCategoryBar()
-    {
-        _suppressCategoryEvent = true;
-        CategoryBar.Items.Clear();
-        SelectorBarItem? toSelect = null;
-        foreach (var c in Categories)
-        {
-            var item = new SelectorBarItem { Text = c.Label, Tag = c.Id };
-            AutomationProperties.SetName(item, "settings-category-" + c.Id);
-            CategoryBar.Items.Add(item);
-            if (c.Id == _currentCategory) toSelect = item;
-        }
-        CategoryBar.SelectedItem = toSelect ?? CategoryBar.Items[0];
-        _suppressCategoryEvent = false;
-    }
-
-    private void OnCategoryChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
-    {
-        if (_suppressCategoryEvent) return;
-        if (sender.SelectedItem?.Tag is not string id) return;
-        _currentCategory = id;
-        RenderCategory(id);
     }
 
     private void RenderCategory(string id)

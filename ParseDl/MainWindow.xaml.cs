@@ -154,7 +154,9 @@ public sealed partial class MainWindow : Window
             menu.Add(CreateItem(item));
         }
 
-        foreach (var group in NavModel.Groups)
+        // 三个下载模块 + 全局设置分组（用户 2026-10-26 要求设置也做成可展开，
+        // 与「X 下载」同一种交互）。设置分组排在三个模块之后、关于之前。
+        foreach (var group in NavModel.Groups.Append(NavModel.SettingsGroup))
         {
             var parent = new NavigationViewItem
             {
@@ -227,6 +229,12 @@ public sealed partial class MainWindow : Window
                 NavFrame.Navigate(typeof(SettingsPage), this);
                 break;
 
+            // 设置分组下的六个分类：同一个 SettingsPage，靠参数带上分类 id。
+            // 用前缀匹配而不是六条 case —— 以后加分类只改 NavModel 一处。
+            case var s when s.StartsWith("settings-"):
+                NavFrame.Navigate(typeof(SettingsPage), new SettingsNavArgs(this, s.Substring("settings-".Length)));
+                break;
+
             case "about":
                 NavFrame.Navigate(typeof(AboutPage), this);
                 break;
@@ -290,9 +298,11 @@ public sealed partial class MainWindow : Window
     {
         foreach (var item in NavModel.Primary)
             if (item.Id == routeId) return item.Label;
-        foreach (var g in NavModel.Groups)
+        foreach (var g in NavModel.Groups.Append(NavModel.SettingsGroup))
+        {
             foreach (var c in g.Children)
                 if (c.Id == routeId) return c.Label;
+        }
         foreach (var item in NavModel.Standalone)
             if (item.Id == routeId) return item.Label;
         return routeId;

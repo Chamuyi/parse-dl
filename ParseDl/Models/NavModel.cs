@@ -54,10 +54,26 @@ public static class NavModel
         }),
     };
 
-    /// <summary>全局项：排在三个模块下面。</summary>
+    /// <summary>
+    /// 全局设置：**可展开分组**，六个分类做子项（用户 2026-10-26 要求
+    /// 「做成下载功能这样的点击展开」——即像「X 下载」那样在主导航里展开）。
+    /// 子项的 routeId 形如 settings-<categoryId>，MainWindow 里按前缀统一分发。
+    /// </summary>
+    public static readonly NavGroup SettingsGroup = new(
+        "settings", "全局设置", "\uE713", "",
+        new[]
+        {
+            new NavItem("settings-appearance", "外观", "\uE790"),
+            new NavItem("settings-download", "下载", "\uE896"),
+            new NavItem("settings-proxy", "代理", "\uE774"),
+            new NavItem("settings-logs", "日志", "\uE9D9"),
+            new NavItem("settings-data", "数据目录", "\uE8B7"),
+            new NavItem("settings-about", "关于", "\uE946"),
+        });
+
+    /// <summary>全局项：排在设置分组下面。</summary>
     public static readonly IReadOnlyList<NavItem> Standalone = new[]
     {
-        new NavItem("settings", "全局设置", "\uE713"),
         new NavItem("about", "关于", "\uE946"),
     };
 }

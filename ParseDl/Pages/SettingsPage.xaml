@@ -5,41 +5,15 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
 
+    <!--
+      分类切换已挪到**主侧边栏**（用户 2026-10-26：「做成下载功能这样的点击展开」）：
+      「全局设置」在主导航里是可展开分组，六个分类是它的子项，与「X 下载 / 抖音解析下载 /
+      B 站下载」完全同一种交互。页面内不再有任何分类控件，只按导航传进来的分类 id 渲染内容。
+
+      历史：2026-10-25 一度做成页面内顶部横向 SelectorBar（因为用户先否掉了「页面内左侧
+      竖栏」）；2026-10-26 用户要求并进主导航，于是彻底删掉页内分类器。
+    -->
     <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-
-        <!--
-          分类切换：**顶部横向分段控件**（WinUI 官方 SelectorBar，与下载管理页同一控件）。
-
-          为什么不是左侧竖栏（2026-10-25 用户明确否掉）：
-          app 的主导航已经是一根左侧栏，页面内再套一根左侧分类栏 = 两层竖栏并排，
-          视觉上像多了一级导航、还把内容挤窄。分类是**同一页内的分节**，用横向分段
-          表达「并列的几段」才对，也回避了与主导航抢层级。
-
-          为什么不用「全部平铺一页」：六个分类里「外观」一张卡就有材质四档 + 明暗 +
-          主题色 + 导航形态，全平铺会变成一眼看不到底的超长页，找「代理」要滚很久。
-          分段切换让每个分类一屏内看完。
-
-          外面套一层横向滚动：窗口被拉窄时能横滚，绝不挤压裁剪文字（下载管理页同款做法）。
-        -->
-        <Border Grid.Row="0"
-                Margin="24,16,24,0"
-                HorizontalAlignment="Center"
-                MaxWidth="900"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1" CornerRadius="8" Padding="8,2,8,2">
-            <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                          HorizontalScrollMode="Enabled"
-                          VerticalScrollBarVisibility="Disabled"
-                          VerticalScrollMode="Disabled">
-                <SelectorBar x:Name="CategoryBar" SelectionChanged="OnCategoryChanged" />
-            </ScrollViewer>
-        </Border>
-
         <!--
           内容区：横向滚动**必须显式关掉**。
           WinUI 的 ScrollViewer 默认横向 Enabled，会给子内容无限宽去测量，
@@ -47,8 +21,7 @@
           或者被拉出视口截断（用户 2026-10-25 报的就是这个）。
           关掉横向滚动后，子内容按视口宽测量，居中才真正居中。
         -->
-        <ScrollViewer Grid.Row="1"
-                      VerticalScrollBarVisibility="Auto"
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled"
                       HorizontalScrollMode="Disabled"
                       Padding="24,12,24,24">
