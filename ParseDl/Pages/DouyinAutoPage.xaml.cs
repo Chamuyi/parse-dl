@@ -27,10 +27,14 @@ namespace ParseDl.Pages;
 /// </summary>
 public sealed partial class DouyinAutoPage : Page
 {
+    /// <summary>左右两栏布局所需的最小正文宽度（逻辑像素）。低于它就改成上下两行。</summary>
+    private const double TwoPaneMinWidth = 820;
+
     private readonly DouyinAutoStore _auto = DouyinAutoStore.Instance;
     private readonly List<string> _log = new();
     private bool _ready;
     private bool _busy;
+    private bool? _wideLayout;
     private DouyinAutoCollector? _collector;
 
     public DouyinAutoPage()
@@ -46,6 +50,7 @@ public sealed partial class DouyinAutoPage : Page
 
         _auto.Load();
         _auto.Changed += OnAutoChanged;
+        ApplyLayout(BodyGrid.ActualWidth);
         BuildAll();
         _ = InitWebAsync();
     }
@@ -55,6 +60,53 @@ public sealed partial class DouyinAutoPage : Page
         base.OnNavigatedFrom(e);
         _auto.Changed -= OnAutoChanged;
         if (_auto.Running) _auto.Stop();
+    }
+
+    // ── 自适应布局 ──────────────────────────────────────────────
+
+    private void OnBodyGridSizeChanged(object sender, SizeChangedEventArgs e)
+        => ApplyLayout(e.NewSize.Width);
+
+    /// <summary>
+    /// 按实际宽度在「左表单 + 右浏览器」与「浏览器在上 / 表单在下」之间切换。
+    /// 只在跨越阈值时重排，避免拖动窗口时每帧都改一遍集合。
+    /// </summary>
+    private void ApplyLayout(double width)
+    {
+        if (width <= 0) return;
+        var wide = width >= TwoPaneMinWidth;
+        if (_wideLayout is not null && _wideLayout.Value == wide) return;
+        _wideLayout = wide;
+
+        BodyGrid.ColumnDefinitions.Clear();
+        BodyGrid.RowDefinitions.Clear();
+
+        if (wide)
+        {
+            BodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            BodyGrid.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star),
+                MinWidth = 360,
+            });
+            BodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            Grid.SetRow(FormCard, 0);
+            Grid.SetColumn(FormCard, 0);
+            Grid.SetRow(BrowserCard, 0);
+            Grid.SetColumn(BrowserCard, 1);
+        }
+        else
+        {
+            BodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            BodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(2, GridUnitType.Star) });
+            BodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star) });
+
+            Grid.SetRow(BrowserCard, 0);
+            Grid.SetColumn(BrowserCard, 0);
+            Grid.SetRow(FormCard, 1);
+            Grid.SetColumn(FormCard, 0);
+        }
     }
 
     // ── WebView ────────────────────────────────────────────────
