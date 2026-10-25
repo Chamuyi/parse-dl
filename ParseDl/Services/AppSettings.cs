@@ -52,6 +52,14 @@ public sealed class AppSettings
     /// <summary>导航形态：dock（悬浮 Dock）/ sidebar（左侧常规栏）。对齐 NavLayout。</summary>
     public string NavLayout { get; set; } = "dock";
 
+    // ── 主题色（强调色）──────────────────────────────
+    // 2026-10-25 新增：预设 id（见 Services/AccentService.Presets）或 "custom"，
+    // 以及自定义色的 #RRGGBB。只新增字段，不动既有字段语义。
+    public string AccentPreset { get; set; } = "windows";
+
+    /// <summary>自定义强调色 #RRGGBB。仅当 AccentPreset == "custom" 时有意义。</summary>
+    public string AccentHex { get; set; } = "#0078D4";
+
     // ── 其它 ──────────────────────────────────────────
     public bool WriteLogs { get; set; } = true;
 
@@ -109,6 +117,19 @@ public sealed class AppSettings
             catch { }
             System.Diagnostics.Debug.WriteLine($"[Settings] 读取失败，使用默认值: {ex.Message}");
         }
+
+        // 设置读完立刻把强调色应用到应用级资源（开机恢复上次选的主题色）。
+        // 放在这里而不是 App.xaml.cs：App 是禁改区，而 Load() 正好在 OnLaunched 里、
+        // UI 线程上、MainWindow 创建之前执行 —— 时机与位置都对。
+        // Application.Current 尚未就绪时 Apply 会返回 false，不抛异常，不影响启动。
+        try
+        {
+            AccentService.ApplyFromSettings();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Settings] 应用主题色失败: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -125,6 +146,8 @@ public sealed class AppSettings
         NavLayout = loaded.NavLayout;
         AutoCheckUpdate = loaded.AutoCheckUpdate;
         AcceptPrerelease = loaded.AcceptPrerelease;
+        AccentPreset = string.IsNullOrWhiteSpace(loaded.AccentPreset) ? "windows" : loaded.AccentPreset;
+        AccentHex = string.IsNullOrWhiteSpace(loaded.AccentHex) ? "#0078D4" : loaded.AccentHex;
     }
 
     /// <summary>原子写盘。</summary>

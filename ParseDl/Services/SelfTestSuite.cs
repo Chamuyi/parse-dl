@@ -30,6 +30,8 @@ public static class SelfTestSuite
         sb.AppendLine(X.XHomeSelfTest.Run());
         sb.AppendLine("===== 抖音解析 =====");
         sb.AppendLine(Douyin.DouyinSelfTest.Run());
+        sb.AppendLine("===== 主题色（强调色）=====");
+        sb.AppendLine(AccentSelfTest.Run());
         return sb.ToString();
     }
 }
