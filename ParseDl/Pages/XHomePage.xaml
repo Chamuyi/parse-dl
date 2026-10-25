@@ -10,8 +10,24 @@
       Services/X/XHomeApi.cs 通过 GraphQL / REST 请求取回，形态与 Flutter 版
       lib/pages/homepage_page.dart 一致。内容在 code-behind 里构建
       （与 ModuleSettingsPage / DownloadsPage 同一做法）。
+
+      布局：本页同样**不放任何登录 UI**（对齐 homepage_page.dart —— 那一页只有
+      输入框 + 加载按钮，未登录时点加载才提示去设置页登录）。
+
+      横向滚动必须显式关掉：ScrollViewer 默认 HorizontalScrollMode=Enabled 会按
+      无限宽测量子内容，子面板要么被挤到最左、要么被拉到 MaxWidth 后溢出被截断。
     -->
-    <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Auto" Padding="24,8,24,24">
-        <StackPanel x:Name="Root" Spacing="14" MaxWidth="1200" HorizontalAlignment="Left" />
+    <ScrollViewer x:Name="PageScroll"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  HorizontalScrollMode="Disabled"
+                  Padding="24,8,24,24">
+        <!-- 居中容器：宽窗时内容居中而不是贴左；窄窗时自然占满 -->
+        <Grid>
+            <StackPanel x:Name="Root"
+                        Spacing="14"
+                        MaxWidth="1200"
+                        HorizontalAlignment="Center" />
+        </Grid>
     </ScrollViewer>
 </Page>

@@ -182,6 +182,12 @@ public sealed class ModuleSettings
     /// <summary>时间范围上界（yyyy-MM-dd），空表示不限。</summary>
     public string DateTo { get; set; } = "";
 
+    /// <summary>
+    /// 下载源（对齐 Flutter 版 DownloadSource）：medias = 媒体列表接口（快，更早的推文可能拿不到）；
+    /// tweets = 帖子时间线（能翻到更早，较慢）。主页与自动执行页共用这一份。
+    /// </summary>
+    public string Source { get; set; } = "medias";
+
     /// <summary>X 身份令牌（auth_token cookie）。</summary>
     public string AuthToken { get; set; } = "";
 
@@ -197,6 +203,15 @@ public sealed class ModuleSettings
     /// <summary>是否已配置凭据（两个字段都非空）。</summary>
     [JsonIgnore]
     public bool HasCredentials => !string.IsNullOrWhiteSpace(AuthToken) && !string.IsNullOrWhiteSpace(Ct0);
+
+    /// <summary>
+    /// 交给抓取链路用的整段 cookie：账号分区填了 auth_token + ct0 就用它拼出来的，
+    /// 否则退回通用 Cookie 字段（老设置文件里只有这一处）。
+    /// 登录入口只在 X 下载设置页，其它页面一律读这里，不自己维护一份 cookie。
+    /// </summary>
+    [JsonIgnore]
+    public string EffectiveCookie =>
+        HasCredentials ? MergedCookie : (Cookie ?? "");
 
     /// <summary>拼回 X 需要的整段 cookie（原版就是发整段）。</summary>
     [JsonIgnore]

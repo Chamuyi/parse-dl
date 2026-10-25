@@ -4,7 +4,27 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,8,24,24">
-        <StackPanel x:Name="Root" Spacing="14" MaxWidth="1200" HorizontalAlignment="Stretch" />
+
+    <!--
+      自动执行页 —— 对齐 Flutter 版 lib/pages/auto_task_page.dart。
+      内容在 code-behind 里构建（与 XHomePage / ModuleSettingsPage 同一做法）。
+
+      横向滚动必须显式关掉：ScrollViewer 默认 HorizontalScrollMode=Enabled 会按
+      **无限宽**测量子内容 —— 设了 HorizontalAlignment=Left 的面板会收缩贴左，
+      设了 MaxWidth 的面板会被拉到 MaxWidth 后溢出被截断。关掉后由外层 Grid
+      按可用宽度布局，根面板 MaxWidth=1200 在宽窗下居中、窄窗下占满。
+    -->
+    <ScrollViewer x:Name="PageScroll"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  HorizontalScrollMode="Disabled"
+                  Padding="24,8,24,24">
+        <Grid>
+            <!-- Center + MaxWidth：宽窗下左右留白对称，窄窗下自然占满 -->
+            <StackPanel x:Name="Root"
+                        Spacing="14"
+                        MaxWidth="1200"
+                        HorizontalAlignment="Center" />
+        </Grid>
     </ScrollViewer>
 </Page>
