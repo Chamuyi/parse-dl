@@ -159,7 +159,10 @@ public sealed class Aria2Engine : IDisposable
                 Log(LastDirError);
             }
         }
-        var dir = System.IO.Path.Combine(AppPaths.DataDir, "downloads");
+        // 兜底走 AppPaths.DefaultDownloadDir（= 安装目录\downloads）。
+        // 以前这里写的是 DataDir\downloads，两处口径不一致，用户看到「数据目录」
+        // 和实际下载落点对不上。
+        var dir = AppPaths.DefaultDownloadDir;
         try { System.IO.Directory.CreateDirectory(dir); } catch { }
         return dir;
     }

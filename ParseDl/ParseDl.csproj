@@ -11,7 +11,22 @@
     <PublishProfile Condition="Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">win-$(Platform).pubxml</PublishProfile>
     <UseWinUI>true</UseWinUI>
     <WinUISDKReferences>false</WinUISDKReferences>
-    <EnableMsixTooling>true</EnableMsixTooling>
+    <!--
+      **2026-10-26 改为非打包（unpackaged）发布**（用户要求「所有数据都要保存在安装目录下，
+      下载路径默认也要在安装路径下」）。
+
+      为什么必须这么做：MSIX 打包版跑在 AppContainer 沙箱里，对安装目录（AppX\）
+      **没有任何写权限** —— 实测 Directory.CreateDirectory 能建出目录、但文件写不进去，
+      于是 settings.json 从来没落过盘。要让「数据跟着软件目录走」，只能放弃包身份。
+
+      代价与配套：
+      - 启动方式变为直接跑 ParseDl.exe（不再走 winapp run / AUMID 激活）；
+      - Windows App SDK 需要 bootstrapper 自初始化，见下方 WindowsAppSdkBootstrapInitialize；
+      - 数据目录规则随之改为 exe 同级 userdata\（见 Services/AppPaths.cs）。
+    -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <WindowsAppSdkBootstrapInitialize>true</WindowsAppSdkBootstrapInitialize>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>

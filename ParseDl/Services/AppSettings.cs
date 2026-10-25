@@ -105,6 +105,16 @@ public sealed class AppSettings
             WriteLogs = loaded.WriteLogs;
             // 2026-10-24 新增的一批字段集中在这一处读，减少与并行分支的合并冲突
             LoadExtras(loaded);
+
+            // ── 2026-10-26 路径迁移 ─────────────────────────────────────
+            // 用户要求「所有数据保存在安装目录下，下载路径默认也在安装路径下」，工程已从
+            // MSIX 打包改成非打包，数据目录从包容器 LocalState 换到 exe 同级 userdata。
+            // 老版本写下的绝对路径会指向旧位置，这里统一改写，免得设置页显示旧路径。
+            SaveDirBase = MigrateLegacyPath(SaveDirBase);
+            if (Modules is not null)
+            {
+                foreach (var m in Modules.Values) m.SaveDir = MigrateLegacyPath(m.SaveDir);
+            }
         }
         catch (Exception ex)
         {
@@ -167,6 +177,44 @@ public sealed class AppSettings
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[Settings] 保存失败: {ex.Message}");
+        }
+    }
+    /// <summary>
+    /// 把旧版本留下的绝对路径改写到新位置（2026-10-26 改非打包发布时新增）。
+    ///
+    /// 只处理两种旧形态，其余原样返回（用户自己选的别的盘不动）：
+    /// 1. 旧包容器路径 %LOCALAPPDATA%\Packages\<pkg>\LocalState\... → 安装目录\...
+    /// 2. 旧兜底路径 %LOCALAPPDATA%\ParseDl\... → 安装目录\...
+    /// </summary>
+    private static string MigrateLegacyPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return path ?? "";
+        try
+        {
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var packages = Path.Combine(localAppData, "Packages");
+            var fallback = Path.Combine(localAppData, "ParseDl");
+
+            string? tail = null;
+            if (path.StartsWith(packages, StringComparison.OrdinalIgnoreCase))
+            {
+                var i = path.IndexOf("LocalState", StringComparison.OrdinalIgnoreCase);
+                if (i >= 0) tail = path.Substring(i + "LocalState".Length).TrimStart('\\', '/');
+            }
+            else if (path.StartsWith(fallback, StringComparison.OrdinalIgnoreCase))
+            {
+                tail = path.Substring(fallback.Length).TrimStart('\\', '/');
+            }
+            if (tail is null) return path;
+
+            var install = AppPaths.InstallDir;
+            if (tail.StartsWith("downloads", StringComparison.OrdinalIgnoreCase))
+                return Path.Combine(install, "downloads");
+            return Path.Combine(install, "userdata", tail);
+        }
+        catch
+        {
+            return path;
         }
     }
 }

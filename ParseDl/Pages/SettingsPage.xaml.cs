@@ -735,6 +735,29 @@ public sealed partial class SettingsPage : Page
         dataPanel.Children.Add(openData);
         panel.Children.Add(SettingRows.Card("数据目录", "设置、台账与下载记录都存这里", dataPanel));
 
+        // 用户 2026-10-26 要求「下载路径默认也要在安装路径下」—— 这里显式把默认下载
+        // 目录露出来，省得用户去猜文件落哪了。设置里填了自定义目录时如实显示自定义值。
+        var dlPanel = new StackPanel { Spacing = 8 };
+        var custom = AppSettings.Instance.SaveDirBase;
+        var effective = Aria2Engine.DefaultDir();
+        dlPanel.Children.Add(new TextBlock
+        {
+            Text = effective,
+            FontSize = 13,
+            FontFamily = new FontFamily("Consolas"),
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        });
+        dlPanel.Children.Add(SettingRows.Description(
+            string.IsNullOrWhiteSpace(custom)
+                ? "默认在安装目录下的 downloads\\（与软件同目录，拷走整个文件夹就带走全部数据）。" +
+                  (string.IsNullOrEmpty(Aria2Engine.LastDirError) ? "" : "\n注意：" + Aria2Engine.LastDirError)
+                : "已自定义为上面这个目录（留空则回到安装目录下的 downloads\\）。"));
+        var openDl = new Button { Content = "打开下载目录" };
+        openDl.Click += (_, _) => OpenInExplorer(effective);
+        dlPanel.Children.Add(openDl);
+        panel.Children.Add(SettingRows.Card("默认下载目录", "下载产物默认落点", dlPanel));
+
         var filePanel = new StackPanel { Spacing = 6 };
         filePanel.Children.Add(new TextBlock
         {
