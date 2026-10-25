@@ -242,7 +242,9 @@ public sealed partial class MainWindow : Window
                 NavFrame.Navigate(typeof(DouyinParsePage), this);
                 break;
             case "bili":
-                NavFrame.Navigate(typeof(ParsePage), new ParseNavArgs(ParseKind.Bili, this));
+                // 用户 2026-10-25 需求：B 站解析要像原项目一样「左浏览、右抓取」，
+                // 所以走 BiliPage（内嵌 WebView2），不再用纯表单的 ParsePage。
+                NavFrame.Navigate(typeof(BiliPage), this);
                 break;
             case "bili-batch":
                 NavFrame.Navigate(typeof(BiliBatchPage), this);
