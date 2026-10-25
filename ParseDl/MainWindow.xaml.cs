@@ -29,6 +29,14 @@ public sealed partial class MainWindow : Window
         AppTitleBar.IsBackButtonVisible = false;
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         AppWindow.SetIcon("Assets/AppIcon.ico");
+        // 任务栏图标：**必须同时设 Window.Icon**。
+        // AppWindow.SetIcon 只影响标题栏那枚小图标；非打包应用的任务栏按钮取的是
+        // Window.Icon（WinAppSDK 1.5+ 才有这个属性）。只设前者的话，任务栏会显示
+        // 一个带叉的占位方块 —— 2026-10-26 用户报「图标不对」就是这个。
+        TrySetWindowIcon();
+        // 任务栏图标要在**窗口真正显示之后**再设一次：任务栏按钮是在窗口首次显示时
+        // 创建并缓存图标的，太早设会被忽略（实测 WM_SETICON 在构造函数里设了没用）。
+        Activated += (_, _) => TrySetWindowIcon();
 
         _material = new MaterialService(this);
 
@@ -307,4 +315,60 @@ public sealed partial class MainWindow : Window
             if (item.Id == routeId) return item.Label;
         return routeId;
     }
+
+    /// <summary>
+    /// 设窗口大图标（**任务栏按钮用的就是这个**）。
+    ///
+    /// 为什么不能用 Window.Icon：本工程用的 WinAppSDK 2.3.9 里 Window 还没有
+    /// Icon 属性（1.6+ 才加），编译报 CS0103。改用 Win32 的 WM_SETICON 直接塞：
+    /// ICON_BIG(1) 是任务栏/Alt-Tab 用的，ICON_SMALL(0) 是标题栏左上角那枚。
+    /// AppWindow.SetIcon 只覆盖后者，所以之前任务栏一直是占位方块。
+    /// </summary>
+    private void TrySetWindowIcon()
+    {
+        try
+        {
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            if (hwnd == IntPtr.Zero) return;
+
+            var icoPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets\\AppIcon.ico");
+            if (!System.IO.File.Exists(icoPath)) return;
+
+            // 用 ExtractIconEx 而不是 LoadImage：实测 LoadImageW 指定 cx/cy 时，
+            // 若 ico 里没有精确匹配的那一档会返回空句柄，进而 WM_SETICON 塞进系统默认
+            // 的「带叉方块」图标（这就是任务栏一直显示方块的真因）。
+            // ExtractIconEx 会按 ico 自带的档位返回大/小两枚，稳。
+            if (_hIconBig == IntPtr.Zero || _hIconSmall == IntPtr.Zero)
+            {
+                var big = new IntPtr[1];
+                var small = new IntPtr[1];
+                var got = ExtractIconExW(icoPath, 0, big, small, 1);
+                if (got > 0)
+                {
+                    if (_hIconBig == IntPtr.Zero) _hIconBig = big[0];
+                    if (_hIconSmall == IntPtr.Zero) _hIconSmall = small[0];
+                }
+            }
+
+            if (_hIconBig != IntPtr.Zero) SendMessageW(hwnd, WM_SETICON, (IntPtr)ICON_BIG, _hIconBig);
+            if (_hIconSmall != IntPtr.Zero) SendMessageW(hwnd, WM_SETICON, (IntPtr)ICON_SMALL, _hIconSmall);
+        }
+        catch { }
+    }
+
+    // ── 窗口图标（Win32 互操作）──────────────────────────────
+    private const uint WM_SETICON = 0x0080;
+
+    /// <summary>已加载的图标句柄。**必须留住**，否则会被 GC/系统回收，任务栏图标变空白。</summary>
+    private static IntPtr _hIconBig = IntPtr.Zero;
+    private static IntPtr _hIconSmall = IntPtr.Zero;
+    private const int ICON_SMALL = 0;
+    private const int ICON_BIG = 1;
+    private const uint IMAGE_ICON = 1;
+
+    [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern uint ExtractIconExW(string file, int index, IntPtr[] large, IntPtr[] small, uint count);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr SendMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 }
