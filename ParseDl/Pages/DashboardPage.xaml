@@ -5,10 +5,9 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,8,24,24">
-        <StackPanel Spacing="16" MaxWidth="1400" HorizontalAlignment="Stretch">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" x:Name="RootScroll" Padding="24,8,24,24">
+        <StackPanel x:Name="RootStack" Spacing="16">
 
-            <!-- 页头：28px 标题 + 14px 副题 + 48×48 图标块 -->
             <Grid Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -26,7 +25,6 @@
                 </StackPanel>
             </Grid>
 
-            <!-- 主卡片：产品名 + 状态 + 版本 -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
@@ -62,8 +60,7 @@
                 </Grid>
             </Border>
 
-            <!-- 4 个统计卡 -->
-            <Grid ColumnSpacing="12">
+            <Grid ColumnSpacing="12" x:Name="StatGrid">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
@@ -104,12 +101,15 @@
                 </Border>
             </Grid>
 
-            <!-- 快捷开始 6 卡 -->
-            <Grid ColumnSpacing="16">
+            <Grid ColumnSpacing="16" RowSpacing="16" x:Name="LowerGrid">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="320" />
+                    <ColumnDefinition Width="340" x:Name="RightCol" />
                 </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
                 <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -120,17 +120,26 @@
                             <TextBlock Text="点一下直达" FontSize="12" Opacity="0.6"
                                        HorizontalAlignment="Right" />
                         </Grid>
-                        <ItemsControl x:Name="QuickGrid">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="3" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                        </ItemsControl>
+                        <!--
+                          快捷开始：2 行 × 3 列，列宽 * —— 卡片必须随容器拉伸。
+                          旧版用 ItemsWrapGrid(MaximumRowsOrColumns=3) + 固定宽度项，
+                          结果卡片挤在左边、右侧留一大片空白，且卡片背景被父级盖住看不见边框。
+                        -->
+                        <Grid x:Name="QuickGrid" ColumnSpacing="8" RowSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                        </Grid>
                     </StackPanel>
                 </Border>
 
-                <StackPanel Grid.Column="1" Spacing="16">
+                <StackPanel Grid.Row="0" Grid.Column="1" Spacing="16" x:Name="RightStack">
                     <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                             BorderThickness="1" CornerRadius="8" Padding="16">
@@ -187,7 +196,6 @@
                 </StackPanel>
             </Grid>
 
-            <!-- 最近活动 -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">

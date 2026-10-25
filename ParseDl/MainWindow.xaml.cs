@@ -77,30 +77,45 @@ public sealed partial class MainWindow : Window
             var tb = AppWindow.TitleBar;
             if (tb is null) return;
 
-            // 前景：深色主题用白，浅色主题用近黑（与 WinUI 标准一致）
-            var fg = isDark
-                ? Windows.UI.Color.FromArgb(255, 255, 255, 255)
-                : Windows.UI.Color.FromArgb(255, 0, 0, 0);
-            // hover/pressed 稍微提亮/压暗，让交互有反馈
-            var hoverFg = isDark
-                ? Windows.UI.Color.FromArgb(255, 255, 255, 255)
-                : Windows.UI.Color.FromArgb(255, 0, 0, 0);
-            var transparent = Windows.UI.Color.FromArgb(0, 0, 0, 0);
-            var hoverBg = isDark
-                ? Windows.UI.Color.FromArgb(30, 255, 255, 255)
-                : Windows.UI.Color.FromArgb(20, 0, 0, 0);
-            var pressedBg = isDark
-                ? Windows.UI.Color.FromArgb(50, 255, 255, 255)
-                : Windows.UI.Color.FromArgb(35, 0, 0, 0);
+            // ── 2026-10-25 重做（真机取证后的结论）──────────────────────
+            //
+            // 用户报的两个现象在这里一次说清：
+            //
+            // (1)「浅色下三键不可辨」根因不在配色，而在**主题没生效**：
+            //     AppPaths 原来把数据目录指到包安装目录（AppX\userdata），
+            //     AppContainer 写不进 settings.json，于是「切浅色 → 重启 → 又是深色」。
+            //     用户那张截图里标题栏其实是浅色的（因为当次运行切成功了），
+            //     但按钮前景仍是系统深色主题的白 —— 两个主题打架。
+            //     现在 AppPaths 落在包容器 LocalState，IsDark 能持久化，
+            //     且下面的颜色**跟随应用内主题**而不是系统主题。
+            //
+            // (2)「hover 是黑块、没有图标」根因是**透明度**：
+            //     AppWindowTitleBar 的 Button*BackgroundColor 只接受**不透明**
+            //     颜色，我上一版传的是 alpha=20 的半透明黑，系统把 alpha 丢掉
+            //     当纯黑画（截图里就是纯黑方块）；同时前景我也设成了黑，
+            //     黑底黑字 → 图标消失。
+            //
+            // 现在的取值全部照 WinUI 官方标题栏配色（不透明，与系统一致）：
+            //   浅色：hover #E6E6E6 / pressed #D2D2D2 / 前景 #1A1A1A
+            //   深色：hover #323232 / pressed #1E1E1E / 前景 #FFFFFF
+            //   关闭键：hover #C42B1C + 白字（Windows 11 惯例，WinUI 同样如此）
+            Windows.UI.Color Rgb(byte r, byte g, byte b) => Windows.UI.Color.FromArgb(255, r, g, b);
 
-            tb.ButtonBackgroundColor = transparent;
-            tb.ButtonInactiveBackgroundColor = transparent;
+            var fg = isDark ? Rgb(0xFF, 0xFF, 0xFF) : Rgb(0x1A, 0x1A, 0x1A);
+            var fgInactive = isDark ? Rgb(0x9A, 0x9A, 0x9A) : Rgb(0x8A, 0x8A, 0x8A);
+
+            var hoverBg = isDark ? Rgb(0x32, 0x32, 0x32) : Rgb(0xE6, 0xE6, 0xE6);
+            var pressedBg = isDark ? Rgb(0x1E, 0x1E, 0x1E) : Rgb(0xD2, 0xD2, 0xD2);
+
+            tb.ButtonBackgroundColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
+            tb.ButtonInactiveBackgroundColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
             tb.ButtonForegroundColor = fg;
-            tb.ButtonInactiveForegroundColor = fg;
+            tb.ButtonInactiveForegroundColor = fgInactive;
             tb.ButtonHoverBackgroundColor = hoverBg;
-            tb.ButtonHoverForegroundColor = hoverFg;
+            tb.ButtonHoverForegroundColor = fg;
             tb.ButtonPressedBackgroundColor = pressedBg;
-            tb.ButtonPressedForegroundColor = hoverFg;
+            tb.ButtonPressedForegroundColor = fg;
+
         }
         catch
         {

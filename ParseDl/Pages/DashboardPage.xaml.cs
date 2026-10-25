@@ -31,7 +31,12 @@ public sealed partial class DashboardPage : Page
     {
         InitializeComponent();
         BuildQuickEntries();
-        Loaded += (_, _) => Refresh();
+        Loaded += (_, _) =>
+        {
+            Refresh();
+            ApplyResponsive();
+            RootScroll.SizeChanged += (_, _) => ApplyResponsive();
+        };
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -42,17 +47,22 @@ public sealed partial class DashboardPage : Page
 
     private void BuildQuickEntries()
     {
-        foreach (var (routeId, glyph, title, sub) in QuickEntries)
+        // 3 列 × 2 行：卡片按星号列宽拉伸，窗口变宽/变窄都跟着走。
+        // 旧版塞进 ItemsWrapGrid + 固定宽度，右侧留白一大片，被用户当场指出。
+        for (var i = 0; i < QuickEntries.Length; i++)
         {
+            var (routeId, glyph, title, sub) = QuickEntries[i];
             var btn = new Button
             {
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Left,
                 Padding = new Thickness(12, 10, 12, 10),
-                Margin = new Thickness(0, 0, 8, 8),
                 MinHeight = 66,
-                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ControlFillColorDefaultBrush"],
-                BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ControlStrokeColorDefaultBrush"],
+                // 卡片底色必须用 ThemeResource 的 CardBackgroundFillColorDefault ——
+                // ControlFillColorDefault 在浅色下几乎与页面底同色，方框「看不见」
+                // 就是用户报的那一条。
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
+                BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
             };
@@ -67,8 +77,13 @@ public sealed partial class DashboardPage : Page
                 Width = 32,
                 Height = 32,
                 CornerRadius = new CornerRadius(6),
-                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ControlFillColorSecondaryBrush"],
-                Child = new FontIcon { Glyph = glyph, FontSize = 14 },
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["AccentFillColorDefaultBrush"],
+                Child = new FontIcon
+                {
+                    Glyph = glyph,
+                    FontSize = 14,
+                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextOnAccentFillColorPrimaryBrush"],
+                },
                 VerticalAlignment = VerticalAlignment.Center,
             };
             Grid.SetColumn(iconBox, 0);
@@ -81,7 +96,14 @@ public sealed partial class DashboardPage : Page
                 Spacing = 2,
             };
             texts.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            texts.Children.Add(new TextBlock { Text = sub, FontSize = 12, Opacity = 0.65, TextTrimming = TextTrimming.CharacterEllipsis });
+            texts.Children.Add(new TextBlock
+            {
+                Text = sub,
+                FontSize = 12,
+                Opacity = 0.65,
+                TextWrapping = TextWrapping.NoWrap,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
             Grid.SetColumn(texts, 1);
             grid.Children.Add(texts);
 
@@ -92,7 +114,37 @@ public sealed partial class DashboardPage : Page
             btn.Content = grid;
             var capturedRoute = routeId;
             btn.Click += (_, _) => _host?.Navigate(capturedRoute);
-            QuickGrid.Items.Add(btn);
+
+            Grid.SetRow(btn, i / 3);
+            Grid.SetColumn(btn, i % 3);
+            QuickGrid.Children.Add(btn);
+        }
+    }
+
+    /// <summary>
+    /// 自适应布局：窗口宽 &lt; 1000 时把右侧三张卡（模块状态 / 下载引擎 / 环境）
+    /// 从「右栏」搬到下方并铺满整行，避免窄窗口下被挤压或截断。
+    /// 用户报的「最大化后位置变了、被截断」就是固定像素列 + 不换行导致的。
+    /// </summary>
+    private void ApplyResponsive()
+    {
+        var width = RootScroll.ActualWidth;
+        if (width <= 0) return;
+        var narrow = width < 1000;
+
+        if (narrow)
+        {
+            Grid.SetRow(RightStack, 1);
+            Grid.SetColumn(RightStack, 0);
+            Grid.SetColumnSpan(RightStack, 2);
+            RightCol.Width = new GridLength(0);
+        }
+        else
+        {
+            Grid.SetRow(RightStack, 0);
+            Grid.SetColumn(RightStack, 1);
+            Grid.SetColumnSpan(RightStack, 1);
+            RightCol.Width = new GridLength(340);
         }
     }
 
