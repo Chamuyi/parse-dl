@@ -23,6 +23,11 @@ public sealed record BiliVideoInfo
     public int DurationSec { get; init; }
     /// <summary>分 P 列表（单 P 视频只有一项）。</summary>
     public IReadOnlyList<BiliPage> Pages { get; init; } = Array.Empty<BiliPage>();
+    /// <summary>
+    /// view 接口 data 节点的**原样 JSON**。
+    /// 给元数据那一族用（json 档要的就是「原样存一份」，不做过滤与排序）。
+    /// </summary>
+    public string RawJson { get; init; } = "";
 }
 
 public sealed record BiliPage
@@ -43,6 +48,8 @@ public sealed record BiliStream
     /// <summary>编码：AVC / HEVC / AV1，认不出为空。</summary>
     public string Codec { get; init; } = "";
     public long SizeBytes { get; init; }
+    /// <summary>dash 的 bandwidth（bps）。音频档位靠它排序 —— 不能按 id 排。</summary>
+    public long Bitrate { get; init; }
     public bool IsAudio { get; init; }
 }
 
@@ -50,6 +57,8 @@ public sealed record BiliStream
 public sealed record BiliPlayInfo
 {
     public long Cid { get; init; }
+    /// <summary>true = 新接口 dash（视频音频分离）；false = 老接口 durl（完整单文件）。</summary>
+    public bool IsDash { get; init; }
     public IReadOnlyList<BiliStream> Videos { get; init; } = Array.Empty<BiliStream>();
     public IReadOnlyList<BiliStream> Audios { get; init; } = Array.Empty<BiliStream>();
 }
@@ -77,6 +86,11 @@ public sealed class BiliApi
     public const string Host = "api.bilibili.com";
     public const string Referer = "https://www.bilibili.com/";
     public const string Origin = "https://www.bilibili.com";
+
+    /// <summary>统一 UA —— 图床与接口都认它，抽出来免得两处漂。</summary>
+    public const string UserAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
     /// <summary>画质 id → 标签。只在接口没给文案时兜底。</summary>
     public static readonly IReadOnlyDictionary<int, string> QualityNames = new Dictionary<int, string>
@@ -148,9 +162,7 @@ public sealed class BiliApi
         var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.TryAddWithoutValidation("Referer", Referer);
         req.Headers.TryAddWithoutValidation("Origin", Origin);
-        req.Headers.TryAddWithoutValidation("User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
+        req.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
         var cookie = EffectiveCookie();
         if (cookie.Length > 0) req.Headers.TryAddWithoutValidation("Cookie", cookie);
         return req;
@@ -230,15 +242,116 @@ public sealed class BiliApi
         return await resp.Content.ReadAsByteArrayAsync(ct);
     }
 
+    /// <summary>取二进制响应，**走 wbi 签名**（弹幕 seg.so 在新版接口下需要签名）。</summary>
+    public async Task<byte[]> GetSignedBytesAsync(
+        string path, IDictionary<string, string?> parameters, CancellationToken ct = default)
+    {
+        var key = await EnsureMixinKeyAsync(ct);
+        var kv = new Dictionary<string, string?>(parameters, StringComparer.Ordinal);
+        var signed = BiliWbi.Sign(kv, key);
+        var query = BiliWbi.Query(signed);
+        return await GetBytesAsync(path + (path.Contains((char)63) ? "&" : "?") + query, ct);
+    }
+
     /// <summary>给列表接口用的公开取数入口（复用同一套请求头与重试策略）。</summary>
     public Task<JsonElement> GetDataPublicAsync(string path, CancellationToken ct = default)
         => GetDataAsync(path, ct);
 
-    /// <summary>取视频基本信息（含分 P 列表）。</summary>
-    public async Task<BiliVideoInfo> GetVideoInfoAsync(string bvid, CancellationToken ct = default)
+    /// <summary>给列表 / 弹幕 / 字幕用的**已签名**取数入口。</summary>
+    public Task<JsonElement> GetSignedDataPublicAsync(
+        string path, IDictionary<string, string?> parameters, CancellationToken ct = default)
+        => GetSignedDataAsync(path, parameters, ct);
+
+    // ── wbi 签名 ─────────────────────────────────────────────
+
+    private string _mixinKey = "";
+    private DateTime _mixinKeyAt = DateTime.MinValue;
+    private readonly SemaphoreSlim _wbiLock = new(1, 1);
+
+    /// <summary>密钥按天轮换，缓存 6 小时足够；并发首次请求只取一次。</summary>
+    private async Task<string> EnsureMixinKeyAsync(CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(bvid)) throw new ArgumentException("bvid 为空", nameof(bvid));
-        var data = await GetDataAsync($"/x/web-interface/view?bvid={Uri.EscapeDataString(bvid)}", ct);
+        if (_mixinKey.Length == BiliWbi.MixinKeyLength &&
+            (DateTime.UtcNow - _mixinKeyAt).TotalHours < 6)
+            return _mixinKey;
+
+        await _wbiLock.WaitAsync(ct);
+        try
+        {
+            if (_mixinKey.Length == BiliWbi.MixinKeyLength &&
+                (DateTime.UtcNow - _mixinKeyAt).TotalHours < 6)
+                return _mixinKey;
+
+            // nav 未登录时也回 wbi_img（这正是匿名也能签名的原因）。
+            // **不能用 GetDataAsync**：未登录时 nav 的 code 是 -101，
+            // 那个方法会当成业务错误直接抛，而我们要的只是 data.wbi_img。
+            var root = await GetRawAsync("https://" + Host + "/x/web-interface/nav", ct);
+            var imgUrl = "";
+            var subUrl = "";
+            if (root.TryGetProperty("data", out var data) &&
+                data.TryGetProperty("wbi_img", out var wbi))
+            {
+                if (wbi.TryGetProperty("img_url", out var iu)) imgUrl = iu.GetString() ?? "";
+                if (wbi.TryGetProperty("sub_url", out var su)) subUrl = su.GetString() ?? "";
+            }
+            if (imgUrl.Length == 0 || subUrl.Length == 0)
+                throw new BiliApiException("取 wbi 签名密钥失败：nav 响应里没有 wbi_img（img_url/sub_url）");
+
+            _mixinKey = BiliWbi.MixinKey(BiliWbi.KeyFromUrl(imgUrl), BiliWbi.KeyFromUrl(subUrl));
+            _mixinKeyAt = DateTime.UtcNow;
+            return _mixinKey;
+        }
+        finally
+        {
+            _wbiLock.Release();
+        }
+    }
+
+    /// <summary>发一次原始请求，取回完整响应体（**不检查 code**）—— 只给 nav 这类「非 0 也有数据」的接口用。</summary>
+    private async Task<JsonElement> GetRawAsync(string url, CancellationToken ct)
+    {
+        await EnsureBuvidAsync(ct);
+        using var req = NewRequest(url);
+        using var resp = await _http.SendAsync(req, ct);
+        var text = await resp.Content.ReadAsStringAsync(ct);
+        var trimmed = text.TrimStart();
+        if (trimmed.Length == 0 || trimmed[0] == (char)60)
+            throw new BiliApiException("B 站返回了 HTML 而不是 JSON（HTTP " + (int)resp.StatusCode + "），通常是触发风控。");
+        using var doc = JsonDocument.Parse(text);
+        return doc.RootElement.Clone();
+    }
+
+    /// <summary>
+    /// 走 wbi 签名的取数（playurl / view / space arc / 弹幕 / 字幕都用它）。
+    ///
+    /// **签名用过滤后的值拼 query，发出的请求必须用同一串字节**，否则服务端重算出的
+    /// w_rid 对不上 —— 所以这里把 BiliWbi.Sign 的结果直接喂给 BiliWbi.Query。
+    /// </summary>
+    public async Task<JsonElement> GetSignedDataAsync(
+        string path, IDictionary<string, string?> parameters, CancellationToken ct = default)
+    {
+        var key = await EnsureMixinKeyAsync(ct);
+        var kv = new Dictionary<string, string?>(parameters, StringComparer.Ordinal);
+        var signed = BiliWbi.Sign(kv, key);
+        var query = BiliWbi.Query(signed);
+        var url = path + (path.Contains((char)63) ? "&" : "?") + query;
+        return await GetDataAsync(url, ct);
+    }
+
+    /// <summary>取视频基本信息（含分 P 列表）。bvid 与 aid 传其一即可（av 号路径靠 aid）。</summary>
+    public async Task<BiliVideoInfo> GetVideoInfoAsync(
+        string? bvid = null, long? aid = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(bvid) && aid is null)
+            throw new ArgumentException("bvid 与 aid 至少要有一个", nameof(bvid));
+
+        var requestBvid = bvid;
+        var data = await GetDataAsync(
+            "/x/web-interface/view?" + (string.IsNullOrWhiteSpace(requestBvid)
+                ? ("aid=" + aid)
+                : ("bvid=" + Uri.EscapeDataString(requestBvid!) + (aid is null ? "" : ("&aid=" + aid)))), ct);
+        if (string.IsNullOrWhiteSpace(requestBvid) && data.TryGetProperty("bvid", out var bv))
+            requestBvid = bv.GetString() ?? "";
 
         var pages = new List<BiliPage>();
         if (data.TryGetProperty("pages", out var pageArr) && pageArr.ValueKind == JsonValueKind.Array)
@@ -257,7 +370,7 @@ public sealed class BiliApi
 
         return new BiliVideoInfo
         {
-            Bvid = data.TryGetProperty("bvid", out var b) ? b.GetString() ?? bvid : bvid,
+            Bvid = data.TryGetProperty("bvid", out var b) ? b.GetString() ?? (requestBvid ?? "") : (requestBvid ?? ""),
             Aid = data.TryGetProperty("aid", out var a) ? a.GetInt64() : 0,
             Title = data.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "",
             Desc = data.TryGetProperty("desc", out var d) ? d.GetString() ?? "" : "",
@@ -269,41 +382,48 @@ public sealed class BiliApi
             OwnerName = data.TryGetProperty("owner", out var owner2) && owner2.TryGetProperty("name", out var on)
                 ? on.GetString() ?? "" : "",
             Pages = pages,
+            RawJson = data.GetRawText(),
         };
     }
 
     /// <summary>
     /// 取播放地址（视频 + 音频分离，需自行合并）。
-    /// qn=127 请求最高清晰度；接口会返回它实际能给的全部档位。
+    ///
+    /// [qn] 是**上限**而不是档位：B 站会按账号权限在 support_formats 里裁掉拿不到的
+    /// 高阶档，所以「传 116 只给到 80」是正常结果；匿名时通常只给到 32（480P）。
+    ///
+    /// **必须走 wbi 签名**（原实现直接拼裸 query 是 bug 之一）：未签名的
+    /// /x/player/wbi/playurl 会被风控，表现为 code=-403 或空响应。
     /// </summary>
-    public async Task<BiliPlayInfo> GetPlayInfoAsync(string bvid, long cid, CancellationToken ct = default)
+    public async Task<BiliPlayInfo> GetPlayInfoAsync(
+        string? bvid, long cid, int qn = 127, long? aid = null, CancellationToken ct = default)
     {
-        var data = await GetDataAsync(
-            $"/x/player/wbi/playurl?bvid={Uri.EscapeDataString(bvid)}&cid={cid}&qn=127&fnval=16&fourk=1", ct);
+        if (cid <= 0) throw new ArgumentException("cid 非法", nameof(cid));
+        if (string.IsNullOrWhiteSpace(bvid) && aid is null)
+            throw new ArgumentException("bvid 与 aid 至少要有一个", nameof(bvid));
+
+        var data = await GetSignedDataAsync("/x/player/wbi/playurl", new Dictionary<string, string?>
+        {
+            ["bvid"] = bvid,
+            ["aid"] = aid?.ToString(),
+            ["cid"] = cid.ToString(),
+            ["qn"] = qn.ToString(),
+            ["fnval"] = "4048",   // 4048 = dash + 全部特性（原实现用的 16 拿不到 HDR/杜比档）
+            ["fnver"] = "0",
+            ["fourk"] = "1",
+        }, ct);
+
+        // support_formats 里那一份才是 B 站自己怎么说这一档的，优先用它
+        var labels = QualityLabelsByQn(data);
 
         var videos = new List<BiliStream>();
         var audios = new List<BiliStream>();
-
-        // 老接口：durl（整段 flv/mp4，无分离音轨）
-        if (data.TryGetProperty("durl", out var durl) && durl.ValueKind == JsonValueKind.Array)
-        {
-            var idx = 0;
-            foreach (var d in durl.EnumerateArray())
-            {
-                idx++;
-                videos.Add(new BiliStream
-                {
-                    Url = d.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "",
-                    QualityId = 0,
-                    QualityLabel = "原始",
-                    SizeBytes = d.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0,
-                });
-            }
-        }
+        var isDash = false;
 
         // 新接口：dash（视频音频分离，质量更高）
         if (data.TryGetProperty("dash", out var dash) && dash.ValueKind == JsonValueKind.Object)
         {
+            isDash = true;
             if (dash.TryGetProperty("video", out var vArr) && vArr.ValueKind == JsonValueKind.Array)
             {
                 foreach (var v in vArr.EnumerateArray())
@@ -313,9 +433,12 @@ public sealed class BiliApi
                     {
                         Url = PickBaseUrl(v),
                         QualityId = qid,
-                        QualityLabel = QualityNames.TryGetValue(qid, out var ql) ? ql : ("Q" + qid),
+                        QualityLabel = labels.TryGetValue(qid, out var ql) && ql.Length > 0
+                            ? ql
+                            : (QualityNames.TryGetValue(qid, out var ql2) ? ql2 : ("Q" + qid)),
                         Codec = CodecFromCodecs(v),
                         SizeBytes = v.TryGetProperty("size", out var sz2) ? sz2.GetInt64() : 0,
+                        Bitrate = v.TryGetProperty("bandwidth", out var bw) ? bw.GetInt64() : 0,
                     });
                 }
             }
@@ -323,26 +446,77 @@ public sealed class BiliApi
             {
                 foreach (var a in aArr.EnumerateArray())
                 {
-                    var qid = a.TryGetProperty("id", out var aid) ? aid.GetInt32() : 0;
+                    var qid = a.TryGetProperty("id", out var aidEl) ? aidEl.GetInt32() : 0;
                     audios.Add(new BiliStream
                     {
                         Url = PickBaseUrl(a),
                         QualityId = qid,
                         QualityLabel = AudioNames.TryGetValue(qid, out var al) ? al : ("A" + qid),
                         SizeBytes = a.TryGetProperty("size", out var sz3) ? sz3.GetInt64() : 0,
+                        Bitrate = a.TryGetProperty("bandwidth", out var abw) ? abw.GetInt64() : 0,
                         IsAudio = true,
                     });
                 }
             }
         }
 
-        // 视频按清晰度降序；音频按固定档位序（不能按 id 排）
+        // 老接口：durl（整段 flv/mp4，无分离音轨）—— 只在没有 dash 时才算数，
+        // 两者同时存在时以 dash 为准（durl 那几条是低清兜底，混进来会污染选流）。
+        if (!isDash && data.TryGetProperty("durl", out var durl) && durl.ValueKind == JsonValueKind.Array)
+        {
+            var serverQn = data.TryGetProperty("quality", out var qEl) && qEl.ValueKind == JsonValueKind.Number
+                ? qEl.GetInt32() : 0;
+            foreach (var d in durl.EnumerateArray())
+            {
+                videos.Add(new BiliStream
+                {
+                    Url = d.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "",
+                    QualityId = serverQn,
+                    QualityLabel = labels.TryGetValue(serverQn, out var ql3) && ql3.Length > 0
+                        ? ql3
+                        : (QualityNames.TryGetValue(serverQn, out var ql4) ? ql4 : "原始"),
+                    SizeBytes = d.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0,
+                });
+            }
+        }
+
+        // 视频按清晰度降序；音频按码率降序（码率单调，且不怕 B 站新增音质档）
         var orderedVideos = videos.OrderByDescending(x => x.QualityId).ToList();
         var orderedAudios = audios
-            .OrderBy(x => Array.IndexOf(AudioRank, x.QualityId) is var idx && idx < 0 ? 99 : idx)
+            .OrderByDescending(x => x.Bitrate)
+            .ThenBy(x => Array.IndexOf(AudioRank, x.QualityId) is var idx && idx < 0 ? 99 : idx)
             .ToList();
 
-        return new BiliPlayInfo { Cid = cid, Videos = orderedVideos, Audios = orderedAudios };
+        return new BiliPlayInfo
+        {
+            Cid = cid,
+            IsDash = isDash,
+            Videos = orderedVideos,
+            Audios = orderedAudios,
+        };
+    }
+
+    /// <summary>
+    /// support_formats[] → qn 到文案的映射。
+    /// 三个历史字段名（quality_desc / new_description / display_desc）都要认。
+    /// </summary>
+    public static Dictionary<int, string> QualityLabelsByQn(JsonElement data)
+    {
+        var map = new Dictionary<int, string>();
+        if (!data.TryGetProperty("support_formats", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return map;
+        foreach (var f in arr.EnumerateArray())
+        {
+            if (!f.TryGetProperty("quality", out var q) || q.ValueKind != JsonValueKind.Number) continue;
+            var qn = q.GetInt32();
+            foreach (var key in new[] { "new_description", "display_desc", "quality_desc" })
+            {
+                if (!f.TryGetProperty(key, out var v)) continue;
+                var s = v.GetString();
+                if (!string.IsNullOrWhiteSpace(s)) { map[qn] = s!.Trim(); break; }
+            }
+        }
+        return map;
     }
 
     /// <summary>dash 的 baseUrl 可能为空但有 backupUrl，取第一个可用的。</summary>

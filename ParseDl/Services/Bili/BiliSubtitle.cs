@@ -29,8 +29,12 @@ public static class BiliSubtitleService
         BiliApi api, string bvid, long cid, CancellationToken ct = default)
     {
         var result = new List<(string, string, string)>();
-        var path = $"/x/player/wbi/v2?bvid={Uri.EscapeDataString(bvid)}&cid={cid}";
-        var data = await api.GetDataPublicAsync(path, ct);
+        // **走 wbi 签名**：/x/player/wbi/v2 不签名会被风控。
+        var data = await api.GetSignedDataAsync("/x/player/wbi/v2", new Dictionary<string, string?>
+        {
+            ["bvid"] = bvid,
+            ["cid"] = cid.ToString(),
+        }, ct);
 
         if (!data.TryGetProperty("subtitle", out var sub) ||
             !sub.TryGetProperty("subtitles", out var arr) ||

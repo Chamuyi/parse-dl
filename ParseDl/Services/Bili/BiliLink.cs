@@ -75,11 +75,46 @@ public static class BiliLink
         if (query.TryGetValue("fid", out var fidStr) && long.TryParse(fidStr, out var fid))
             return new BiliRef { FavId = fid };
 
-        // 合集 / 系列：/space/xxx 或 /list/ 下带 season_id / series_id
+        // ── 先把 mid 抠出来，**合集 / 系列返回时必须一起带上** ──────────
+        //
+        // 修 bug（2026-10-25）：原实现先判 season_id 就 return，把路径里的 mid 丢了，
+        // 于是合集链接（形如 space.bilibili.com/228292951/channel/collectiondetail?sid=9225450）
+        // 解析出来的 BiliRef 只有 SeasonId、Mid 为 null，列表页报「缺 mid」直接失败。
+        // 合集 / 系列两个接口都**必须**带 mid，所以这里先解析出来，后面各分支复用。
+        long? midFromPath = null;
+        if (uri.Host.StartsWith("space.bilibili.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var onlyId = Regex.Match(path, "^/(\\d+)");
+            if (onlyId.Success) midFromPath = long.Parse(onlyId.Groups[1].Value);
+        }
+        if (midFromPath is null)
+        {
+            var spaceM = Regex.Match(path, "^/space/(\\d+)");
+            if (spaceM.Success) midFromPath = long.Parse(spaceM.Groups[1].Value);
+        }
+        if (midFromPath is null && query.TryGetValue("mid", out var midStr) &&
+            long.TryParse(midStr, out var midFromQuery))
+            midFromPath = midFromQuery;
+
+        // 合集 / 系列：两种参数名都要认。
+        //
+        // 修 bug（2026-10-25）：UP 主空间里的合集/系列链接用的是 **sid**（B 站自己前端
+        // 就写 ?sid=…），而不是 season_id / series_id；原实现只认后两个，于是真实
+        // 链接一个都解析不出来。这里按**路径**判它是合集还是系列：
+        //   /channel/collectiondetail?sid=N → 合集（season）
+        //   /channel/seriesdetail?sid=N     → 系列（series）
         if (query.TryGetValue("season_id", out var sidStr) && long.TryParse(sidStr, out var sid))
-            return new BiliRef { SeasonId = sid };
+            return new BiliRef { SeasonId = sid, Mid = midFromPath };
         if (query.TryGetValue("series_id", out var serStr) && long.TryParse(serStr, out var ser))
-            return new BiliRef { SeriesId = ser };
+            return new BiliRef { SeriesId = ser, Mid = midFromPath };
+
+        if (query.TryGetValue("sid", out var shortSid) && long.TryParse(shortSid, out var sidVal))
+        {
+            if (path.Contains("seriesdetail", StringComparison.OrdinalIgnoreCase))
+                return new BiliRef { SeriesId = sidVal, Mid = midFromPath };
+            // collectiondetail 与「/list/ 下带 sid」都按合集处理
+            return new BiliRef { SeasonId = sidVal, Mid = midFromPath };
+        }
 
         // 视频页 /video/BVxxx 或 /video/av123
         var bv = BvidRe.Match(path + "?" + uri.Query);
@@ -90,15 +125,8 @@ public static class BiliLink
         // UP 主空间。两种写法都要认：
         //   ① space.bilibili.com/546195  —— **host 是 space，路径只有 /546195**（实测踩过）
         //   ② www.bilibili.com/space/546195 —— 路径带 /space 前缀
-        if (uri.Host.StartsWith("space.bilibili.com", StringComparison.OrdinalIgnoreCase))
-        {
-            var onlyId = Regex.Match(path, "^/(\\d+)");
-            if (onlyId.Success) return new BiliRef { Mid = long.Parse(onlyId.Groups[1].Value) };
-        }
-        var spaceM = Regex.Match(path, "^/space/(\\d+)");
-        if (spaceM.Success) return new BiliRef { Mid = long.Parse(spaceM.Groups[1].Value) };
-        if (query.TryGetValue("mid", out var midStr) && long.TryParse(midStr, out var mid2))
-            return new BiliRef { Mid = mid2 };
+        // 两处都已在上面的 midFromPath 里解析过，这里直接用，不再重复匹配。
+        if (midFromPath is long midOnly) return new BiliRef { Mid = midOnly };
 
         return null;
     }
@@ -150,6 +178,18 @@ public static class BiliLinkSelfTest
         Check("合集 season_id", BiliLink.Parse("https://www.bilibili.com/list/BV1xx?season_id=1729")?.SeasonId == 1729);
         Check("系列 series_id", BiliLink.Parse("https://www.bilibili.com/list/BV1xx?series_id=88")?.SeriesId == 88);
         Check("收藏夹 ml", BiliLink.Parse("https://www.bilibili.com/medialist/detail/ml152431")?.FavId == 152431);
+        // 修 bug 后的回归判据：合集链接必须**同时**带回 mid（缺 mid 列表页直接失败）
+        var seasonRef = BiliLink.Parse(
+            "https://space.bilibili.com/228292951/channel/collectiondetail?sid=9225450");
+        Check("合集链接带回 mid",
+            seasonRef?.Mid == 228292951 && seasonRef?.SeasonId == 9225450,
+            "mid=" + (seasonRef?.Mid?.ToString() ?? "null") +
+            " season=" + (seasonRef?.SeasonId?.ToString() ?? "null"));
+        var seriesRef = BiliLink.Parse("https://space.bilibili.com/228292951/channel/seriesdetail?sid=88");
+        Check("系列链接带回 mid",
+            seriesRef?.Mid == 228292951 && seriesRef?.SeriesId == 88,
+            "mid=" + (seriesRef?.Mid?.ToString() ?? "null"));
+
         Check("UP 主空间（space 子域）", BiliLink.Parse("https://space.bilibili.com/546195")?.Mid == 546195);
         Check("UP 主空间（/space 路径）", BiliLink.Parse("https://www.bilibili.com/space/546195")?.Mid == 546195);
         Check("b23 短链识别", BiliLink.IsShortLink("https://b23.tv/abc123"));
