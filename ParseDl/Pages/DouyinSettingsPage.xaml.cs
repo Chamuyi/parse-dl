@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -20,6 +21,56 @@ namespace ParseDl.Pages;
 /// </summary>
 public sealed partial class DouyinSettingsPage : Page
 {
+    /// <summary>
+    /// 抖音侧可用变量（与 Flutter 版 kDouyinTemplateVars 逐条一致：20 个、顺序照抄）。
+    /// 元数据取自 DouyinTemplate.Vars（引擎那一份，单一来源），页面不再各写一份文案。
+    /// </summary>
+    private static readonly TemplateVarInfo[] DouyinVars = DouyinTemplate.Vars
+        .Select(v => new TemplateVarInfo(v.Name, v.Desc, v.ParamExample, v.ParamDesc))
+        .ToArray();
+
+    /// <summary>文件夹模板的「填入默认」值（对齐 Flutter 版 douyin_section 的 onUseDefault）。</summary>
+    private const string DefaultDirTpl = "%AUTHOR%";
+
+    /// <summary>变量面板底部的补充提示（对齐 Flutter 版 douyin_section 的 varHint）。</summary>
+    private const string VarHintForDirTemplate =
+        "提示：文件夹模板建议只用「作者 / 作品」级变量；%MEDIA_INDEX%、%EXT% 这类逐文件变量会让每条媒体各建一个文件夹。";
+
+    /// <summary>预览用的示例作品（同 Flutter 版 douyinExampleMedia 的那组数）。</summary>
+    private static readonly DouyinItem ExampleItem = new()
+    {
+        Id = "7412345678901234567",
+        Type = DouyinMediaType.Video,
+        Url = "https://v3-web.douyinvod.com/example/media.mp4",
+        PostId = "7412345678901234567",
+        Text = "傍晚的海边，风把云吹成一条线。#旅行 #vlog",
+        CreatedAt = new DateTime(2024, 1, 20, 21, 15, 36),
+        UserId = "1234567890123456",
+        UserName = "海边的猫",
+        AuthorUniqueId = "haibiandema",
+        MediaIndex = 1,
+        Width = 1080,
+        Height = 1920,
+        DurationMs = 45000,
+        LikeCount = 12345,
+        CommentCount = 678,
+        CollectCount = 2345,
+        ShareCount = 89,
+        Chosen = new DouyinVariant
+        {
+            Width = 1080,
+            Height = 1920,
+            Fps = 30,
+            Bitrate = 2400000,
+            Size = 12582912,
+        },
+    };
+
+    // 命名模板控件（BuildNamingGroup 里创建；开关回调里要复用它）
+    private TemplateEditor? _templateEditor;
+    private TemplateField? _dirField;
+    private TemplateField? _nameField;
+
     public DouyinSettingsPage()
     {
         InitializeComponent();
@@ -127,6 +178,23 @@ public sealed partial class DouyinSettingsPage : Page
 
     private static void Mutate(Action<DouyinConfig> change) => DouyinSettings.Mutate(change);
 
+    /// <summary>
+    /// 文件夹模板的输出示例：只做变量展开、不做整串清洗（与 Flutter 版
+    /// douyin_section 的 example: resolveVariables(...) 同口径 —— 目录名不是文件名，
+    /// 清掉 / 就没法演示多级目录了）。
+    /// </summary>
+    private static string RenderDirTemplate(string template)
+        => DouyinTemplate.Expand(template, ExampleItem).Trim();
+
+    /// <summary>
+    /// 文件名模板的输出示例：展开 + 抖音侧整串清洗，与真正下载走**同一条**路径
+    /// （DouyinTemplate.BuildTarget 里的 FileNameTemplate.DouyinFilenamify），
+    /// 所以「输出示例」与落盘名字不可能漂移。
+    /// </summary>
+    private static string RenderNameTemplate(string template)
+        => FileNameTemplate.DouyinFilenamify(
+            DouyinTemplate.Expand(template, ExampleItem).Trim(), ExampleItem.Id);
+
     // ── 命名 ───────────────────────────────────────────────────
 
     private UIElement BuildNamingGroup(DouyinConfig cfg)
@@ -168,13 +236,13 @@ public sealed partial class DouyinSettingsPage : Page
         panel.Children.Add(dirGrid);
 
         panel.Children.Add(Row("启用保存文件夹", "开 = 按文件夹模板建子目录；关 = 全部平铺在保存目录里",
-            Toggle(cfg.EnableSaveFolder, v => Mutate(c => c.EnableSaveFolder = v))));
-
-        panel.Children.Add(Row("文件夹模板", "可用变量见下方变量表",
-            Text(cfg.DirTemplate, v => Mutate(c => c.DirTemplate = v), 320)));
-
-        panel.Children.Add(Row("文件名模板", "空则退回「媒体ID_时间戳.扩展名」",
-            Text(cfg.FileNameTemplate, v => Mutate(c => c.FileNameTemplate = v), 320)));
+            Toggle(cfg.EnableSaveFolder, v =>
+            {
+                Mutate(c => c.EnableSaveFolder = v);
+                // 重建一次：文件夹模板的可用性与空提示文案都跟着这个开关走
+                // （对齐 Flutter 版 TemplateRow 的 enabled + emptyHint 两条）
+                Build();
+            })));
 
         // 「启用模版」预设
         var presetRow = new Grid { ColumnSpacing = 8 };
@@ -220,28 +288,57 @@ public sealed partial class DouyinSettingsPage : Page
         presetRow.Children.Add(presetCombo);
         panel.Children.Add(presetRow);
 
-        // 变量表
-        var vars = new StackPanel { Spacing = 4 };
-        vars.Children.Add(new TextBlock
+        // ── 命名模板：与 X 设置页同一份控件（Controls/TemplateEditor.cs）──
+        //
+        // 对齐 Flutter 版 lib/widgets/douyin_section.dart 的两个 TemplateRow：
+        // 文件夹模板（受「启用保存文件夹」开关约束）与文件名模板各自带
+        // 「填入默认」与「输出示例」；「可用变量」面板只有一份，点「插入」插到
+        // **当前正在编辑的那个框**。
+        panel.Children.Add(new TextBlock
         {
-            Text = "可用变量（抖音侧 20 个）",
+            Text = "命名模板",
             FontSize = 13,
-            Opacity = 0.75,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 4, 0, 0),
         });
-        foreach (var v in DouyinTemplate.Vars)
+
+        _templateEditor = new TemplateEditor(DouyinVars, VarHintForDirTemplate);
+
+        _dirField = _templateEditor.AddField(new TemplateFieldOptions
         {
-            var line = new TextBlock
-            {
-                FontSize = 12,
-                Opacity = 0.65,
-                TextWrapping = TextWrapping.Wrap,
-                Text = "%" + v.Name + "%"
-                    + (v.Param.Length > 0 ? "（" + v.Param + "）" : "")
-                    + "  " + v.Desc,
-            };
-            vars.Children.Add(line);
-        }
-        panel.Children.Add(vars);
+            Label = "文件夹模板",
+            Hint = DefaultDirTpl,
+            DefaultTemplate = DefaultDirTpl,
+            EmptyHint = cfg.EnableSaveFolder
+                ? "留空则直接存到保存目录下"
+                : "「启用保存文件夹」已关闭 —— 文件全部平铺在保存目录下",
+            Preview = RenderDirTemplate,
+            Enabled = cfg.EnableSaveFolder,
+        }, cfg.DirTemplate);
+
+        _nameField = _templateEditor.AddField(new TemplateFieldOptions
+        {
+            Label = "文件名模板",
+            Hint = DouyinTemplate.DefaultFileNameTemplate,
+            DefaultTemplate = DouyinTemplate.DefaultFileNameTemplate,
+            EmptyHint = "留空则使用「媒体ID_时间戳.扩展名」",
+            Preview = RenderNameTemplate,
+        }, cfg.FileNameTemplate);
+
+        _templateEditor.FieldChanged += (_, e) =>
+        {
+            if (ReferenceEquals(e.Field, _dirField)) Mutate(c => c.DirTemplate = e.Value);
+            else if (ReferenceEquals(e.Field, _nameField)) Mutate(c => c.FileNameTemplate = e.Value);
+        };
+        panel.Children.Add(_templateEditor);
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "模板改动会自动保存",
+            FontSize = 11.5,
+            Opacity = 0.55,
+            TextWrapping = TextWrapping.Wrap,
+        });
 
         return UiKit.SectionCard("命名", panel);
     }

@@ -5,7 +5,15 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,8,24,24">
-        <StackPanel x:Name="Root" Spacing="16" MaxWidth="1040" HorizontalAlignment="Left" />
+    <!-- 横向滚动必须关掉（理由同 XSettingsPage）：否则子面板会按无限宽测量，
+         出现「贴最左」或「靠右溢出被截断」。根面板放在居中容器里。 -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  HorizontalScrollMode="Disabled"
+                  Padding="24,8,24,24">
+        <Grid>
+            <StackPanel x:Name="Root" Spacing="16" MaxWidth="1040"
+                        HorizontalAlignment="Center" />
+        </Grid>
     </ScrollViewer>
 </Page>

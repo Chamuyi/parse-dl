@@ -4,7 +4,17 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,8,24,24">
-        <StackPanel x:Name="Root" Spacing="14" MaxWidth="1000" HorizontalAlignment="Left" />
+    <!-- 横向滚动必须关掉：ScrollViewer 默认 HorizontalScrollMode=Enabled，
+         会把子内容按无限宽测量 —— 结果是 HorizontalAlignment=Left 的面板收缩贴左，
+         MaxWidth+Stretch 的面板被拉到上限后溢出被截断（用户 2026-10-25 投诉）。
+         根面板放进一个居中容器里：窄窗自然占满，宽窗左右留白对称。 -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  HorizontalScrollMode="Disabled"
+                  Padding="24,8,24,24">
+        <Grid>
+            <StackPanel x:Name="Root" Spacing="14" MaxWidth="1000"
+                        HorizontalAlignment="Center" />
+        </Grid>
     </ScrollViewer>
 </Page>
