@@ -4,7 +4,22 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,8,24,24">
-        <StackPanel x:Name="Root" Spacing="14" MaxWidth="1000" HorizontalAlignment="Left" />
+
+    <!--
+      布局：关掉横向滚动 + Grid 居中容器。
+      根因（用户 2026-10-25 投诉）：ScrollViewer 默认 HorizontalScrollMode=Enabled，
+      按无限宽测量子内容 → Left 的收缩贴左、Stretch+MaxWidth 的溢出被截断。
+    -->
+    <ScrollViewer
+        VerticalScrollBarVisibility="Auto"
+        HorizontalScrollBarVisibility="Disabled"
+        HorizontalScrollMode="Disabled"
+        Padding="24,8,24,24">
+        <Grid>
+            <StackPanel x:Name="Root"
+                        Spacing="14"
+                        MaxWidth="1000"
+                        HorizontalAlignment="Stretch" />
+        </Grid>
     </ScrollViewer>
 </Page>

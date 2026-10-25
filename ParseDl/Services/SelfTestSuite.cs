@@ -22,6 +22,8 @@ public static class SelfTestSuite
         sb.AppendLine(Bili.BiliConfigSelfTest.Run());
         sb.AppendLine("===== B 站选流决策 =====");
         sb.AppendLine(Bili.BiliDownloadPlanSelfTest.Run());
+        sb.AppendLine("===== B 站命名模板 =====");
+        sb.AppendLine(Bili.BiliTemplateSelfTest.Run());
         sb.AppendLine("===== B 站附加文件契约 =====");
         sb.AppendLine(Bili.BiliAdditionalSelfTest.Run());
         sb.AppendLine("===== X 时间与媒体解析 =====");
