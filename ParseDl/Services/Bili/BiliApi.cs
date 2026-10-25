@@ -22,15 +22,28 @@ public sealed record BiliVideoInfo
     public string OwnerName { get; init; } = "";
     public int DurationSec { get; init; }
     /// <summary>分 P 列表（单 P 视频只有一项）。</summary>
-    public IReadOnlyList<BiliPage> Pages { get; init; } = Array.Empty<BiliPage>();
+    public IReadOnlyList<BiliPart> Pages { get; init; } = Array.Empty<BiliPart>();
     /// <summary>
     /// view 接口 data 节点的**原样 JSON**。
     /// 给元数据那一族用（json 档要的就是「原样存一份」，不做过滤与排序）。
     /// </summary>
     public string RawJson { get; init; } = "";
+
+    // ── 统计量（抓取结果列表的第三行要用）──────────────────
+    public long ViewCount { get; init; }
+    public long LikeCount { get; init; }
+    public long CoinCount { get; init; }
+    public long FavCount { get; init; }
+    public long ShareCount { get; init; }
+    public long ReplyCount { get; init; }
+    public long DanmakuCount { get; init; }
+    /// <summary>分区名（如「游戏」），做「话题」那一行的兜底。</summary>
+    public string Tname { get; init; } = "";
+    /// <summary>稿件标签（view 接口不回，nfo 那一族另外取；这里留空）。</summary>
+    public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
 }
 
-public sealed record BiliPage
+public sealed record BiliPart
 {
     public int Page { get; init; }
     public string Title { get; init; } = "";
@@ -353,12 +366,12 @@ public sealed class BiliApi
         if (string.IsNullOrWhiteSpace(requestBvid) && data.TryGetProperty("bvid", out var bv))
             requestBvid = bv.GetString() ?? "";
 
-        var pages = new List<BiliPage>();
+        var pages = new List<BiliPart>();
         if (data.TryGetProperty("pages", out var pageArr) && pageArr.ValueKind == JsonValueKind.Array)
         {
             foreach (var p in pageArr.EnumerateArray())
             {
-                pages.Add(new BiliPage
+                pages.Add(new BiliPart
                 {
                     Page = p.TryGetProperty("page", out var pn) ? pn.GetInt32() : 0,
                     Title = p.TryGetProperty("part", out var pt) ? pt.GetString() ?? "" : "",
@@ -383,6 +396,14 @@ public sealed class BiliApi
                 ? on.GetString() ?? "" : "",
             Pages = pages,
             RawJson = data.GetRawText(),
+            ViewCount = StatOf(data, "view"),
+            LikeCount = StatOf(data, "like"),
+            CoinCount = StatOf(data, "coin"),
+            FavCount = StatOf(data, "favorite"),
+            ShareCount = StatOf(data, "share"),
+            ReplyCount = StatOf(data, "reply"),
+            DanmakuCount = StatOf(data, "danmaku"),
+            Tname = data.TryGetProperty("tname", out var tn) ? tn.GetString() ?? "" : "",
         };
     }
 
@@ -494,6 +515,16 @@ public sealed class BiliApi
             Videos = orderedVideos,
             Audios = orderedAudios,
         };
+    }
+
+    /// <summary>data.stat.{name} 取数值；没有就 0（不猜）。</summary>
+    private static long StatOf(JsonElement data, string name)
+    {
+        if (!data.TryGetProperty("stat", out var stat) || stat.ValueKind != JsonValueKind.Object)
+            return 0;
+        if (!stat.TryGetProperty(name, out var v) || v.ValueKind != JsonValueKind.Number)
+            return 0;
+        return v.GetInt64();
     }
 
     /// <summary>

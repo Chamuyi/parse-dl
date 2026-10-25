@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
+using Microsoft.Web.WebView2.Core;
 using ParseDl.Controls;
 using ParseDl.Services;
 using ParseDl.Services.Bili;
@@ -14,28 +15,31 @@ using ParseDl.Services.Bili;
 namespace ParseDl.Pages;
 
 /// <summary>
-/// B 站批量下载页 —— 对齐 Flutter 版 lib/pages/bili_batch_page.dart（720 行）。
+/// B 站批量下载 —— 对齐 Flutter 版 lib/pages/bili_batch_page.dart 与原项目最终形态
+/// （左边内嵌浏览器 + 右边批量面板）。
 ///
-/// 覆盖四类列表：主页（UP 主投稿）/ 合集 / 系列 / 收藏夹。
+/// 为什么左边也要浏览器：找合集 / 收藏夹这件事本身就得在 B 站页面里点，
+/// 让用户「在左边找到、把地址拷到右边」比让他在外面复制粘贴省一步。
 ///
-/// 为什么必须逐条取流：列表接口只给概要（bvid + 标题 + 时长），播放地址要**单独**
-/// 请求 playurl，所以批量入队必须逐条、带节流（连着打会被风控）。
-/// 这一层的编排（节流 / 进度 / 成功失败计数）与 Flutter 版 bili_batch_runner.dart
-/// 同一套口径：一条失败不影响后面，最后如实报「成功 N 失败 M」。
+/// 右侧七件事（照原项目）：
+///  ① 说明文字；② 多行粘贴框；③ 「识别到 N 个目标」；④ 我的自建收藏夹；
+///  ⑤ 每个列表最多下几条；⑥ 多 P 取全部 P 开关；⑦ 开始批量 / 停止。
 /// </summary>
 public sealed partial class BiliBatchPage : Page
 {
     private BiliConfig Cfg => BiliConfig.Instance;
+    private const string HomeUrl = "https://www.bilibili.com/";
 
-    private TextBox? _urlBox;
-    private TextBlock? _status;
-    private StackPanel? _listPanel;
-    private Button? _enqueueBtn;
+    private bool _webReady;
     private CancellationTokenSource? _cts;
+    private int _targetCount;
+    private readonly List<string> _targets = new();
 
-    private List<BiliListItem> _items = new();
-    private readonly List<(BiliListItem Item, CheckBox Box)> _rows = new();
-    private string _kindLabel = "";
+    /// <summary>「每个列表最多下几条」的档位。0 = 不限。</summary>
+    private static readonly (string Label, int Value)[] Limits =
+    {
+        ("不限", 0), ("10 条", 10), ("20 条", 20), ("50 条", 50), ("100 条", 100),
+    };
 
     public BiliBatchPage() { InitializeComponent(); }
 
@@ -43,7 +47,12 @@ public sealed partial class BiliBatchPage : Page
     {
         base.OnNavigatedTo(e);
         Cfg.Load();
-        Build();
+        HeaderHost.Children.Add(UiKit.PageHeader("B 站批量下载", "主页 / 合集 / 系列 / 收藏夹", "\uE8EF"));
+        LimitBox.ItemsSource = Limits.Select(x => x.Label).ToArray();
+        LimitBox.SelectedIndex = 0;
+        TakeAllPartsSwitch.IsOn = false;
+        UpdateTargetCount();
+        _ = InitWebAsync();
     }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
@@ -53,358 +62,382 @@ public sealed partial class BiliBatchPage : Page
         _cts = null;
     }
 
-    private void Build()
+    // ── WebView2（左）──────────────────────────────────────
+
+    private async Task InitWebAsync()
     {
-        Root.Children.Clear();
-        Root.Children.Add(UiKit.PageHeader("批量下载", "主页 · 合集 · 系列 · 收藏夹", "\uE8EF"));
-
-        // ── 输入区 ─────────────────────────────────────────────
-        var input = new StackPanel { Spacing = 10 };
-        var row = new Grid { ColumnSpacing = 8 };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        _urlBox = new TextBox
-        {
-            PlaceholderText = "粘贴 UP 主空间 / 合集 / 系列 / 收藏夹链接，如 https://space.bilibili.com/546195",
-            Height = 36,
-            VerticalContentAlignment = VerticalAlignment.Center,
-        };
-        Grid.SetColumn(_urlBox, 0);
-        row.Children.Add(_urlBox);
-
-        var loadBtn = new Button
-        {
-            Content = "加载列表", Height = 36, MinWidth = 96,
-            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
-        };
-        loadBtn.Click += async (_, _) => await LoadListAsync();
-        Grid.SetColumn(loadBtn, 1);
-        row.Children.Add(loadBtn);
-        input.Children.Add(row);
-
-        _status = new TextBlock
-        {
-            Text = "", FontSize = 12, Opacity = 0.75, TextWrapping = TextWrapping.Wrap,
-        };
-        input.Children.Add(_status);
-
-        input.Children.Add(new TextBlock
-        {
-            Text = "支持的链接：\n" +
-                   "  · UP 主投稿  https://space.bilibili.com/546195\n" +
-                   "  · 合集       https://space.bilibili.com/228292951/channel/collectiondetail?sid=9225450\n" +
-                   "  · 系列       https://space.bilibili.com/228292951/channel/seriesdetail?sid=88\n" +
-                   "  · 收藏夹     https://www.bilibili.com/medialist/detail/ml152431",
-            FontSize = 12, Opacity = 0.6, TextWrapping = TextWrapping.Wrap,
-            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
-        });
-        Root.Children.Add(UiKit.SectionCard("列表地址", input));
-
-        // ── 结果区 ─────────────────────────────────────────────
-        _listPanel = new StackPanel { Spacing = 2 };
-        Root.Children.Add(UiKit.SectionCard("列表内容", _listPanel, "默认全选，取消勾选可跳过"));
-
-        // ── 批量操作条 ─────────────────────────────────────────
-        var ops = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var allBtn = new Button { Content = "全选", MinWidth = 80 };
-        allBtn.Click += (_, _) => SetAll(true);
-        var noneBtn = new Button { Content = "全不选", MinWidth = 80 };
-        noneBtn.Click += (_, _) => SetAll(false);
-        var invertBtn = new Button { Content = "反选", MinWidth = 80 };
-        invertBtn.Click += (_, _) =>
-        {
-            foreach (var (_, box) in _rows) box.IsChecked = box.IsChecked != true;
-            UpdateSelectionHint();
-        };
-        _enqueueBtn = new Button
-        {
-            Content = "批量入队选中", MinWidth = 140, IsEnabled = false,
-            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
-        };
-        _enqueueBtn.Click += async (_, _) => await EnqueueSelectedAsync();
-        ops.Children.Add(allBtn);
-        ops.Children.Add(noneBtn);
-        ops.Children.Add(invertBtn);
-        ops.Children.Add(_enqueueBtn);
-
-        var opsPanel = new StackPanel { Spacing = 8 };
-        opsPanel.Children.Add(ops);
-        opsPanel.Children.Add(new TextBlock
-        {
-            Text = "批量入队会逐条请求播放地址，每条之间等 " + Cfg.RequestIntervalMs +
-                   " 毫秒（可在 B 站设置里改）—— 连着打会触发风控。",
-            FontSize = 12, Opacity = 0.6, TextWrapping = TextWrapping.Wrap,
-        });
-        Root.Children.Add(UiKit.SectionCard("批量操作", opsPanel));
-    }
-
-    private void SetAll(bool value)
-    {
-        foreach (var (_, box) in _rows) box.IsChecked = value;
-        UpdateSelectionHint();
-    }
-
-    private void UpdateSelectionHint()
-    {
-        if (_enqueueBtn is null) return;
-        var picked = _rows.Count(r => r.Box.IsChecked == true);
-        _enqueueBtn.IsEnabled = picked > 0;
-        _enqueueBtn.Content = picked > 0 ? ("批量入队选中（" + picked + "）") : "批量入队选中";
-    }
-
-    // ── 加载列表 ─────────────────────────────────────────────
-
-    private async Task LoadListAsync()
-    {
-        if (_urlBox is null || _status is null || _listPanel is null) return;
-        var raw = _urlBox.Text?.Trim() ?? "";
-        if (raw.Length == 0) { _status.Text = "请先粘贴列表链接"; return; }
-
-        _listPanel.Children.Clear();
-        _rows.Clear();
-        _items = new List<BiliListItem>();
-        UpdateSelectionHint();
-        _status.Text = "正在加载列表…";
-
         try
         {
-            var target = raw;
-            if (BiliLink.IsShortLink(raw))
-            {
-                try
-                {
-                    using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-                    var resp = await http.GetAsync(raw.StartsWith("http") ? raw : "https://" + raw);
-                    target = resp.RequestMessage?.RequestUri?.ToString() ?? raw;
-                }
-                catch { }
-            }
+            await Web.EnsureCoreWebView2Async();
+            Web.CoreWebView2.Settings.UserAgent =
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+            Web.CoreWebView2.Settings.IsStatusBarEnabled = false;
+            _webReady = true;
+            WebFallback.Visibility = Visibility.Collapsed;
+            Web.CoreWebView2.Navigate(HomeUrl);
+        }
+        catch (Exception ex)
+        {
+            WebFallback.Visibility = Visibility.Visible;
+            WebFallbackText.Text = "内嵌浏览器初始化失败：" + ex.Message;
+        }
+    }
 
-            var refInfo = BiliLink.Parse(target);
-            if (refInfo is null)
+    // ── 粘贴框 → 目标识别 ──────────────────────────────────
+
+    private void OnTargetsChanged(object sender, TextChangedEventArgs e) => UpdateTargetCount();
+
+    /// <summary>
+    /// 识别粘贴框里的目标：一行一条，去掉空行与重复。
+    /// **不在这里判它是不是合法链接** —— 那是开始批量时逐条报错的事；
+    /// 现在只把「看起来像目标的行」数出来，用户才知道自己粘了几条。
+    /// </summary>
+    private void UpdateTargetCount()
+    {
+        _targets.Clear();
+        var text = TargetsBox.Text ?? "";
+        foreach (var raw in text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0) continue;
+            if (_targets.Contains(line, StringComparer.OrdinalIgnoreCase)) continue;
+            _targets.Add(line);
+        }
+        _targetCount = _targets.Count;
+        TargetCountText.Text = "识别到 " + _targetCount + " 个目标";
+        StartButton.IsEnabled = _targetCount > 0;
+    }
+
+    // ── 我的自建收藏夹 ─────────────────────────────────────
+
+    /// <summary>
+    /// 列出「我建的」收藏夹。**需要登录态** —— 收藏夹列表接口按 up_mid 查，
+    /// 而未登录拿不到自己的 mid。所以先从内嵌页面把 nav 读出来拿 mid
+    /// （页内 fetch 会带上 WebView 会话里的 cookie），再查 created/list-all。
+    /// </summary>
+    private async void OnListFavClick(object sender, RoutedEventArgs e)
+    {
+        FavListButton.IsEnabled = false;
+        HintText.Text = "正在读取登录态…";
+        try
+        {
+            if (!_webReady || Web.CoreWebView2 is null)
             {
-                _status.Text = "认不出这条链接。支持 UP 主空间 / 合集 / 系列 / 收藏夹。";
+                HintText.Text = "内嵌浏览器还没就绪，请稍后再试";
+                return;
+            }
+            var navBody = await BiliInPage.FetchAsync(Web.CoreWebView2,
+                "https://api.bilibili.com/x/web-interface/nav", 15000);
+            long mid = 0;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(navBody);
+                if (doc.RootElement.TryGetProperty("data", out var d) &&
+                    d.TryGetProperty("mid", out var m) &&
+                    m.ValueKind == System.Text.Json.JsonValueKind.Number)
+                    mid = m.GetInt64();
+            }
+            catch { }
+
+            if (mid <= 0)
+            {
+                HintText.Text = "读不到你的账号（未登录？）。请先在左边页面登录 B 站，再点这里。";
                 return;
             }
 
             var api = new BiliApi(Cfg.Cookie);
-            var listApi = new BiliListApi(api);
+            var data = await api.GetDataPublicAsync(
+                "/x/v3/fav/folder/created/list-all?up_mid=" + mid);
+            var urls = new List<string>();
+            if (data.TryGetProperty("list", out var list) &&
+                list.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var f in list.EnumerateArray())
+                {
+                    var id = f.TryGetProperty("id", out var i) ? i.GetInt64() : 0;
+                    if (id <= 0) continue;
+                    urls.Add("https://www.bilibili.com/medialist/detail/ml" + id);
+                }
+            }
 
-            BiliListPage page;
-            if (refInfo.SeasonId is long seasonId)
+            if (urls.Count == 0)
             {
-                if (refInfo.Mid is not long mid)
-                {
-                    _status.Text = "合集链接里没有 mid。请用 space.bilibili.com/<mid>/channel/collectiondetail?sid=… 这种形态。";
-                    return;
-                }
-                page = await listApi.GetSeasonArchivesAsync(mid, seasonId);
-                _kindLabel = "合集";
-            }
-            else if (refInfo.SeriesId is long seriesId)
-            {
-                if (refInfo.Mid is not long mid2)
-                {
-                    _status.Text = "系列链接里没有 mid。请用 space.bilibili.com/<mid>/channel/seriesdetail?sid=… 这种形态。";
-                    return;
-                }
-                page = await listApi.GetSeriesArchivesAsync(mid2, seriesId);
-                _kindLabel = "系列";
-            }
-            else if (refInfo.FavId is long favId)
-            {
-                page = await listApi.GetFavAsync(favId);
-                _kindLabel = "收藏夹";
-            }
-            else if (refInfo.Mid is long mid3)
-            {
-                page = await listApi.GetSpaceVideosAsync(mid3, 1, 30);
-                _kindLabel = "UP 主投稿";
-            }
-            else
-            {
-                _status.Text = "这条链接不是列表（列表 = UP 主空间 / 合集 / 系列 / 收藏夹）。单个稿件请到「解析下载」页。";
+                HintText.Text = "你的账号下没有自建收藏夹（或接口没返回）。别人的收藏夹请直接贴链接。";
                 return;
             }
 
-            _items = page.Items.ToList();
-            if (_items.Count == 0)
+            // 追加到粘贴框末尾 —— 用户点这个按钮的意图就是「把这些也加进来」
+            var existing = TargetsBox.Text ?? "";
+            var sb = new System.Text.StringBuilder(existing.TrimEnd());
+            var added = 0;
+            foreach (var url in urls)
             {
-                _status.Text = _kindLabel + "是空的（或该收藏夹不公开）";
-                return;
+                if (existing.Contains(url, StringComparison.OrdinalIgnoreCase)) continue;
+                if (sb.Length > 0) sb.AppendLine();
+                sb.Append(url);
+                added++;
             }
-
-            var header = new TextBlock
-            {
-                Text = _kindLabel + "：共 " + _items.Count + " 个稿件" +
-                       (page.Total > _items.Count ? "（接口报告总数 " + page.Total + "）" : ""),
-                FontSize = 14, FontWeight = FontWeights.SemiBold,
-                Margin = new Thickness(0, 0, 0, 8),
-            };
-            _listPanel.Children.Add(header);
-
-            foreach (var it in _items)
-            {
-                var box = new CheckBox { IsChecked = true, FontSize = 13 };
-                var texts = new StackPanel { Spacing = 1 };
-                texts.Children.Add(new TextBlock
-                {
-                    Text = it.Title, FontSize = 13, TextWrapping = TextWrapping.Wrap,
-                });
-                texts.Children.Add(new TextBlock
-                {
-                    Text = it.Bvid + "　" + FormatDur(it.DurationSec),
-                    FontSize = 11, Opacity = 0.6,
-                });
-                var cell = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-                cell.Children.Add(box);
-                cell.Children.Add(texts);
-
-                box.Checked += (_, _) => UpdateSelectionHint();
-                box.Unchecked += (_, _) => UpdateSelectionHint();
-
-                _listPanel.Children.Add(cell);
-                _rows.Add((it, box));
-            }
-
-            UpdateSelectionHint();
-            _status.Text = "列表加载成功，默认全选。点「批量入队选中」开始。";
+            TargetsBox.Text = sb.ToString();
+            UpdateTargetCount();
+            HintText.Text = "已加入 " + added + " 个自建收藏夹（共识别到 " + _targetCount + " 个目标）";
         }
         catch (Exception ex)
         {
-            _status.Text = "加载列表失败：" + ex.Message;
+            HintText.Text = "列收藏夹失败：" + ex.Message;
+        }
+        finally
+        {
+            FavListButton.IsEnabled = true;
         }
     }
 
-    // ── 批量入队 ─────────────────────────────────────────────
+    // ── 开始批量 / 停止 ────────────────────────────────────
+
+    private async void OnStartClick(object sender, RoutedEventArgs e) => await StartBatchAsync();
+
+    private void OnStopClick(object sender, RoutedEventArgs e)
+    {
+        try { _cts?.Cancel(); } catch { }
+        HintText.Text = "已请求停止（正在跑的那一条会走完）";
+    }
 
     /// <summary>
-    /// 批量入队：逐条取播放地址再入队。
+    /// 批量：逐条目标 → 展开成稿件列表 → 逐条取流 → 入队。
     ///
-    /// 两条流用**契约命名**入队（base 名 + .video.m4s / .audio.m4s），
-    /// 这样下载完成后 BiliMergePipeline 能靠名字直接配对，不需要额外的映射表
-    /// （映射表在重启后就丢了，而文件名不会）。
+    /// 三条硬约束（都是踩过的）：
+    ///  1. **每条之间必须节流**（RequestIntervalMs）：列表接口 + 每个稿件的
+    ///     playurl 连着打，一定会被风控；
+    ///  2. **「每个列表最多下几条」是硬上限**：一个 20P 合集全取就是几百条队列，
+    ///     用户没要求全量时不要替他决定；
+    ///  3. **「多 P 稿件取全部 P」默认关**：默认只取第 1P（原项目的说明文字就是这个口径）。
     /// </summary>
-    private async Task EnqueueSelectedAsync()
+    private async Task StartBatchAsync()
     {
-        if (_status is null || _enqueueBtn is null) return;
-        var picked = _rows.Where(r => r.Box.IsChecked == true).Select(r => r.Item).ToList();
-        if (picked.Count == 0) { _status.Text = "没有选中任何稿件"; return; }
-
-        _enqueueBtn.IsEnabled = false;
+        if (_targetCount == 0) return;
+        StartButton.IsEnabled = false;
+        StopButton.IsEnabled = true;
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
 
         var api = new BiliApi(Cfg.Cookie);
-        var interval = Math.Max(300, Cfg.RequestIntervalMs);
-        var ok = 0; var skipped = 0; var fail = 0;
-        var failures = new List<string>();
+        var listApi = new BiliListApi(api);
         var saveDir = Cfg.ResolvedSaveDir;
+        var limit = LimitBox.SelectedIndex >= 0 ? Limits[LimitBox.SelectedIndex].Value : 0;
+        var takeAllParts = TakeAllPartsSwitch.IsOn;
+        var interval = Math.Max(300, Cfg.RequestIntervalMs);
 
-        for (var i = 0; i < picked.Count; i++)
+        var okTargets = 0; var failTargets = 0;
+        var failures = new List<string>();
+        var total = 0;
+
+        try
         {
-            if (ct.IsCancellationRequested) break;
-            var it = picked[i];
-            _status.Text = "批量入队 " + (i + 1) + "/" + picked.Count + "：" + it.Title;
-            try
+            for (var ti = 0; ti < _targets.Count; ti++)
             {
-                var info = await api.GetVideoInfoAsync(it.Bvid, null, ct);
-                if (info.Pages.Count == 0) { fail++; failures.Add(it.Title + "：没有分P"); continue; }
+                if (ct.IsCancellationRequested) break;
+                var raw = _targets[ti];
+                HintText.Text = "目标 " + (ti + 1) + "/" + _targets.Count + "：" + Shorten(raw);
 
-                var cidStr = info.Pages[0].Cid;
-                if (cidStr is null || !long.TryParse(cidStr, out var cid)) { fail++; failures.Add(it.Title + "：没有 cid"); continue; }
-
-                var play = await api.GetPlayInfoAsync(
-                    info.Bvid, cid, BiliConfig.QnOf(Cfg.Quality), null, ct);
-                var pair = BiliDownloadPlan.Plan(play, Cfg.Quality, Cfg.Codec);
-                if (!pair.Usable)
+                try
                 {
-                    fail++;
-                    failures.Add(it.Title + "：" + (pair.Message ?? "取不到可下载的流"));
-                    continue;
-                }
-
-                var outBase = BuildOutBase(info, it, pair);
-                var videoName = pair.IsDash
-                    ? BiliDownloadPlan.VideoStreamName(outBase)
-                    : outBase + ".mp4";
-
-                var (a, msg) = await DownloadStore.Instance.AddAsync(
-                    pair.Video!.Url, "B 站", saveDir, videoName);
-                if (!a) { fail++; failures.Add(it.Title + "：" + msg); continue; }
-
-                if (pair.IsDash && pair.Audio is not null)
-                {
-                    var (a2, msg2) = await DownloadStore.Instance.AddAsync(
-                        pair.Audio.Url, "B 站（音频）", saveDir,
-                        BiliDownloadPlan.AudioStreamName(outBase));
-                    if (!a2)
+                    var works = await ExpandTargetAsync(api, listApi, raw, limit, ct);
+                    if (works.Count == 0)
                     {
-                        // 音频没入队就等于下一个没声音的空壳 —— 记失败，不粉饰。
-                        fail++;
-                        failures.Add(it.Title + "：音频入队失败（" + msg2 + "）");
+                        failTargets++;
+                        failures.Add(raw + "：没解析出任何稿件");
                         continue;
                     }
-                }
-                ok++;
-            }
-            catch (Exception ex)
-            {
-                fail++;
-                failures.Add(it.Title + "：" + ex.Message);
-            }
 
-            if (i < picked.Count - 1) await Task.Delay(interval, ct);
+                    var perTargetOk = 0;
+                    foreach (var work in works)
+                    {
+                        if (ct.IsCancellationRequested) break;
+                        try
+                        {
+                            var queued = await EnqueueWorkAsync(api, work, saveDir, takeAllParts, ct);
+                            total += queued;
+                            if (queued > 0) perTargetOk++;
+                        }
+                        catch (Exception ex)
+                        {
+                            failures.Add(work.Title + "：" + ex.Message);
+                        }
+                        if (ct.IsCancellationRequested) break;
+                        await Task.Delay(interval, ct);
+                    }
+                    if (perTargetOk > 0) okTargets++; else failTargets++;
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex)
+                {
+                    failTargets++;
+                    failures.Add(raw + "：" + ex.Message);
+                }
+
+                if (ti < _targets.Count - 1) await Task.Delay(interval, ct);
+            }
         }
+        catch (OperationCanceledException) { }
 
         var sb = new System.Text.StringBuilder();
-        sb.Append("批量入队完成：成功 " + ok + "，失败 " + fail);
-        if (skipped > 0) sb.Append("，跳过 " + skipped);
-        sb.Append("。");
+        sb.Append("批量完成：目标 " + okTargets + " 个成功 / " + failTargets + " 个失败，共入队 " + total + " 条分P。");
         if (failures.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("失败明细（前 10 条）：");
-            foreach (var f in failures.Take(10)) sb.AppendLine("  · " + f);
+            sb.AppendLine("失败明细（前 8 条）：");
+            foreach (var f in failures.Take(8)) sb.AppendLine("  · " + f);
         }
-        _status.Text = sb.ToString();
-        _enqueueBtn.IsEnabled = true;
-        UpdateSelectionHint();
+        HintText.Text = sb.ToString();
+
+        StartButton.IsEnabled = _targetCount > 0;
+        StopButton.IsEnabled = false;
+        _cts = null;
     }
 
-    /// <summary>按模板算 base 名（不含扩展名）—— 合并产物与两条流共用它。</summary>
-    private string BuildOutBase(BiliVideoInfo info, BiliListItem item, BiliStreamPair pair)
+    /// <summary>一条目标 → 稿件列表。支持：UP 主空间 / 合集 / 系列 / 收藏夹 / 单个稿件 / 裸 id。</summary>
+    private async Task<List<BiliListItem>> ExpandTargetAsync(
+        BiliApi api, BiliListApi listApi, string raw, int limit, CancellationToken ct)
     {
-        var tpl = string.IsNullOrWhiteSpace(Cfg.FileNameTemplate)
-            ? "%BILI_TITLE%-%POST_ID%" : Cfg.FileNameTemplate;
-        var ctx = new TemplateContext
+        var target = raw;
+        if (BiliLink.IsShortLink(raw))
         {
-            PostId = info.Bvid,
-            MediaId = info.Bvid,
-            UserId = info.OwnerMid.ToString(),
-            UserName = info.OwnerName,
-            UserScreenName = info.OwnerName,
-            BiliTitle = string.IsNullOrWhiteSpace(item.Title) ? info.Title : item.Title,
-            BiliPageIndex = info.Pages.Count > 0 ? info.Pages[0].Page : 1,
-            BiliQuality = BiliApi.QualityNames.TryGetValue(pair.VideoQn, out var ql) ? ql : "",
-            MediaIndex = 1,
-            PostTime = info.PubDateUnix > 0
-                ? DateTimeOffset.FromUnixTimeSeconds(info.PubDateUnix).LocalDateTime
-                : null,
-            Extension = "mp4",
-        };
-        var name = FileNameTemplate.UnicodeFilenamify(FileNameTemplate.Resolve(tpl, ctx));
-        if (string.IsNullOrWhiteSpace(name)) name = info.Bvid;
-        // 模板里可能带 %EXT%（会渲染成 mp4），base 名必须把这段尾巴剥掉，
-        // 否则会落成 冬天.mp4.video.m4s。
-        return BiliDownloadPlan.BaseNameFromFileName(name);
+            try
+            {
+                using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                var resp = await http.GetAsync(raw.StartsWith("http") ? raw : "https://" + raw, ct);
+                target = resp.RequestMessage?.RequestUri?.ToString() ?? raw;
+            }
+            catch { }
+        }
+
+        // 也认「那串 id」：纯数字默认当 UP 主 mid（原项目说明里写了「或那串 id」）
+        var refInfo = BiliLink.Parse(target);
+        if (refInfo is null && long.TryParse(target, out var midOnly))
+            refInfo = new BiliRef { Mid = midOnly };
+        if (refInfo is null) return new List<BiliListItem>();
+
+        var pageSize = limit > 0 ? Math.Min(limit, 30) : 30;
+
+        if (refInfo.SeasonId is long seasonId && refInfo.Mid is long mid)
+        {
+            var p = await listApi.GetSeasonArchivesAsync(mid, seasonId, 1, pageSize, ct);
+            return Trim(p.Items, limit);
+        }
+        if (refInfo.SeriesId is long seriesId && refInfo.Mid is long mid2)
+        {
+            var p = await listApi.GetSeriesArchivesAsync(mid2, seriesId, 1, pageSize, ct);
+            return Trim(p.Items, limit);
+        }
+        if (refInfo.FavId is long favId)
+        {
+            var p = await listApi.GetFavAsync(favId, 0, 1, pageSize, ct);
+            return Trim(p.Items, limit);
+        }
+        if (refInfo.Mid is long mid3)
+        {
+            var p = await listApi.GetSpaceVideosAsync(mid3, 1, pageSize, ct);
+            return Trim(p.Items, limit);
+        }
+        if (refInfo.IsVideo)
+        {
+            // 单条稿件：当作只有这一条
+            var info = await api.GetVideoInfoAsync(refInfo.Bvid, refInfo.Aid, ct);
+            return new List<BiliListItem>
+            {
+                new BiliListItem
+                {
+                    Bvid = info.Bvid, Aid = info.Aid, Title = info.Title,
+                    Cover = info.Cover, DurationSec = info.DurationSec,
+                    PubDateUnix = info.PubDateUnix,
+                },
+            };
+        }
+        return new List<BiliListItem>();
     }
 
-    private static string FormatDur(int sec)
+    private static List<BiliListItem> Trim(IReadOnlyList<BiliListItem> items, int limit) =>
+        limit > 0 ? items.Take(limit).ToList() : items.ToList();
+
+    /// <summary>一个稿件 → 入队它的分 P，返回入队条数。</summary>
+    private async Task<int> EnqueueWorkAsync(
+        BiliApi api, BiliListItem work, string saveDir, bool takeAllParts, CancellationToken ct)
     {
-        if (sec >= 3600)
-            return (sec / 3600) + ":" + (sec % 3600 / 60).ToString("00") + ":" + (sec % 60).ToString("00");
-        return (sec / 60) + ":" + (sec % 60).ToString("00");
+        var info = await api.GetVideoInfoAsync(work.Bvid, work.Aid > 0 ? work.Aid : null, ct);
+        if (info.Pages.Count == 0) return 0;
+
+        // 默认只取第 1P：一个 20P 的合集全取就是几百条队列（原项目的说明文字）
+        var parts = takeAllParts ? info.Pages.ToList() : new List<BiliPart> { info.Pages[0] };
+        var queued = 0;
+
+        foreach (var part in parts)
+        {
+            if (ct.IsCancellationRequested) break;
+            if (part.Cid is not string cidStr || !long.TryParse(cidStr, out var cid)) continue;
+
+            var play = await api.GetPlayInfoAsync(
+                info.Bvid, cid, BiliConfig.QnOf(Cfg.Quality), info.Aid, ct);
+            var pair = BiliDownloadPlan.Plan(play, Cfg.Quality, Cfg.Codec);
+            if (!pair.Usable) continue;
+
+            var outBase = BuildOutBase(info, part, pair, cid);
+            var partDir = BiliEnqueue.ResolveSaveDir(Cfg, saveDir, info, part, pair, play);
+            Directory.CreateDirectory(partDir);
+
+            var videoName = pair.IsDash
+                ? BiliDownloadPlan.VideoStreamName(outBase)
+                : BiliDownloadPlan.MergedName(outBase, Cfg.Container);
+            var (a, _) = await DownloadStore.Instance.AddAsync(
+                pair.Video!.Url, "B 站", partDir, videoName);
+            if (!a) continue;
+
+            if (pair.IsDash && pair.Audio is not null)
+            {
+                var (a2, _) = await DownloadStore.Instance.AddAsync(
+                    pair.Audio.Url, "B 站（音频）", partDir,
+                    BiliDownloadPlan.AudioStreamName(outBase));
+                if (!a2) continue;
+            }
+
+            try
+            {
+                await BiliAdditionalRunner.ProduceAsync(
+                    new BiliApi(Cfg.Cookie), Cfg, partDir, outBase, info, cid,
+                    part.Title, part.Page, ct);
+            }
+            catch { }
+
+            queued++;
+            await Task.Delay(Math.Max(200, Cfg.RequestIntervalMs), ct);
+        }
+        return queued;
     }
+
+    /// <summary>按 B 站模板算 base 名（不含扩展名）—— 两条流与合并产物共用它。</summary>
+    private string BuildOutBase(BiliVideoInfo info, BiliPart part, BiliStreamPair pair, long cid)
+    {
+        var ctx = new BiliTemplate.Context
+        {
+            WorkTitle = info.Title,
+            PartTitle = part.Title,
+            Part = info.Pages.Count > 1 ? part.Page : 0,
+            PartTotal = info.Pages.Count,
+            Bvid = info.Bvid,
+            Aid = info.Aid,
+            Cid = cid,
+            UpName = info.OwnerName,
+            UpMid = info.OwnerMid,
+            Quality = pair.Video?.QualityLabel ?? "",
+            Codec = pair.VideoCodec,
+            CustomText = Cfg.CustomText,
+            DurationSec = part.DurationSec,
+            Ext = ".mp4",
+        };
+        var rendered = BiliTemplate.Sanitize(
+            BiliTemplate.Render(Cfg.EffectiveFileNameTemplate, ctx));
+        if (rendered.Length == 0) rendered = info.Bvid + "-P" + part.Page;
+        return BiliDownloadPlan.BaseNameFromFileName(rendered);
+    }
+
+    private static string Shorten(string s) => s.Length <= 56 ? s : (s.Substring(0, 56) + "…");
 }

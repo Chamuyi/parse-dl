@@ -4,7 +4,142 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,8,24,24">
-        <StackPanel x:Name="Root" Spacing="14" MaxWidth="1200" HorizontalAlignment="Left" />
-    </ScrollViewer>
+
+    <!-- 布局：左内嵌浏览器 + 右批量面板（照原项目形态）。
+         顶层不用 ScrollViewer（WebView2 在无限高/宽测量下会塌），
+         改成 Grid + 居中容器：宽窗居中、窄窗占满，且**没有横向滚动**。 -->
+    <Grid Padding="24,8,24,24">
+        <Grid x:Name="Root" HorizontalAlignment="Stretch" MaxWidth="1500" RowSpacing="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <StackPanel x:Name="HeaderHost" Grid.Row="0" />
+
+            <Grid Grid.Row="1" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="3*" />
+                    <ColumnDefinition Width="2*" MinWidth="380" MaxWidth="560" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="0">
+                    <Grid>
+                        <WebView2 x:Name="Web" />
+                        <Border x:Name="WebFallback" Visibility="Collapsed"
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                                        Spacing="8" Padding="24">
+                                <FontIcon Glyph="&#xE774;" FontSize="28" Opacity="0.5" />
+                                <TextBlock x:Name="WebFallbackText" Text="内嵌浏览器正在准备…"
+                                           FontSize="13" Opacity="0.75"
+                                           TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Column="1" RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Spacing="4">
+                        <TextBlock Text="一行一个目标：UP 主主页、合集 / 系列链接、收藏夹链接或那串 id、单条稿件链接或 BV 号都认。"
+                                   FontSize="12" Opacity="0.7" TextWrapping="Wrap" LineHeight="18" />
+                    </StackPanel>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  HorizontalScrollMode="Disabled">
+                        <StackPanel Spacing="10">
+                            <!-- ② 多行粘贴框 -->
+                            <TextBox x:Name="TargetsBox"
+                                     AcceptsReturn="True" TextWrapping="Wrap"
+                                     Height="150" MinHeight="110"
+                                     PlaceholderText="把链接一行一条粘进来"
+                                     TextChanged="OnTargetsChanged" />
+
+                            <!-- ③ 识别到 N 个目标 -->
+                            <TextBlock x:Name="TargetCountText" Text="识别到 0 个目标"
+                                       FontSize="12.5" Opacity="0.85" />
+
+                            <!-- ④ 我的自建收藏夹 -->
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0"
+                                           Text="下拉里是「我建的」收藏夹；别人的收藏夹请贴链接"
+                                           FontSize="12" Opacity="0.7"
+                                           TextWrapping="Wrap" VerticalAlignment="Center" />
+                                <Button x:Name="FavListButton" Grid.Column="1"
+                                        Content="列出我的自建收藏夹"
+                                        FontSize="12" Padding="10,6"
+                                        Click="OnListFavClick" />
+                            </Grid>
+
+                            <!-- ⑤ 每个列表最多下几条 -->
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="每个列表最多下几条" FontSize="12.5" />
+                                <ComboBox x:Name="LimitBox" HorizontalAlignment="Stretch"
+                                          PlaceholderText="不限" />
+                            </StackPanel>
+
+                            <!-- ⑥ 多 P 取全部 P -->
+                            <StackPanel Spacing="2">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="多 P 稿件取全部 P" FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <ToggleSwitch x:Name="TakeAllPartsSwitch" OnContent=""
+                                                  OffContent="" MinWidth="0" />
+                                </StackPanel>
+                                <TextBlock Text="默认只取第 1P：一个 20P 的合集全取就是几百条队列。"
+                                           FontSize="11.5" Opacity="0.6" TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <!-- 提示 / 结果文本 -->
+                            <TextBlock x:Name="HintText" Text="" FontSize="12" Opacity="0.8"
+                                       TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+
+                            <!-- 保留的「支持的链接」帮助块（来自更早那版纯表单形态） -->
+                            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1" CornerRadius="6" Padding="10">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="支持的链接" FontSize="12" FontWeight="SemiBold" />
+                                    <TextBlock FontSize="11" Opacity="0.65" TextWrapping="Wrap"
+                                               LineHeight="17"
+                                               Text="· UP 主投稿  https://space.bilibili.com/546195&#x0a;· 合集  …/channel/collectiondetail?sid=9225450&#x0a;· 系列  …/channel/seriesdetail?sid=88&#x0a;· 收藏夹  https://www.bilibili.com/medialist/detail/ml152431&#x0a;· 单条稿件  https://www.bilibili.com/video/BV1xx411c7mD" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- ⑦ 开始批量 / 停止 -->
+                    <Grid x:Name="ActionHost" Grid.Row="2" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="StartButton" Grid.Column="0"
+                                Content="开始批量" HorizontalAlignment="Stretch" Height="36"
+                                IsEnabled="False"
+                                Style="{ThemeResource AccentButtonStyle}"
+                                Click="OnStartClick" />
+                        <Button x:Name="StopButton" Grid.Column="1"
+                                Content="停止" HorizontalAlignment="Stretch" Height="36"
+                                IsEnabled="False"
+                                Click="OnStopClick" />
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
 </Page>

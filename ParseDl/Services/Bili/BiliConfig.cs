@@ -129,9 +129,43 @@ public sealed class BiliConfig
     public BiliMetadataFormat MetadataFormat { get; set; } = BiliMetadataFormat.Json;
     public BiliTrackPriority TrackPriority { get; set; } = BiliTrackPriority.SubtitleFirst;
 
+    /// <summary>
+    /// 把字幕作为**内封轨**塞进成品，而不是只留侧文件。
+    /// 生效前提三个：容器 MKV + 开了合并 + 字幕格式 ASS。缺任一条界面要写明缺哪条。
+    /// </summary>
+    public bool EmbedSubtitleTrack { get; set; }
+
+    /// <summary>弹幕 ASS 的字体名（libass 按系统字体名找）。只在弹幕格式 = ASS 时生效。</summary>
+    public string DanmakuFontFace { get; set; } = "Microsoft YaHei";
+    /// <summary>弹幕字号。</summary>
+    public int DanmakuFontSize { get; set; } = 25;
+    /// <summary>弹幕不透明度，0~100 的整数百分比（与界面滑条同一口径）。</summary>
+    public int DanmakuOpacity { get; set; } = 100;
+    /// <summary>弹幕底部边距（像素，ASS 的 MarginV）。</summary>
+    public int DanmakuMarginV { get; set; } = 10;
+
+    /// <summary>只取这几种语言的字幕；**空列表 = 不筛选，有几条取几条**。</summary>
+    public List<string> SubtitleLangs { get; set; } = new();
+    /// <summary>仅人工字幕：AI 那条语言码带 ai- 前缀，开了就不取（需要登录才有可观测效果）。</summary>
+    public bool SubtitleManualOnly { get; set; }
+
     // ── 保存与命名 ──────────────────────────────────────
     public string SaveDir { get; set; } = "";
-    /// <summary>命名模板。空 = 用 B 站默认（标题-BV号）。</summary>
+    /// <summary>启用保存文件夹：开 = 按文件夹模板建子目录；关 = 平铺。</summary>
+    public bool EnableSaveFolder { get; set; } = true;
+    /// <summary>文件夹模板（空 = 平铺）。</summary>
+    public string DirTemplate { get; set; } = DefaultDirTemplate;
+    /// <summary>同一稿件的多个分 P 排在连续位置。</summary>
+    public bool GroupByWork { get; set; } = true;
+    /// <summary>%CUSTOM_TEXT% 的输出内容。</summary>
+    public string CustomText { get; set; } = "";
+    /// <summary>每条任务的下载限速（KB/s）。0 = 不限。走 aria2 的 per-task 选项，不是全局。</summary>
+    public int SpeedLimitKbps { get; set; }
+    /// <summary>外挂 ffmpeg 所在**目录**（空 = 用随包那份）。</summary>
+    public string FfmpegDir { get; set; } = "";
+    /// <summary>
+    /// 命名模板（不含扩展名的部分由模板自己定）。空 = 用默认模板 DefaultFileNameTemplate。
+    /// </summary>
     public string FileNameTemplate { get; set; } = "";
     public bool SkipDownloaded { get; set; } = true;
     public int RequestIntervalMs { get; set; } = 800;
@@ -166,7 +200,20 @@ public sealed class BiliConfig
         SaveMetadata = o.SaveMetadata;
         MetadataFormat = o.MetadataFormat;
         TrackPriority = o.TrackPriority;
+        EmbedSubtitleTrack = o.EmbedSubtitleTrack;
+        DanmakuFontFace = o.DanmakuFontFace;
+        DanmakuFontSize = o.DanmakuFontSize;
+        DanmakuOpacity = o.DanmakuOpacity;
+        DanmakuMarginV = o.DanmakuMarginV;
+        SubtitleLangs = o.SubtitleLangs ?? new List<string>();
+        SubtitleManualOnly = o.SubtitleManualOnly;
         SaveDir = o.SaveDir;
+        EnableSaveFolder = o.EnableSaveFolder;
+        DirTemplate = o.DirTemplate;
+        GroupByWork = o.GroupByWork;
+        CustomText = o.CustomText;
+        SpeedLimitKbps = o.SpeedLimitKbps;
+        FfmpegDir = o.FfmpegDir;
         FileNameTemplate = o.FileNameTemplate;
         SkipDownloaded = o.SkipDownloaded;
         RequestIntervalMs = o.RequestIntervalMs;
@@ -209,6 +256,29 @@ public sealed class BiliConfig
             Aria2Engine.Log("[BiliConfig] 保存失败：" + ex.Message);
         }
     }
+
+    // ── 模板常量（对齐 Flutter 版 bili_config.dart）──────
+
+    /// <summary>默认文件夹模板：一个稿件一个目录。</summary>
+    public const string DefaultDirTemplate = "%WORK_TITLE%";
+
+    /// <summary>
+    /// 默认文件名模板。用 %WORK_TITLE% 而不是 %PART_TITLE% —— 真机实测：
+    /// UP 主常把分P名填成上传时的原始文件名（带日期/分辨率/版本号），
+    /// 单P稿件里那个字段基本是垃圾（42 字），而作品标题才是他真正起的名字。
+    /// 可选段让单P不出现 "P0"。
+    /// </summary>
+    public const string DefaultFileNameTemplate = "%WORK_TITLE%<-P%P%>-%QUALITY%%EXT%";
+
+    /// <summary>实际生效的文件名模板（空 = 默认）。</summary>
+    [JsonIgnore]
+    public string EffectiveFileNameTemplate =>
+        string.IsNullOrWhiteSpace(FileNameTemplate) ? DefaultFileNameTemplate : FileNameTemplate;
+
+    /// <summary>实际生效的文件夹模板（关掉保存文件夹时为空 = 平铺）。</summary>
+    [JsonIgnore]
+    public string EffectiveDirTemplate =>
+        EnableSaveFolder ? (DirTemplate ?? "") : "";
 
     /// <summary>实际保存目录：模块设置留空则落全局默认目录。</summary>
     public string ResolvedSaveDir =>
