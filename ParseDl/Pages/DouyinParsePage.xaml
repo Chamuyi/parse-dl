@@ -5,7 +5,13 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
 
-    <Grid Padding="24,8,24,24" RowSpacing="12">
+    <!--
+        统一布局规则（lead 2026-10-25）：外层 Grid 做居中容器，内容 MaxWidth 1600
+        并在宽窗下居中、窄窗下自然占满。本页顶层不是 ScrollViewer（内容自己管滚动），
+        但仍要避免超宽屏下无限拉伸。
+    -->
+    <Grid>
+    <Grid Padding="24,8,24,24" RowSpacing="12" MaxWidth="1600" HorizontalAlignment="Center">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -64,17 +70,28 @@
             </StackPanel>
         </Border>
 
-        <Grid Grid.Row="2" ColumnSpacing="12">
+        <!--
+            主体区：**布局由代码按实际宽度切换**（见 ApplyLayout）。
+              宽（>= 820）：左浏览器 / 右抓取面板，两列各 *，右列 MinWidth 380；
+              窄（< 820）：改成上下两行，右栏移到浏览器下方 —— 这样右栏内容
+                            永远不会被窗口右边界裁掉（用户 2026-10-25 报的截断问题）。
+            两个卡片都挂在本 Grid 上，靠 Grid.Row / Grid.Column 换位。
+        -->
+        <Grid x:Name="BodyGrid" Grid.Row="2" ColumnSpacing="12" RowSpacing="12"
+              SizeChanged="OnBodyGridSizeChanged">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MinWidth="320" />
-                <ColumnDefinition Width="*" MinWidth="380" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
             <!-- 左：内嵌浏览器 -->
-            <Border Grid.Column="0"
+            <Border x:Name="BrowserCard" Grid.Row="0" Grid.Column="0"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8">
+                    BorderThickness="1" CornerRadius="8" MinHeight="240">
                 <Grid>
                     <WebView2 x:Name="Web" />
                     <TextBlock x:Name="WebPlaceholder" Text="内嵌浏览器正在初始化…"
@@ -84,13 +101,14 @@
                 </Grid>
             </Border>
 
-            <!-- 右：下载选项 + 结果列表 -->
-            <Border Grid.Column="1"
+            <!-- 右：下载选项 + 抓取结果网格 -->
+            <Border x:Name="CaptureCard" Grid.Row="0" Grid.Column="1"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="12">
-                <Grid RowSpacing="10">
+                <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -98,41 +116,53 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <StackPanel x:Name="OptionHost" Grid.Row="0" Spacing="6" />
+                    <!-- 下载选项（代码生成，两个下拉同宽同高同基线） -->
+                    <StackPanel x:Name="OptionHost" Grid.Row="0" Spacing="8" />
 
-                    <Grid Grid.Row="1" ColumnSpacing="6">
+                    <!-- 全选 + 已选计数 -->
+                    <Grid Grid.Row="1" ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Button x:Name="SelectAllButton" Grid.Column="0" Content="全选"
-                                MinWidth="60" Click="OnSelectAllClick" />
-                        <Button x:Name="SelectNoneButton" Grid.Column="1" Content="清空勾选"
-                                MinWidth="80" Click="OnSelectNoneClick" />
-                        <Button x:Name="SelectVideoButton" Grid.Column="2" Content="选全部视频"
-                                MinWidth="92" Click="OnSelectVideoClick" />
-                        <Button x:Name="SelectImageButton" Grid.Column="3" Content="选全部图文"
-                                MinWidth="92" Click="OnSelectImageClick" />
-                        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6"
-                                    HorizontalAlignment="Right">
-                            <Button x:Name="FilterButton" Content="筛选" MinWidth="60"
-                                    Click="OnFilterClick" />
-                            <Button x:Name="ClearButton" Content="清空" MinWidth="60"
-                                    Click="OnClearClick" />
-                        </StackPanel>
+                        <CheckBox x:Name="SelectAllBox" Grid.Column="0" Content="全选" MinWidth="0"
+                                  IsThreeState="True" Click="OnSelectAllBoxClick" />
+                        <TextBlock x:Name="SelectedCountText" Grid.Column="1" Text="已选 0"
+                                   FontSize="12" Opacity="0.7"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
                     </Grid>
 
-                    <TextBlock x:Name="ListSummary" Grid.Row="2" Text="" FontSize="12"
+                    <!-- 操作按钮排：自己写的换行面板，宽度不够时自动换行（不再被截断） -->
+                    <Grid x:Name="ActionHost" Grid.Row="2" />
+
+                    <TextBlock x:Name="ListSummary" Grid.Row="3" Text="" FontSize="12"
                                Opacity="0.7" TextWrapping="Wrap" />
 
-                    <ListView x:Name="ResultList" Grid.Row="3"
-                              SelectionMode="None" IsItemClickEnabled="False"
-                              BorderThickness="0" Padding="0" />
+                    <!-- 抓取结果：方格缩略图网格（点击格子放大预览） -->
+                    <GridView x:Name="ResultGrid" Grid.Row="4"
+                              SelectionMode="None" IsItemClickEnabled="True"
+                              ItemClick="OnTileClick"
+                              BorderThickness="0" Padding="0"
+                              ScrollViewer.HorizontalScrollMode="Disabled"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <GridView.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <ItemsWrapGrid Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </GridView.ItemsPanel>
+                        <GridView.ItemContainerStyle>
+                            <Style TargetType="GridViewItem">
+                                <Setter Property="Margin" Value="3" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="MinWidth" Value="0" />
+                                <Setter Property="MinHeight" Value="0" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </GridView.ItemContainerStyle>
+                    </GridView>
 
-                    <Grid Grid.Row="4" ColumnSpacing="8">
+                    <Grid Grid.Row="5" ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -147,5 +177,6 @@
                 </Grid>
             </Border>
         </Grid>
+    </Grid>
     </Grid>
 </Page>

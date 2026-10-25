@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -17,21 +19,42 @@ namespace ParseDl.Pages;
 /// <summary>
 /// 抖音解析下载页 —— 对齐 Flutter 版 lib/pages/douyin_page.dart。
 ///
-/// 结构：左边内嵌浏览器（WebView2）+ 注入拦截脚本，右边下载选项 + 作品列表。
+/// 结构：左边内嵌浏览器（WebView2）+ 注入拦截脚本，右边下载选项 + **方格缩略图**
+/// 抓取结果（对齐原项目形态：一格一个作品，点击放大）。
 /// 抓取不靠读 HTML，而靠拦截脚本抄页面自己的 XHR/fetch 响应，并且只认
 /// **页面真渲染成卡片**的那些作品（见 Services/Douyin/DouyinInterceptor.cs）。
 ///
-/// 本页职责边界：只做「展示 + 触发」。结果仓库是 DouyinStore 单例（切页面不丢），
-/// 落盘规则在 DouyinConfig/DouyinSettings，入队在 DouyinEnqueuer。
+/// 自适应策略（2026-10-25 用户投诉「右栏被截断」）：
+///   · BodyGrid 按**实际宽度**切换布局 —— &gt;= 820 逻辑像素时左右两栏（各 *，右栏
+///     MinWidth 380）；&lt; 820 时改成上下两行（浏览器在上、抓取面板在下），
+///     于是右栏内容永远不会被窗口右边界裁掉；
+///   · 右栏两列都是星号宽度，跟随窗口比例伸缩，不用固定像素；
+///   · 面板内两个下拉用同一套网格（标签列固定 88 + 控件列 *、同高 32）→ 等宽等高同基线；
+///   · 操作按钮排是自写的 DouyinWrapPanel，放不下就换行，不会横向溢出。
 /// </summary>
 public sealed partial class DouyinParsePage : Page
 {
+    /// <summary>左右两栏布局所需的最小正文宽度（逻辑像素）。低于它就改成上下两行。</summary>
+    private const double TwoPaneMinWidth = 820;
+
+    /// <summary>缩略图格子边长（逻辑像素）。</summary>
+    private const double TileSize = 104;
+
+    /// <summary>选项区标签列宽度 —— 两个下拉共用它，保证等宽等高同基线。</summary>
+    private const double OptionLabelWidth = 88;
+
+    /// <summary>下拉框统一高度。</summary>
+    private const double OptionControlHeight = 32;
+
     private readonly DouyinStore _store = DouyinStore.Instance;
     private bool _ready;
     private bool _loading;
+    private bool? _wideLayout;
     private DouyinAutoScroller? _autoScroller;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _autoTimer;
     private bool _suppressOptionEvents;
+    /// <summary>点勾选圈后的短暂抑制窗口 —— 免得同一次点击又弹出预览。</summary>
+    private DateTime _suppressTileClickUntil;
 
     public DouyinParsePage()
     {
@@ -48,7 +71,9 @@ public sealed partial class DouyinParsePage : Page
         _store.Changed += OnStoreChanged;
         _store.Ledger.Load();
         UrlBox.Text = string.IsNullOrEmpty(_store.LastUrl) ? DouyinUrl.HomeUrl : _store.LastUrl;
+        BuildActionBar();
         BuildOptionBar();
+        ApplyLayout(BodyGrid.ActualWidth);
         RefreshList();
         _ = InitWebAsync();
     }
@@ -58,6 +83,55 @@ public sealed partial class DouyinParsePage : Page
         base.OnNavigatedFrom(e);
         _store.Changed -= OnStoreChanged;
         StopAutoScroll();
+    }
+
+    // ── 自适应布局 ──────────────────────────────────────────────
+
+    private void OnBodyGridSizeChanged(object sender, SizeChangedEventArgs e)
+        => ApplyLayout(e.NewSize.Width);
+
+    /// <summary>
+    /// 按实际宽度在「左右两栏」与「上下两行」之间切换。
+    /// 只在跨越阈值时重排，避免拖动窗口时每帧都改一遍集合。
+    /// </summary>
+    private void ApplyLayout(double width)
+    {
+        if (width <= 0) return;
+        var wide = width >= TwoPaneMinWidth;
+        if (_wideLayout is not null && _wideLayout.Value == wide) return;
+        _wideLayout = wide;
+
+        BodyGrid.ColumnDefinitions.Clear();
+        BodyGrid.RowDefinitions.Clear();
+
+        if (wide)
+        {
+            BodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            BodyGrid.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star),
+                MinWidth = 380,
+            });
+            BodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            Grid.SetRow(BrowserCard, 0);
+            Grid.SetColumn(BrowserCard, 0);
+            Grid.SetRow(CaptureCard, 0);
+            Grid.SetColumn(CaptureCard, 1);
+        }
+        else
+        {
+            BodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            // 浏览器约 29%、抓取面板约 71% —— 抓取面板里有 6 行选项 + 按钮排 + 网格，
+            // 给少了网格会被挤成一条缝（面板是用户真正要看的那个）
+            BodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(2, GridUnitType.Star) });
+            BodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(5, GridUnitType.Star) });
+
+            Grid.SetRow(BrowserCard, 0);
+            Grid.SetColumn(BrowserCard, 0);
+            Grid.SetRow(CaptureCard, 1);
+            Grid.SetColumn(CaptureCard, 0);
+        }
     }
 
     // ── 内嵌浏览器 ──────────────────────────────────────────────
@@ -179,10 +253,9 @@ public sealed partial class DouyinParsePage : Page
         {
             StatusText.Text = "正在统计页面上的作品…";
             var raw = await Web.CoreWebView2.ExecuteScriptAsync("document.documentElement.scrollHeight");
-            var height = raw;
             RefreshList();
             StatusText.Text = "当前页面已收集 " + _store.Count + " 个媒体 / " +
-                _store.AllAwemeGroupCount + " 个作品（页面高 " + height + "px）。" +
+                _store.AllAwemeGroupCount + " 个作品（页面高 " + raw + "px）。" +
                 "若列表为空，请先登录并向下滚动让卡片加载出来。";
         }
         catch (Exception ex)
@@ -290,9 +363,14 @@ public sealed partial class DouyinParsePage : Page
     // ── 下载选项（对齐参照实现「下载设置」）────────────────────────
 
     /// <summary>
-    /// 下载源 / 质量策略 / 图片格式三行紧凑选项。
-    /// 放在抓取面板里而不是只放设置页：参照实现的这套选项就长在批量下载弹窗上，
-    /// 用户抓完一批会就地切换对比效果。设置页那份是**同一份数据**，改哪边都即时生效。
+    /// 下载源 / 质量策略 / 图片格式 + 三个开关。
+    ///
+    /// **两个下拉必须同宽同高同基线**（用户 2026-10-25 明确投诉「上面两个框怎么
+    /// 大小不一致」）：都走同一个 <see cref="OptionRow"/> —— 标签列固定 88px、
+    /// 控件列吃满剩余宽度、控件高度统一 32px。所以「下载源」和「图片格式」的框
+    /// 尺寸完全一致，不会一个高一个矮。
+    ///
+    /// 开关按用户 2026-09-30 的约定**与标题同行且距离 ≤24px**（不推到行尾）。
     /// </summary>
     private void BuildOptionBar()
     {
@@ -300,76 +378,91 @@ public sealed partial class DouyinParsePage : Page
         _suppressOptionEvents = true;
         OptionHost.Children.Clear();
 
-        var sourceCombo = new ComboBox { MinWidth = 260 };
+        var sourceCombo = new ComboBox
+        {
+            Height = OptionControlHeight,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            MinWidth = 0,
+        };
         foreach (var s in Enum.GetValues<DouyinSource>()) sourceCombo.Items.Add(s.Label());
         sourceCombo.SelectedIndex = (int)cfg.Source;
         sourceCombo.SelectionChanged += (_, _) =>
         {
             if (_suppressOptionEvents) return;
-            DouyinSettings.Mutate(c => c.Source = (DouyinSource)sourceCombo.SelectedIndex);
+            DouyinSettings.Mutate(c => c.Source = (DouyinSource)Math.Max(0, sourceCombo.SelectedIndex));
             BuildOptionBar();
             RefreshSummary();
         };
-        OptionHost.Children.Add(CompactRow("下载源", sourceCombo));
+        OptionHost.Children.Add(OptionRow("下载源", sourceCombo));
 
         if (cfg.Source.NeedsQualityMode())
         {
-            var modeCombo = new ComboBox { MinWidth = 200 };
+            var modeCombo = new ComboBox
+            {
+                Height = OptionControlHeight,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                MinWidth = 0,
+            };
             foreach (var m in Enum.GetValues<DouyinQualityMode>()) modeCombo.Items.Add(m.Label());
             modeCombo.SelectedIndex = (int)cfg.QualityMode;
             modeCombo.SelectionChanged += (_, _) =>
             {
                 if (_suppressOptionEvents) return;
-                DouyinSettings.Mutate(c => c.QualityMode = (DouyinQualityMode)modeCombo.SelectedIndex);
+                DouyinSettings.Mutate(c => c.QualityMode = (DouyinQualityMode)Math.Max(0, modeCombo.SelectedIndex));
                 RefreshSummary();
             };
-            OptionHost.Children.Add(CompactRow("质量优先策略", modeCombo));
+            OptionHost.Children.Add(OptionRow("质量优先策略", modeCombo));
         }
 
-        var imgCombo = new ComboBox { MinWidth = 200 };
+        var imgCombo = new ComboBox
+        {
+            Height = OptionControlHeight,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            MinWidth = 0,
+        };
         foreach (var f in Enum.GetValues<DouyinImageFormat>()) imgCombo.Items.Add(f.Label());
         imgCombo.SelectedIndex = (int)cfg.ImageFormat;
         imgCombo.SelectionChanged += (_, _) =>
         {
             if (_suppressOptionEvents) return;
-            DouyinSettings.Mutate(c => c.ImageFormat = (DouyinImageFormat)imgCombo.SelectedIndex);
+            DouyinSettings.Mutate(c => c.ImageFormat = (DouyinImageFormat)Math.Max(0, imgCombo.SelectedIndex));
         };
-        OptionHost.Children.Add(CompactRow("图片格式", imgCombo));
+        OptionHost.Children.Add(OptionRow("图片格式", imgCombo));
 
-        var skipToggle = new ToggleSwitch { IsOn = cfg.SkipDownloaded, MinWidth = 0 };
+        var skipToggle = new ToggleSwitch { IsOn = cfg.SkipDownloaded, MinWidth = 0, OnContent = "开", OffContent = "关" };
         skipToggle.Toggled += (_, _) =>
         {
             if (_suppressOptionEvents) return;
             DouyinSettings.Mutate(c => c.SkipDownloaded = skipToggle.IsOn);
             RefreshSummary();
         };
-        OptionHost.Children.Add(CompactRow("跳过已下载", skipToggle));
+        OptionHost.Children.Add(ToggleRow("跳过已下载", skipToggle));
 
-        var bgmToggle = new ToggleSwitch { IsOn = cfg.IncludeBgm, MinWidth = 0 };
+        var bgmToggle = new ToggleSwitch { IsOn = cfg.IncludeBgm, MinWidth = 0, OnContent = "开", OffContent = "关" };
         bgmToggle.Toggled += (_, _) =>
         {
             if (_suppressOptionEvents) return;
             DouyinSettings.Mutate(c => c.IncludeBgm = bgmToggle.IsOn);
         };
-        OptionHost.Children.Add(CompactRow("附带 BGM（图文）", bgmToggle));
+        OptionHost.Children.Add(ToggleRow("附带 BGM（图文）", bgmToggle));
 
-        var liveToggle = new ToggleSwitch { IsOn = cfg.IncludeLivePhoto, MinWidth = 0 };
+        var liveToggle = new ToggleSwitch { IsOn = cfg.IncludeLivePhoto, MinWidth = 0, OnContent = "开", OffContent = "关" };
         liveToggle.Toggled += (_, _) =>
         {
             if (_suppressOptionEvents) return;
             DouyinSettings.Mutate(c => c.IncludeLivePhoto = liveToggle.IsOn);
         };
-        OptionHost.Children.Add(CompactRow("实况图配对视频", liveToggle));
+        OptionHost.Children.Add(ToggleRow("实况图配对视频", liveToggle));
 
         _suppressOptionEvents = false;
     }
 
-    /// <summary>设置项开关必须与标题同行（用户 2026-09-30 约定：距离 ≤24px）。</summary>
-    private static Grid CompactRow(string label, FrameworkElement control)
+    /// <summary>标签列固定宽 + 控件列吃满剩余 —— 同一套网格保证控件等宽等高同基线。</summary>
+    private static Grid OptionRow(string label, FrameworkElement control)
     {
         var grid = new Grid { ColumnSpacing = 8 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(OptionLabelWidth) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         grid.Children.Add(new TextBlock
         {
@@ -377,6 +470,7 @@ public sealed partial class DouyinParsePage : Page
             FontSize = 13,
             Opacity = 0.8,
             VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
         });
 
         control.VerticalAlignment = VerticalAlignment.Center;
@@ -385,23 +479,61 @@ public sealed partial class DouyinParsePage : Page
         return grid;
     }
 
-    // ── 列表 ───────────────────────────────────────────────────
+    /// <summary>开关行：开关紧跟标题（距离 ≤24px，遵循用户 2026-09-30 的约定）。</summary>
+    private static StackPanel ToggleRow(string label, ToggleSwitch toggle)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        row.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 13,
+            Opacity = 0.8,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        toggle.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(toggle);
+        return row;
+    }
+
+    // ── 操作按钮排（换行，不截断）────────────────────────────────
+
+    /// <summary>把操作按钮装进自写的换行面板 —— 窗口变窄时换行而不是被裁掉。</summary>
+    private void BuildActionBar()
+    {
+        ActionHost.Children.Clear();
+        var wrap = new DouyinWrapPanel { RowGap = 6, ColumnGap = 6 };
+
+        wrap.Children.Add(MiniButton("全部", OnSelectAllClick));
+        wrap.Children.Add(MiniButton("清空勾选", OnSelectNoneClick));
+        wrap.Children.Add(MiniButton("选全部视频", OnSelectVideoClick));
+        wrap.Children.Add(MiniButton("选全部图文", OnSelectImageClick));
+        wrap.Children.Add(MiniButton("筛选", OnFilterClick));
+        wrap.Children.Add(MiniButton("清空结果", OnClearClick));
+
+        ActionHost.Children.Add(wrap);
+    }
+
+    private static Button MiniButton(string text, RoutedEventHandler handler)
+    {
+        var b = new Button { Content = text, MinWidth = 0, Padding = new Thickness(12, 5, 12, 5) };
+        b.Click += handler;
+        return b;
+    }
+
+    // ── 结果网格 ───────────────────────────────────────────────
 
     private void OnStoreChanged()
     {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            RefreshList();
-        });
+        DispatcherQueue.TryEnqueue(RefreshList);
     }
 
     private void RefreshList()
     {
-        ResultList.Items.Clear();
+        ResultGrid.Items.Clear();
 
         var groups = _store.AwemeGroups;
         foreach (var g in groups)
-            ResultList.Items.Add(BuildRow(g));
+            ResultGrid.Items.Add(BuildTile(g));
 
         RefreshSummary();
     }
@@ -412,14 +544,18 @@ public sealed partial class DouyinParsePage : Page
         var total = _store.AllAwemeGroupCount;
         var shown = _store.AwemeGroups.Count;
 
-        var text = "共 " + total + " 个作品（媒体 " + _store.Count + " 条）";
+        var text = _store.Count == 0
+            ? "还没有抓到内容：先在左边登录并滚动页面，作品会自动出现在这里。"
+            : "共 " + total + " 个作品（媒体 " + _store.Count + " 条）";
         if (_store.HasFilter) text += " · 筛选后 " + shown + " 个作品";
         if (_store.Dropped > 0) text += " · 超出上限已丢弃 " + _store.Dropped + " 条";
         ListSummary.Text = text;
 
         var sel = _store.SelectedCount;
+        SelectedCountText.Text = "已选 " + sel;
+        SelectAllBox.IsChecked = _store.SelectionState;
+
         DownloadButton.IsEnabled = _store.Count > 0;
-        DownloadButton.Content = "开始下载";
 
         var batch = _store.BuildDownloadList(cfg);
         var why = "已选 " + sel + " 条媒体";
@@ -429,116 +565,260 @@ public sealed partial class DouyinParsePage : Page
         DownloadSummary.Text = why;
     }
 
-    private FrameworkElement BuildRow(DouyinAwemeGroup g)
+    /// <summary>
+    /// 一个作品 = 一个方格：封面铺满 + 时长角标（右下）+ 勾选圈（左上）+ 已下载标。
+    /// 点击方格弹出放大预览（见 <see cref="ShowPreviewAsync"/>）。
+    /// </summary>
+    private FrameworkElement BuildTile(DouyinAwemeGroup g)
     {
-        var grid = new Grid { ColumnSpacing = 10, Padding = new Thickness(0, 4, 0, 4) };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var root = new Grid { Width = TileSize, Height = TileSize };
 
-        // 勾选框（三态：整组全选 = true，部分 = null，未选 = false）
-        var check = new CheckBox { MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
-        var state = _store.GroupSelectionOf(g);
-        check.IsChecked = state switch
-        {
-            DouyinSelection.All => true,
-            DouyinSelection.Some => null,
-            _ => false,
-        };
-        check.Click += (_, _) =>
-        {
-            _store.ToggleGroup(g);
-        };
-        grid.Children.Add(check);
-
-        // 封面
+        // 封面（铺满整格）
         var cover = new Border
         {
-            Width = 64,
-            Height = 64,
             CornerRadius = new CornerRadius(6),
             Background = UiKit.SubtleFill,
-            VerticalAlignment = VerticalAlignment.Center,
             Child = new TextBlock
             {
                 Text = "\uE8B9",
                 FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                FontSize = 20,
-                Opacity = 0.5,
+                FontSize = 22,
+                Opacity = 0.45,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             },
         };
         if (!string.IsNullOrEmpty(g.CoverUrl) && Uri.TryCreate(g.CoverUrl, UriKind.Absolute, out var coverUri))
         {
+            // 缩略图按解码尺寸限制一下：网格里几十上百张，原图解码太贵
             cover.Child = new Image
             {
-                Source = new BitmapImage(coverUri),
+                Source = new BitmapImage(new Uri(g.CoverUrl)) { DecodePixelWidth = 208 },
                 Stretch = Stretch.UniformToFill,
             };
         }
-        Grid.SetColumn(cover, 1);
-        grid.Children.Add(cover);
+        root.Children.Add(cover);
 
-        // 文案 + 元数据
-        var texts = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
-        texts.Children.Add(new TextBlock
+        // 勾选圈（左上角，圆形按钮 —— 保留批量勾选能力）
+        var selected = _store.GroupSelectionOf(g) != DouyinSelection.None;
+        var check = new Button
         {
-            Text = g.Title,
-            FontSize = 13,
-            TextWrapping = TextWrapping.Wrap,
-            MaxLines = 2,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-        });
-
-        var meta = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        meta.Children.Add(new TextBlock { Text = g.TypeLabel, FontSize = 11, Opacity = 0.65 });
-        if (g.DurationMs is int ms && ms > 0)
-            meta.Children.Add(new TextBlock
+            Content = new FontIcon
             {
-                Text = DouyinTemplate.FormatDurationSeconds(ms / 1000),
-                FontSize = 11,
-                Opacity = 0.65,
-            });
-        meta.Children.Add(new TextBlock
+                Glyph = selected ? "\uE73E" : "\uE739",
+                FontSize = 12,
+                Foreground = selected ? UiKit.OnAccentText : UiKit.CardBackground,
+            },
+            Width = 24,
+            Height = 24,
+            MinWidth = 0,
+            Padding = new Thickness(0),
+            CornerRadius = new CornerRadius(12),
+            Background = selected ? UiKit.AccentFill : UiKit.SubtleFill,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(6, 6, 0, 0),
+        };
+        ToolTipService.SetToolTip(check, "勾选 / 取消这个作品");
+        check.Click += (_, _) =>
         {
-            Text = DouyinTemplate.FormatStatCount(g.LikeCount) + " 赞",
-            FontSize = 11,
-            Opacity = 0.65,
-        });
-        if (g.CreatedAt is DateTime t)
-            meta.Children.Add(new TextBlock
-            {
-                Text = t.ToString("yyyy-MM-dd"),
-                FontSize = 11,
-                Opacity = 0.65,
-            });
-        texts.Children.Add(meta);
-        Grid.SetColumn(texts, 2);
-        grid.Children.Add(texts);
+            // 点勾选圈不要再冒出一次「打开预览」—— WinUI 的 Button.Click 没有
+            // Handled 可设，所以用一个短窗口标记，OnTileClick 里据此忽略。
+            _suppressTileClickUntil = DateTime.Now.AddMilliseconds(300);
+            _store.ToggleGroup(g);
+        };
+        root.Children.Add(check);
 
-        // 已下载标记
-        if (_store.IsGroupDownloaded(g))
+        // 时长角标（右下）
+        var duration = g.DurationMs is int ms && ms > 0 ? DouyinTemplate.FormatDurationSeconds(ms / 1000) : null;
+        var badgeText = duration ?? (g.ImageCount > 0 ? g.ImageCount + " 图" : null);
+        if (badgeText is not null)
         {
             var badge = new Border
             {
-                Background = UiKit.SubtleFill,
-                CornerRadius = new CornerRadius(10),
-                Padding = new Thickness(8, 3, 8, 3),
-                VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock { Text = "已下载", FontSize = 11, Opacity = 0.75 },
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(170, 0, 0, 0)),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(5, 1, 5, 1),
+                Margin = new Thickness(0, 0, 5, 5),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Child = new TextBlock
+                {
+                    Text = badgeText,
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 255, 255)),
+                },
             };
-            Grid.SetColumn(badge, 3);
-            grid.Children.Add(badge);
+            root.Children.Add(badge);
         }
 
-        return new Border
+        // 类型标（左下：视频 / 图文 / 视频+N图）
+        var typeTag = new Border
         {
-            BorderThickness = new Thickness(0, 0, 0, 1),
-            BorderBrush = UiKit.CardBorder,
-            Child = grid,
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(150, 0, 0, 0)),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(5, 1, 5, 1),
+            Margin = new Thickness(5, 0, 0, 5),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Child = new TextBlock
+            {
+                Text = g.TypeLabel,
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 255, 255)),
+            },
         };
+        root.Children.Add(typeTag);
+
+        // 已下载标记（右上）
+        if (_store.IsGroupDownloaded(g))
+        {
+            var done = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(190, 0, 100, 0)),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(5, 1, 5, 1),
+                Margin = new Thickness(0, 6, 6, 0),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Child = new TextBlock
+                {
+                    Text = "已下载",
+                    FontSize = 10,
+                    Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 255, 255)),
+                },
+            };
+            root.Children.Add(done);
+        }
+
+        // 选中时描一圈强调色边
+        if (selected)
+        {
+            root.Children.Add(new Border
+            {
+                BorderBrush = UiKit.AccentFill,
+                BorderThickness = new Thickness(2),
+                CornerRadius = new CornerRadius(6),
+                IsHitTestVisible = false,
+            });
+        }
+
+        var tile = new Border
+        {
+            Padding = new Thickness(0),
+            Child = root,
+            // 点格子弹预览时靠 Tag 找回这个作品
+            Tag = g,
+        };
+        ToolTipService.SetToolTip(tile, g.Title);
+        return tile;
+    }
+
+    /// <summary>点击方格 → 放大预览（大图 + 标题 + 时长 + 点赞 + 日期 + 媒体地址）。</summary>
+    private async void OnTileClick(object sender, ItemClickEventArgs e)
+    {
+        if (DateTime.Now < _suppressTileClickUntil) return;
+
+        // Items 里塞的是控件而不是数据对象，靠 Tag 找回对应的作品
+        if (e.ClickedItem is Border { Tag: DouyinAwemeGroup g })
+            await ShowPreviewAsync(g);
+    }
+
+    private async Task ShowPreviewAsync(DouyinAwemeGroup g)
+    {
+        var panel = new StackPanel { Spacing = 12, MinWidth = 420 };
+
+        // 大图
+        if (!string.IsNullOrEmpty(g.CoverUrl) && Uri.TryCreate(g.CoverUrl, UriKind.Absolute, out var uri))
+        {
+            panel.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                Background = UiKit.SubtleFill,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Child = new Image
+                {
+                    Source = new BitmapImage(uri),
+                    Stretch = Stretch.Uniform,
+                    MaxHeight = 380,
+                    MaxWidth = 380,
+                },
+            });
+        }
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = g.Title,
+            FontSize = 15,
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+        });
+
+        var info = new StackPanel { Spacing = 0 };
+        info.Children.Add(UiKit.InfoRow("类型", g.TypeLabel));
+        info.Children.Add(UiKit.InfoRow("时长",
+            g.DurationMs is int ms && ms > 0 ? DouyinTemplate.FormatDurationSeconds(ms / 1000) : "—"));
+        info.Children.Add(UiKit.InfoRow("媒体条数", g.Count.ToString()));
+        info.Children.Add(UiKit.InfoRow("点赞", DouyinTemplate.FormatStatCount(g.LikeCount)));
+        info.Children.Add(UiKit.InfoRow("评论", DouyinTemplate.FormatStatCount(g.CommentCount)));
+        info.Children.Add(UiKit.InfoRow("收藏", DouyinTemplate.FormatStatCount(g.CollectCount)));
+        info.Children.Add(UiKit.InfoRow("分享", DouyinTemplate.FormatStatCount(g.ShareCount)));
+        info.Children.Add(UiKit.InfoRow("发布时间",
+            g.CreatedAt is DateTime t ? t.ToString("yyyy-MM-dd HH:mm") : "未知"));
+        info.Children.Add(UiKit.InfoRow("作品 ID", g.AwemeId, selectable: true));
+        if (!string.IsNullOrEmpty(g.Lead.UserName))
+            info.Children.Add(UiKit.InfoRow("作者", "@" + g.Lead.UserName, selectable: true));
+        if (g.Tags.Count > 0)
+            info.Children.Add(UiKit.InfoRow("标签", string.Join(" / ", g.Tags), selectable: true));
+        info.Children.Add(UiKit.InfoRow("已下载", _store.IsGroupDownloaded(g) ? "是" : "否"));
+        panel.Children.Add(info);
+
+        // 媒体地址（一条媒体一行）
+        var urls = new StackPanel { Spacing = 4 };
+        urls.Children.Add(new TextBlock { Text = "媒体地址", FontSize = 12, Opacity = 0.7 });
+        foreach (var m in g.Items)
+        {
+            urls.Children.Add(new TextBlock
+            {
+                Text = "#" + m.MediaIndex + " " + (m.IsVideo ? "视频" : m.IsImage ? "图片" : "音频") + "  " + m.Url,
+                FontSize = 11,
+                Opacity = 0.65,
+                IsTextSelectionEnabled = true,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+        panel.Children.Add(urls);
+
+        var dialog = new ContentDialog
+        {
+            Title = "作品预览",
+            Content = new ScrollViewer
+            {
+                Content = panel,
+                MaxHeight = 560,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                HorizontalScrollMode = ScrollMode.Disabled,
+            },
+            PrimaryButtonText = _store.GroupSelectionOf(g) == DouyinSelection.All ? "取消勾选" : "勾选这个作品",
+            CloseButtonText = "关闭",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result == ContentDialogResult.Primary)
+        {
+            _store.ToggleGroup(g);
+        }
+    }
+
+    private void OnSelectAllBoxClick(object sender, RoutedEventArgs e)
+    {
+        // 三态：不是「全选」状态就全选，已经是全选就清空
+        var wantAll = _store.SelectionState != true;
+        _store.SetAllSelected(wantAll);
+        SelectAllBox.IsChecked = _store.SelectionState;
     }
 
     private void OnSelectAllClick(object sender, RoutedEventArgs e) => _store.SetAllSelected(true);
@@ -603,7 +883,7 @@ public sealed partial class DouyinParsePage : Page
 
         var authorBox = new StackPanel { Spacing = 4 };
         authorBox.Children.Add(new TextBlock { Text = "作者（任一命中）", FontSize = 12, Opacity = 0.7 });
-        var authorChecks = new System.Collections.Generic.List<(string Value, CheckBox Box)>();
+        var authorChecks = new List<(string Value, CheckBox Box)>();
         foreach (var a in facets.Authors.Take(20))
         {
             var cb = new CheckBox { Content = a, IsChecked = current.AuthorIds.Contains(a), FontSize = 12 };
@@ -616,7 +896,7 @@ public sealed partial class DouyinParsePage : Page
 
         var tagWrap = new StackPanel { Spacing = 4 };
         tagWrap.Children.Add(new TextBlock { Text = "标签", FontSize = 12, Opacity = 0.7 });
-        var tagChecks = new System.Collections.Generic.List<(string Value, CheckBox Box)>();
+        var tagChecks = new List<(string Value, CheckBox Box)>();
         foreach (var t in facets.Tags.Take(20))
         {
             var cb = new CheckBox { Content = t, IsChecked = current.Tags.Contains(t), FontSize = 12 };
@@ -640,6 +920,8 @@ public sealed partial class DouyinParsePage : Page
             Content = panel,
             MaxHeight = 460,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            HorizontalScrollMode = ScrollMode.Disabled,
         };
 
         var dialog = new ContentDialog
@@ -692,7 +974,7 @@ public sealed partial class DouyinParsePage : Page
         // 一个都没剩下时也要给说法 —— 否则用户点下去毫无反应
         if (batch.Items.Count == 0)
         {
-            var why = new System.Collections.Generic.List<string>();
+            var why = new List<string>();
             if (batch.SkippedDownloaded > 0) why.Add(batch.SkippedDownloaded + " 个已下载作品");
             if (batch.SkippedDuration > 0) why.Add(batch.SkippedDuration + " 条不符合时长范围");
             StatusText.Text = why.Count == 0 ? "没有可下载的条目。" : "这批全部被跳过（" + string.Join("，", why) + "）。";
