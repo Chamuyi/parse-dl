@@ -43,23 +43,31 @@ public sealed partial class XSettingsPage : Page
     private const string DefaultNameTpl =
         "%POST_TIME% %USER_SCREEN_NAME% %POST_ID%-%MEDIA_INDEX%%EXT%";
 
-    /// <summary>X 侧可用变量（与 Flutter 版 kXVarNames 逐条一致，不含其它平台术语）。</summary>
-    private static readonly (string Name, string Desc)[] XTemplateVars =
+    /// <summary>
+    /// X 侧可用变量（与 Flutter 版 kXTemplateVars 逐条一致：13 个、顺序照抄
+    /// kAllTemplateVars 过滤后的顺序，不含任何抖音 / B 站术语）。
+    /// 带参数的变量把参数写进 ParamExample / ParamDesc —— 控件的「参数格式」行
+    /// 与每行说明都从这两个字段生成，不在页面里再写一遍。
+    /// </summary>
+    private static readonly TemplateVarInfo[] XTemplateVars =
     {
-        ("POST_ID", "推文 ID"),
-        ("POST_TIME", "推文发布时间（加 ,d=1 只取日期）"),
-        ("USER_ID", "用户 ID"),
-        ("USER_NAME", "用户昵称"),
-        ("USER_SCREEN_NAME", "用户名（@ 后面的那串）"),
-        ("MEDIA_ID", "媒体资源 ID"),
-        ("MEDIA_WIDTH", "媒体宽度"),
-        ("MEDIA_HEIGHT", "媒体高度"),
-        ("MEDIA_INDEX", "同一条推文里的第几个媒体"),
-        ("MEDIA_TYPE", "媒体类型（video / image / gif）"),
-        ("CONTENT", "推文正文（加 ,t=32 截断 32 字）"),
-        ("TAGS", "推文标签"),
-        ("EXT", "扩展名（含点）"),
+        new("POST_ID", "推文 ID"),
+        new("POST_TIME", "推文发布日期", "d=0", "仅日期（0 或 1）"),
+        new("USER_ID", "用户 ID"),
+        new("USER_NAME", "用户昵称"),
+        new("USER_SCREEN_NAME", "用户名"),
+        new("MEDIA_ID", "资源 ID"),
+        new("MEDIA_WIDTH", "资源宽度"),
+        new("MEDIA_HEIGHT", "资源高度"),
+        new("MEDIA_INDEX", "资源索引"),
+        new("CONTENT", "推文内容", "t=32", "截断长度"),
+        new("MEDIA_TYPE", "媒体类型"),
+        new("EXT", "扩展名"),
+        new("TAGS", "推文标签"),
     };
+
+    /// <summary>文件夹模板的「填入默认」值（对齐 Flutter 版 download_section 的 onUseDefault）。</summary>
+    private const string DefaultDirTpl = "%USER_SCREEN_NAME%";
 
     private ModuleSettings S => AppSettings.Instance.ForModule(ModuleKey);
 
@@ -71,9 +79,9 @@ public sealed partial class XSettingsPage : Page
     private TextBlock _loginBadgeText = null!;
     private Button _verifyButton = null!;
     private Button _logoutButton = null!;
-    private TextBox _dirTplBox = null!;
-    private TextBox _nameTplBox = null!;
-    private TextBlock _previewText = null!;
+    private TemplateEditor _templateEditor = null!;
+    private TemplateField _dirField = null!;
+    private TemplateField _nameField = null!;
     private TextBox _saveDirBox = null!;
     private TextBlock _saveDirStatus = null!;
     private bool _applying;
@@ -102,7 +110,6 @@ public sealed partial class XSettingsPage : Page
         Root.Children.Add(BuildCacheCard());
 
         RefreshLoginVisual();
-        UpdatePreview();
     }
 
     // ── ① 账号 ──────────────────────────────────────────────
@@ -560,53 +567,49 @@ public sealed partial class XSettingsPage : Page
 
         panel.Children.Add(SettingRows.Divider());
 
-        // 文件夹模板
-        _dirTplBox = new TextBox
+        // ── 命名模板：一张共用的模板编辑控件（Controls/TemplateEditor.cs）──
+        //
+        // 对齐 Flutter 版 lib/widgets/download_section.dart 的两个 TemplateRow：
+        // 文件夹模板与文件名模板**各自**带「填入默认」与「输出示例」，而「可用变量」
+        // 面板只有一份，点「插入」插到**当前正在编辑的那个框**（旧实现写死文件名框，
+        // 用户 2026-10-25 投诉的正是这一点）。
+        panel.Children.Add(new TextBlock
         {
-            Text = S.DirTemplate,
-            PlaceholderText = "%USER_SCREEN_NAME%",
-            FontFamily = new FontFamily("Consolas"),
-        };
-        _dirTplBox.TextChanged += (_, _) => OnTemplateChanged();
-        panel.Children.Add(SettingRows.Row("文件夹模板",
-            "留空则直接存到保存目录下。建议只用「用户 / 推文」级变量，逐文件变量会让每条媒体各建一个文件夹。",
-            _dirTplBox));
+            Text = "命名模板",
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 4, 0, 0),
+        });
 
-        // 文件名模板
-        _nameTplBox = new TextBox
+        _templateEditor = new TemplateEditor(XTemplateVars, VarHintForDirTemplate);
+        _dirField = _templateEditor.AddField(new TemplateFieldOptions
         {
-            Text = string.IsNullOrEmpty(S.FileNameTemplate) ? DefaultNameTpl : S.FileNameTemplate,
-            PlaceholderText = DefaultNameTpl,
-            FontFamily = new FontFamily("Consolas"),
-        };
-        _nameTplBox.TextChanged += (_, _) => OnTemplateChanged();
-        panel.Children.Add(SettingRows.Row("文件名模板",
-            "留空则使用「媒体ID_时间戳.扩展名」。改动会自动保存。",
-            _nameTplBox));
+            Label = "文件夹模板",
+            Hint = DefaultDirTpl,
+            DefaultTemplate = DefaultDirTpl,
+            EmptyHint = "留空则直接存到保存目录下",
+            Preview = RenderDirTemplate,
+        }, S.DirTemplate);
 
-        // 全部占位符说明 + 点一下插入
-        panel.Children.Add(BuildVarTable());
-
-        // 实时预览
-        _previewText = new TextBlock
+        _nameField = _templateEditor.AddField(new TemplateFieldOptions
         {
-            Text = "-",
-            FontSize = 12.5,
-            FontFamily = new FontFamily("Consolas"),
+            Label = "文件名模板",
+            Hint = DefaultNameTpl,
+            DefaultTemplate = DefaultNameTpl,
+            EmptyHint = "留空则使用「媒体ID_时间戳.扩展名」",
+            Preview = RenderNameTemplate,
+        }, string.IsNullOrEmpty(S.FileNameTemplate) ? DefaultNameTpl : S.FileNameTemplate);
+
+        _templateEditor.FieldChanged += (_, e) => OnTemplateChanged(e.Field, e.Value);
+        panel.Children.Add(_templateEditor);
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "模板改动会自动保存。",
+            FontSize = 11.5,
+            Opacity = 0.55,
             TextWrapping = TextWrapping.Wrap,
-            IsTextSelectionEnabled = true,
-        };
-        var previewInner = new StackPanel { Spacing = 4 };
-        previewInner.Children.Add(new TextBlock { Text = "输出示例", FontSize = 12, Opacity = 0.6 });
-        previewInner.Children.Add(_previewText);
-        var previewBox = new Border
-        {
-            Background = SettingRows.SubtleFill,
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(12, 10, 12, 10),
-            Child = previewInner,
-        };
-        panel.Children.Add(previewBox);
+        });
 
         panel.Children.Add(SettingRows.Divider());
 
@@ -629,120 +632,47 @@ public sealed partial class XSettingsPage : Page
         return SettingRows.Card("下载", "保存路径、文件夹 / 文件名模板、同名文件处理", panel);
     }
 
-    /// <summary>可用变量表：每个变量一行（名字 + 说明），点「插入」追加到文件名模板光标处。</summary>
-    private UIElement BuildVarTable()
+    /// <summary>文件夹模板变量面板底部的补充提示（对齐 Flutter 版 download_section 的 varHint）。</summary>
+    private const string VarHintForDirTemplate =
+        "提示：文件夹模板建议只用「用户 / 推文」级变量；%MEDIA_INDEX%、%EXT%、%MEDIA_ID% 等逐文件变量会让每条媒体各建一个文件夹。";
+
+    /// <summary>
+    /// 两个模板框任一改动 → 立即落盘（字段标签判别，不靠下标，免得以后加字段错位）。
+    /// </summary>
+    private void OnTemplateChanged(TemplateField field, string value)
     {
-        var wrap = new StackPanel { Spacing = 6 };
-        wrap.Children.Add(new TextBlock { Text = "可用变量", FontSize = 13, FontWeight = FontWeights.SemiBold });
-        wrap.Children.Add(new TextBlock
-        {
-            Text = "用百分号包住变量名，如 %USER_SCREEN_NAME%。尖括号包住的是可选段：段内变量为空时整段（含字面字符）丢弃。" +
-                   "带参数写作 %CONTENT,t=32% / %POST_TIME,d=1%。",
-            FontSize = 12,
-            Opacity = 0.62,
-            TextWrapping = TextWrapping.Wrap,
-            LineHeight = 18,
-        });
-
-        var grid = new StackPanel { Spacing = 4 };
-        foreach (var (name, desc) in XTemplateVars)
-        {
-            var row = new Grid { ColumnSpacing = 8 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(190) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            row.Children.Add(new TextBlock
-            {
-                Text = "%" + name + "%",
-                FontSize = 12,
-                FontFamily = new FontFamily("Consolas"),
-                VerticalAlignment = VerticalAlignment.Center,
-            });
-
-            var d = new TextBlock
-            {
-                Text = desc,
-                FontSize = 12,
-                Opacity = 0.62,
-                TextWrapping = TextWrapping.Wrap,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            Grid.SetColumn(d, 1);
-            row.Children.Add(d);
-
-            var insert = new Button { Content = "插入", FontSize = 12, Padding = new Thickness(10, 2, 10, 2) };
-            var token = "%" + name + "%";
-            insert.Click += (_, _) => InsertToken(token);
-            Grid.SetColumn(insert, 2);
-            row.Children.Add(insert);
-
-            grid.Children.Add(row);
-        }
-        wrap.Children.Add(grid);
-
-        var restore = new Button { Content = "恢复默认模板" };
-        restore.Click += (_, _) =>
-        {
-            _nameTplBox.Text = DefaultNameTpl;
-            S.FileNameTemplate = DefaultNameTpl;
-            AppSettings.Instance.Save();
-            UpdatePreview();
-        };
-        wrap.Children.Add(restore);
-
-        return wrap;
-    }
-
-    /// <summary>把变量插到文件名模板框的光标处（无光标则追加到末尾）。</summary>
-    private void InsertToken(string token)
-    {
-        var text = _nameTplBox.Text ?? "";
-        var start = _nameTplBox.SelectionStart;
-        if (start < 0 || start > text.Length) start = text.Length;
-        var len = _nameTplBox.SelectionLength;
-        if (len < 0 || start + len > text.Length) len = 0;
-        _nameTplBox.Text = text.Remove(start, len).Insert(start, token);
-        _nameTplBox.SelectionStart = start + token.Length;
-    }
-
-    private void OnTemplateChanged()
-    {
-        S.DirTemplate = _dirTplBox.Text ?? "";
-        S.FileNameTemplate = _nameTplBox.Text ?? "";
+        if (ReferenceEquals(field, _dirField)) S.DirTemplate = value;
+        else if (ReferenceEquals(field, _nameField)) S.FileNameTemplate = value;
         AppSettings.Instance.Save();
-        UpdatePreview();
     }
 
     /// <summary>
-    /// 实时预览：用一条示例推文展开两个模板。
-    /// 复用 FileNameTemplate 引擎（与真正下载时同一份实现），预览与实际产出不可能漂移。
+    /// 预览用的示例上下文（同 Flutter 版 xExampleMedia 的那组数）。
+    /// 复用 FileNameTemplate 引擎（与真正下载时同一份实现），预览与产出不可能漂移。
     /// </summary>
-    private void UpdatePreview()
+    private static TemplateContext ExampleContext() => new()
     {
-        if (_previewText is null) return;
-        var ctx = new TemplateContext
-        {
-            PostId = "1734567890123456789",
-            PostTime = new DateTime(2024, 1, 20, 21, 15, 36),
-            UserId = "1234567890",
-            UserName = "示例作者",
-            UserScreenName = "example_user",
-            MediaId = "1734567890123456799",
-            MediaWidth = 1920,
-            MediaHeight = 1080,
-            MediaType = "image",
-            Extension = ".jpg",
-            MediaIndex = 1,
-            MediaCount = 4,
-            Content = "这是一条示例推文的正文内容，用来演示 CONTENT 变量与截断参数。",
-        };
+        PostId = "1145141919810",
+        PostTime = new DateTime(2024, 1, 20, 21, 15, 36),
+        UserId = "1145141919",
+        UserName = "这是用户昵称",
+        UserScreenName = "userscreenname",
+        MediaId = "1234567890123456789",
+        MediaWidth = 1323,
+        MediaHeight = 1136,
+        MediaType = "image",
+        Extension = ".jpg",
+        MediaIndex = 1,
+        MediaCount = 4,
+        Content = "这里是推文内容,这里是推文内容，这里是推文内容，这里是推文内容，"
+                + "这里是推文内容，这里是推文内容。",
+    };
 
-        var dir = FileNameTemplate.Resolve(_dirTplBox.Text ?? "", ctx).Trim();
-        var name = FileNameTemplate.Resolve(_nameTplBox.Text ?? "", ctx).Trim();
-        if (name.Length == 0) name = "（文件名为空，将回退为 媒体ID_时间戳.扩展名）";
-        _previewText.Text = dir.Length == 0 ? name : dir + "\\" + name;
-    }
+    private static string RenderDirTemplate(string template)
+        => FileNameTemplate.Resolve(template, ExampleContext()).Trim();
+
+    private static string RenderNameTemplate(string template)
+        => FileNameTemplate.Resolve(template, ExampleContext()).Trim();
 
     private async Task PickDirAsync()
     {

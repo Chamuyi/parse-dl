@@ -7,8 +7,22 @@ using System.Text.RegularExpressions;
 
 namespace ParseDl.Services.Douyin;
 
-/// <summary>一个可用的模板变量（设置页「可用变量」表用）。</summary>
-public sealed record DouyinTemplateVar(string Name, string Desc, string Param);
+/// <summary>
+/// 一个可用的模板变量（设置页「可用变量」表用）。
+///
+/// ParamExample / ParamDesc 对应 Flutter 版 TemplateVar.params 的第一个参数：
+/// 前者是「参数=默认值」的写法（如 d=0），后者是中文说明（如「仅日期（0 或 1）」）。
+/// 两个都空表示该变量不带参数。设置页的「参数格式」提示行与每行说明都由它们生成。
+/// </summary>
+public sealed record DouyinTemplateVar(
+    string Name,
+    string Desc,
+    string ParamExample = "",
+    string ParamDesc = "")
+{
+    /// <summary>插入模板时用的完整记号（含首尾百分号）。</summary>
+    public string Token => "%" + Name + "%";
+}
 
 /// <summary>
 /// 抖音侧的文件名 / 文件夹模板 —— 变量表与格式化规则逐条对齐 Flutter 版
@@ -37,29 +51,35 @@ public static class DouyinTemplate
         new DouyinTemplatePreset("aweme", "按作品 ID 分文件夹", "%AWEME_ID%", "%DESCRIPTION%%EXT%"),
     };
 
-    /// <summary>「可用变量」表 —— 顺序固定，与 Flutter 版一致。</summary>
+    /// <summary>
+    /// 「可用变量」表 —— 顺序固定，与 Flutter 版 kDouyinTemplateVars 逐条一致
+    /// （即 kAllTemplateVars 过滤 kDouyinVarNames 之后的顺序，共 20 个）。
+    ///
+    /// 术语只含抖音语义 + 三个中性变量（资源索引 / 媒体类型 / 扩展名），
+    /// 不会出现推文、用户名这类 X 术语。
+    /// </summary>
     public static readonly IReadOnlyList<DouyinTemplateVar> Vars = new[]
     {
-        new DouyinTemplateVar("AUTHOR", "作者（@昵称）", ""),
-        new DouyinTemplateVar("AUTHOR_ID", "作者 ID", ""),
-        new DouyinTemplateVar("AUTHOR_UNIQUE_ID", "抖音号", ""),
-        new DouyinTemplateVar("CREATE_TIME", "创建时间（YYYYMMDDHHmmss）", "d=1 仅日期"),
-        new DouyinTemplateVar("DESCRIPTION", "作品描述", "t=最大长度(默认25)"),
-        new DouyinTemplateVar("AWEME_ID", "作品 ID", ""),
-        new DouyinTemplateVar("CUSTOM_TEXT", "自定义文本", ""),
-        new DouyinTemplateVar("IMAGE_INDEX", "图集序号（0 起，作品主视频不带）", ""),
-        new DouyinTemplateVar("RESOLUTION", "分辨率（WxH）", ""),
-        new DouyinTemplateVar("BITRATE", "比特率", ""),
-        new DouyinTemplateVar("FPS", "帧率", ""),
-        new DouyinTemplateVar("DURATION", "时长", ""),
-        new DouyinTemplateVar("FILE_SIZE", "文件大小", ""),
-        new DouyinTemplateVar("LIKE_COUNT", "点赞数", ""),
-        new DouyinTemplateVar("COMMENT_COUNT", "评论数", ""),
-        new DouyinTemplateVar("COLLECT_COUNT", "收藏数", ""),
-        new DouyinTemplateVar("SHARE_COUNT", "分享数", ""),
-        new DouyinTemplateVar("MEDIA_INDEX", "媒体序号", ""),
-        new DouyinTemplateVar("MEDIA_TYPE", "媒体类型（video/image/audio）", ""),
-        new DouyinTemplateVar("EXT", "扩展名（含点）", ""),
+        new DouyinTemplateVar("AUTHOR", "作者（@昵称）"),
+        new DouyinTemplateVar("AUTHOR_ID", "作者 ID"),
+        new DouyinTemplateVar("AUTHOR_UNIQUE_ID", "抖音号"),
+        new DouyinTemplateVar("CREATE_TIME", "创建时间（YYYYMMDDHHmmss）", "d=0", "仅日期（0 或 1）"),
+        new DouyinTemplateVar("DESCRIPTION", "作品描述", "t=25", "最大长度（1~120）"),
+        new DouyinTemplateVar("IMAGE_INDEX", "图集序号（0 起，作品主视频不带）"),
+        new DouyinTemplateVar("AWEME_ID", "作品 ID"),
+        new DouyinTemplateVar("CUSTOM_TEXT", "自定义文本"),
+        new DouyinTemplateVar("RESOLUTION", "分辨率（WxH）"),
+        new DouyinTemplateVar("BITRATE", "比特率"),
+        new DouyinTemplateVar("FPS", "帧率"),
+        new DouyinTemplateVar("DURATION", "时长"),
+        new DouyinTemplateVar("FILE_SIZE", "文件大小"),
+        new DouyinTemplateVar("LIKE_COUNT", "点赞数"),
+        new DouyinTemplateVar("COMMENT_COUNT", "评论数"),
+        new DouyinTemplateVar("COLLECT_COUNT", "收藏数"),
+        new DouyinTemplateVar("SHARE_COUNT", "分享数"),
+        new DouyinTemplateVar("MEDIA_INDEX", "资源索引"),
+        new DouyinTemplateVar("MEDIA_TYPE", "媒体类型"),
+        new DouyinTemplateVar("EXT", "扩展名"),
     };
 
     /// <summary>该模板匹配哪个预设（不匹配返回 custom）。</summary>
