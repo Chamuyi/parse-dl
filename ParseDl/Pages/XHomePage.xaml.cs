@@ -37,10 +37,6 @@ public sealed partial class XHomePage : Page
     private Button? _loadButton;
     private TextBlock? _status;
 
-    private TextBox? _cookieBox;
-    private TextBlock? _loginState;
-    private StackPanel? _pillHost;
-
     private StackPanel? _resultHost;
     private Grid? _grid;
 
@@ -62,6 +58,19 @@ public sealed partial class XHomePage : Page
         base.OnNavigatedTo(e);
         if (e.Parameter is MainWindow host) _host = host;
         Build();
+
+        // 内容宽度 = min(视口宽度, 1200)：宽窗居中、窄窗占满（同自动执行页做法）
+        PageScroll.SizeChanged += (_, _) => SyncRootWidth();
+        SyncRootWidth();
+    }
+
+    /// <summary>把根面板宽度夹到「可用宽度上限 1200」（可用宽度 = 视口 − ScrollViewer 的左右内边距）。</summary>
+    private void SyncRootWidth()
+    {
+        var vw = PageScroll.ViewportWidth;
+        if (vw <= 0) return;
+        var pad = PageScroll.Padding.Left + PageScroll.Padding.Right;
+        Root.Width = Math.Min(1200, Math.Max(0, vw - pad));
     }
 
     // ── 界面骨架 ──────────────────────────────────────────────
@@ -72,7 +81,6 @@ public sealed partial class XHomePage : Page
 
         Root.Children.Add(UiKit.PageHeader("X 主页", "下载某个 X 用户的全部媒体", "\uE80F"));
         Root.Children.Add(BuildHero());
-        Root.Children.Add(BuildLoginCard());
         Root.Children.Add(BuildSearchCard());
 
         _resultHost = new StackPanel { Spacing = 14 };
@@ -82,8 +90,6 @@ public sealed partial class XHomePage : Page
 
         PageScroll.ViewChanged += (_, _) => LoadMoreIfNearBottom();
         RebuildApi();
-        RefreshLoginPill();
-        SetLoginState("");
     }
 
     private UIElement BuildHero()
@@ -119,13 +125,6 @@ public sealed partial class XHomePage : Page
             FontWeight = FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center,
         });
-        _pillHost = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        row.Children.Add(_pillHost);
-
         stack.Children.Add(row);
         stack.Children.Add(new TextBlock
         {
@@ -135,54 +134,6 @@ public sealed partial class XHomePage : Page
         });
 
         return UiKit.Card(stack, 20);
-    }
-
-    private UIElement BuildLoginCard()
-    {
-        var s = AppSettings.Instance.ForModule("x");
-
-        _cookieBox = new TextBox
-        {
-            Text = s.Cookie ?? "",
-            PlaceholderText = "从浏览器复制 x.com 的完整 cookie（必须含 ct0=…）",
-            Height = 36,
-            VerticalContentAlignment = VerticalAlignment.Center,
-        };
-
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var saveBtn = new Button { Content = "保存 Cookie", MinWidth = 110 };
-        saveBtn.Click += (_, _) => SaveCookie();
-        var verifyBtn = new Button { Content = "验证登录", MinWidth = 90 };
-        verifyBtn.Click += async (_, _) => await VerifyLoginAsync();
-        buttons.Children.Add(saveBtn);
-        buttons.Children.Add(verifyBtn);
-
-        _loginState = new TextBlock
-        {
-            FontSize = 12,
-            Opacity = 0.75,
-            TextWrapping = TextWrapping.Wrap,
-        };
-
-        var inner = new StackPanel { Spacing = 10 };
-        inner.Children.Add(new TextBlock
-        {
-            Text = "X 的接口需要账号 Cookie 才能读取用户与作品列表。在浏览器登录 x.com 后，"
-                 + "从开发者工具复制 Cookie（必须包含 ct0），粘贴到这里保存。",
-            FontSize = 12,
-            Opacity = 0.65,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        inner.Children.Add(_cookieBox);
-        inner.Children.Add(buttons);
-        inner.Children.Add(_loginState);
-
-        return new Expander
-        {
-            Header = "X 登录 Cookie",
-            Content = inner,
-            IsExpanded = false,
-        };
     }
 
     private UIElement BuildSearchCard()
@@ -235,7 +186,7 @@ public sealed partial class XHomePage : Page
     {
         var stack = new StackPanel { Spacing = 6 };
         stack.Children.Add(Bullet("本页不内嵌浏览器：用户与作品数据由 X 的 GraphQL / REST 接口取回"));
-        stack.Children.Add(Bullet("需要登录：在「X 登录 Cookie」里粘贴含 ct0 的 cookie（浏览器登录 x.com 后复制）"));
+        stack.Children.Add(Bullet("需要登录：登录入口只在「X 下载设置 → 账号」，本页不放登录 UI"));
         stack.Children.Add(Bullet("勾选作品后点「下载所选」只下勾中的；不勾选则下载全部已加载作品"));
         stack.Children.Add(Bullet("文件名按「X 下载设置 → 文件名模板」生成，模块固定记为「X 媒体」"));
         stack.Children.Add(Bullet("已下载过的媒体按「X 下载设置 → 跳过已下载」自动跳过"));
@@ -272,64 +223,12 @@ public sealed partial class XHomePage : Page
 
     private void RebuildApi()
     {
-        _api = new XHomeApi(AppSettings.Instance.ForModule("x").Cookie);
-    }
-
-    private void RefreshLoginPill()
-    {
-        if (_pillHost is null) return;
-        _pillHost.Children.Clear();
-        var loggedIn = _api?.HasLogin == true;
-        var pill = UiKit.Pill(loggedIn ? "已登录" : "未登录", "",
-            loggedIn ? UiKit.AccentFill : UiKit.SubtleFill);
-        pill.VerticalAlignment = VerticalAlignment.Center;
-        _pillHost.Children.Add(pill);
-    }
-
-    private void SetLoginState(string text)
-    {
-        if (_loginState is not null) _loginState.Text = text;
+        _api = new XHomeApi(AppSettings.Instance.ForModule("x").EffectiveCookie);
     }
 
     private void SetStatus(string text)
     {
         if (_status is not null) _status.Text = text;
-    }
-
-    private void SaveCookie()
-    {
-        var s = AppSettings.Instance.ForModule("x");
-        s.Cookie = _cookieBox?.Text?.Trim() ?? "";
-        AppSettings.Instance.Save();
-        RebuildApi();
-        RefreshLoginPill();
-        SetLoginState(s.Cookie.Length == 0
-            ? "已清空 Cookie（未登录）"
-            : (_api?.HasLogin == true
-                ? "Cookie 已保存"
-                : "Cookie 已保存，但里面没有 ct0 —— X 会拒绝这类请求"));
-    }
-
-    private async Task VerifyLoginAsync()
-    {
-        RebuildApi();
-        if (_api?.HasLogin != true)
-        {
-            SetLoginState("请先填入含 ct0 的 Cookie");
-            return;
-        }
-        SetLoginState("正在验证登录…");
-        try
-        {
-            var sn = await _api.VerifyLoginAsync();
-            SetLoginState(string.IsNullOrEmpty(sn)
-                ? "Cookie 可用，但没解析出登录账号名"
-                : "登录有效：@" + sn);
-        }
-        catch (Exception ex)
-        {
-            SetLoginState(XHomeApi.MapError(ex));
-        }
     }
 
     // ── 加载 ─────────────────────────────────────────────────
@@ -347,7 +246,9 @@ public sealed partial class XHomePage : Page
         RebuildApi();
         if (_api?.HasLogin != true)
         {
-            SetStatus("未登录：请先展开「X 登录 Cookie」填入含 ct0 的 cookie");
+            // 本页不放登录 UI（与原项目 homepage_page.dart 一致）：未登录时点加载只提示去设置页。
+            // 文案照抄原项目 homepage_page.dart:122 的 toast。
+            SetStatus("请先在「设置」中登录 X 账号");
             return;
         }
 
@@ -882,6 +783,20 @@ public sealed partial class XHomePage : Page
         var skip = settings.SkipDownloaded;
         var downloaded = skip ? BuildDownloadedSet() : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // 下载配置与自动执行页共用同一份（X 下载设置里的媒体类型 / 时间范围）：
+        // 原项目两页读的是同一个 HomepageStore.filter，这里读同一份模块设置。
+        var types = (settings.MediaTypeFilter ?? "")
+            .Split((char)44, StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim().ToLowerInvariant())
+            .ToHashSet();
+        DateTime? dateFrom = null, dateTo = null;
+        if (settings.TimeRangeEnabled)
+        {
+            if (DateTime.TryParse(settings.DateFrom, out var df)) dateFrom = df.Date;
+            if (DateTime.TryParse(settings.DateTo, out var dt)) dateTo = dt.Date.AddDays(1).AddSeconds(-1);
+        }
+        var filtered = 0;
+
         _busy = true;
         UpdateDownloadCard();
 
@@ -899,6 +814,10 @@ public sealed partial class XHomePage : Page
                 {
                     var m = post.Media[i];
                     seen++;
+
+                    if (types.Count > 0 && !types.Contains(m.Type)) { filtered++; continue; }
+                    if (dateFrom is not null && post.CreatedAt is not null && post.CreatedAt.Value < dateFrom) { filtered++; continue; }
+                    if (dateTo is not null && post.CreatedAt is not null && post.CreatedAt.Value > dateTo) { filtered++; continue; }
 
                     if (skip && downloaded.Contains(m.Url))
                     {
@@ -924,6 +843,7 @@ public sealed partial class XHomePage : Page
 
             var parts = new List<string> { "已入队 " + queued + " 个" };
             if (skipped > 0) parts.Add("跳过 " + skipped + " 个已下载");
+            if (filtered > 0) parts.Add("过滤 " + filtered + " 个（按下载配置）");
             if (failed > 0) parts.Add(failed + " 个失败");
             parts.Add("可到「下载管理」查看进度");
             SetStatus(string.Join("，", parts));
