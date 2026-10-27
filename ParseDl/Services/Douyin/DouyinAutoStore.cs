@@ -50,6 +50,12 @@ public sealed class DouyinAutoTask
     /// <summary>列表里显示的短标签。</summary>
     public string Label { get; }
 
+    /// <summary>
+    /// 作者名（从「插眼导出器」的 Markdown 名单里读出来的）。
+    /// 只用于**按模板建文件夹**时的替换；手动一行一个链接粘进来时是空串。
+    /// </summary>
+    public string Author { get; set; } = "";
+
     public DouyinAutoStatus Status { get; set; } = DouyinAutoStatus.Waiting;
     /// <summary>收集到的作品数（一个图集算一条）。</summary>
     public int AwemeCount { get; set; }
@@ -199,7 +205,13 @@ public sealed class DouyinAutoStore
     {
         if (Running || _rawText == v) return;
         _rawText = v;
-        _parsed = ParseTargets(v, MaxTargets);
+        // **先认表格**（用户 2026-10-27：要能直接粘「插眼导出器」导出的 Markdown 名单）。
+        // 名单里每行是 | 1 | 作者 | UID | ... | 主页链接 | ... |，整行不是链接，
+        // 旧的「一行一个链接」解析会全部判非法。表格能认出来就走表格解析，
+        // 认不出来再退回逐行链接解析（两种用法都保留）。
+        _parsed = DouyinRoster.LooksLikeRoster(v)
+            ? DouyinRoster.Parse(v, MaxTargets)
+            : ParseTargets(v, MaxTargets);
         CurrentIndex = -1;
         if (persist) Save();
         Notify();

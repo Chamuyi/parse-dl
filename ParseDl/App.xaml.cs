@@ -47,7 +47,9 @@ public partial class App : Application
         {
             try
             {
-                var report = ParseDl.Services.FileNameTemplateSelfTest.Run();
+                var report = ParseDl.Services.FileNameTemplateSelfTest.Run()
+                    + Environment.NewLine + "===== 抖音名单解析自测 =====" + Environment.NewLine
+                    + ParseDl.Services.Douyin.DouyinRoster.SelfTest();
                 var outPath = System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "selftest.txt");
                 System.IO.File.WriteAllText(outPath, report);
             }

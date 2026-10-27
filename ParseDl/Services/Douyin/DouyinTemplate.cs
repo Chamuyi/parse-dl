@@ -316,22 +316,39 @@ public static class DouyinTemplate
     /// （enableSaveFolder 关掉时忽略文件夹模板）。
     /// </summary>
     public static (string Dir, string FileName) BuildTarget(DouyinItem item, DouyinConfig cfg)
+        => BuildTarget(item, cfg, auto: false);
+
+    /// <summary>
+    /// 同 <see cref="BuildTarget(DouyinItem, DouyinConfig)"/>，但可以选择**自动下载模式**。
+    ///
+    /// 自动下载模式（2026-10-27 用户要求）与设置页那套分开：
+    /// - 文件夹模板用 <see cref="DouyinConfig.EffectiveAutoDirTemplate"/>；
+    /// - 文件名模板用 <see cref="DouyinConfig.EffectiveAutoFileNameTemplate"/>；
+    /// - 是否建子目录看 <see cref="DouyinConfig.AutoCreateFolder"/>（独立开关，
+    ///   不受设置页 EnableSaveFolder 影响）。
+    /// 这样「设置里那套」不会误控自动下载。
+    /// </summary>
+    public static (string Dir, string FileName) BuildTarget(DouyinItem item, DouyinConfig cfg, bool auto)
     {
         var baseDir = !string.IsNullOrWhiteSpace(cfg.SaveDirBase)
             ? cfg.SaveDirBase!
             : Aria2Engine.DefaultDir();
 
+        var useFolder = auto ? cfg.AutoCreateFolder : cfg.EnableSaveFolder;
+        var dirTemplate = auto ? cfg.EffectiveAutoDirTemplate : cfg.DirTemplate;
+        var nameTemplate = auto ? cfg.EffectiveAutoFileNameTemplate : cfg.FileNameTemplate;
+
         var dir = baseDir;
-        if (cfg.EnableSaveFolder && !string.IsNullOrWhiteSpace(cfg.DirTemplate))
+        if (useFolder && !string.IsNullOrWhiteSpace(dirTemplate))
         {
-            var sub = Expand(cfg.DirTemplate, item);
+            var sub = Expand(dirTemplate, item);
             var segs = ParseDirSegments(sub);
             foreach (var s in segs) dir = System.IO.Path.Combine(dir, s);
         }
 
-        var tpl = string.IsNullOrWhiteSpace(cfg.FileNameTemplate)
+        var tpl = string.IsNullOrWhiteSpace(nameTemplate)
             ? DefaultFileNameTemplate
-            : cfg.FileNameTemplate;
+            : nameTemplate;
         var expanded = FileNameTemplate.DouyinFilenamify(Expand(tpl, item).Trim(), item.Id);
         if (string.IsNullOrWhiteSpace(expanded)) expanded = item.Id;
         return (dir, expanded);

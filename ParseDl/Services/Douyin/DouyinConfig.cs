@@ -41,6 +41,30 @@ public sealed class DouyinConfig
     public string DirTemplate { get; set; } = "%AUTHOR%";
     public string FileNameTemplate { get; set; } = DouyinTemplate.DefaultFileNameTemplate;
 
+    // ── 自动下载专用（用户 2026-10-27 要求）────────────────
+    // 自动下载页要有**自己的一套**命名模板，不跟设置页共用：
+    // 设置页那套是「手动解析单条」时用的，自动下载是整批跑，用户希望两者互不干扰。
+
+    /// <summary>
+    /// 自动下载时，在下载路径下**按文件夹模板新建子目录**。
+    /// 关掉则所有文件直接落在下载根目录（旧行为）。
+    /// </summary>
+    public bool AutoCreateFolder { get; set; } = true;
+
+    /// <summary>自动下载用的文件夹模板（空 = 用设置页那套）。</summary>
+    public string AutoDirTemplate { get; set; } = "";
+
+    /// <summary>自动下载用的文件名模板（空 = 用设置页那套）。</summary>
+    public string AutoFileNameTemplate { get; set; } = "";
+
+    /// <summary>自动下载实际生效的文件夹模板。</summary>
+    public string EffectiveAutoDirTemplate =>
+        string.IsNullOrWhiteSpace(AutoDirTemplate) ? DirTemplate : AutoDirTemplate;
+
+    /// <summary>自动下载实际生效的文件名模板。</summary>
+    public string EffectiveAutoFileNameTemplate =>
+        string.IsNullOrWhiteSpace(AutoFileNameTemplate) ? FileNameTemplate : AutoFileNameTemplate;
+
     // ── 抓取 / 滚动 ─────────────────────────────────────────
     public int BatchSize { get; set; } = 50;
     public int RequestIntervalMs { get; set; } = 800;
@@ -161,6 +185,9 @@ public static class DouyinSettings
                 DirTemplate = S("dirTemplate", "%AUTHOR%"),
                 // 旧默认模板（3.6 之前）升级成当前这套 —— 只认「存的值恰好等于旧默认串」
                 FileNameTemplate = Migrate(S("fileNameTemplate", DouyinTemplate.DefaultFileNameTemplate)),
+                AutoCreateFolder = B("autoCreateFolder", true),
+                AutoDirTemplate = S("autoDirTemplate", ""),
+                AutoFileNameTemplate = S("autoFileNameTemplate", ""),
                 BatchSize = I("batchSize", 50),
                 RequestIntervalMs = I("requestIntervalMs", 800),
                 ScrollStepPx = I("scrollStepPx", 600),
@@ -214,6 +241,9 @@ public static class DouyinSettings
                 ["enableSaveFolder"] = c.EnableSaveFolder,
                 ["dirTemplate"] = c.DirTemplate,
                 ["fileNameTemplate"] = c.FileNameTemplate,
+                ["autoCreateFolder"] = c.AutoCreateFolder,
+                ["autoDirTemplate"] = c.AutoDirTemplate,
+                ["autoFileNameTemplate"] = c.AutoFileNameTemplate,
                 ["batchSize"] = c.BatchSize,
                 ["requestIntervalMs"] = c.RequestIntervalMs,
                 ["scrollStepPx"] = c.ScrollStepPx,

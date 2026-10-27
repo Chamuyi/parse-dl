@@ -29,10 +29,15 @@ public static class DouyinEnqueuer
     /// <summary>模块名（DownloadsPage 的筛选值，也是台账里的模块标签）。</summary>
     public const string Module = "抖音";
 
+    /// <param name="auto">
+    /// true = 自动下载模式：用自动下载专属的模板与「按模板建文件夹」开关
+    /// （2026-10-27 用户要求，与设置页那套分开互不影响）。
+    /// </param>
     public static async Task<DouyinEnqueueResult> EnqueueAsync(
         IEnumerable<DouyinItem> items,
         DouyinConfig cfg,
-        bool writeLedger = true)
+        bool writeLedger = true,
+        bool auto = false)
     {
         var result = new DouyinEnqueueResult();
         var list = items.ToList();
@@ -47,7 +52,7 @@ public static class DouyinEnqueuer
 
         foreach (var m in list)
         {
-            var (dir, fileName) = DouyinTemplate.BuildTarget(m, cfg);
+            var (dir, fileName) = DouyinTemplate.BuildTarget(m, cfg, auto);
             try
             {
                 var (ok, _) = await DownloadStore.Instance.AddAsync(m.Url, Module, dir, fileName);

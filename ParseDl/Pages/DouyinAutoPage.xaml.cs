@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
@@ -36,6 +37,9 @@ public sealed partial class DouyinAutoPage : Page
     private bool _busy;
     private bool? _wideLayout;
     private DouyinAutoCollector? _collector;
+
+    /// <summary>自动下载模板区里「最后聚焦的那个模板框」—— 点变量就往这里插。</summary>
+    private TextBox? _lastTemplateBox;
 
     public DouyinAutoPage()
     {
@@ -219,7 +223,8 @@ public sealed partial class DouyinAutoPage : Page
                 "https://www.douyin.com/video/7412345678901234567（作品）\n" +
                 "https://v.douyin.com/xxxx/（短链）\n" +
                 "7412345678901234567（纯作品 ID）\n" +
-                "分享口令整段粘进来也能认",
+                "分享口令整段粘进来也能认\n" +
+                "也可以直接粘「视频插眼导出器」导出的 Markdown 名单表格",
             Text = _auto.RawText,
             IsEnabled = !_auto.Running,
         };
@@ -248,7 +253,7 @@ public sealed partial class DouyinAutoPage : Page
         panel.Children.Add(summary);
 
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var importBtn = new Button { Content = "从 txt 导入", MinWidth = 100, IsEnabled = !_auto.Running };
+        var importBtn = new Button { Content = "导入名单（.md / .txt）", MinWidth = 150, IsEnabled = !_auto.Running };
         importBtn.Click += async (_, _) => await ImportFileAsync();
         row.Children.Add(importBtn);
         panel.Children.Add(row);
@@ -307,6 +312,146 @@ public sealed partial class DouyinAutoPage : Page
         autoRow.Children.Add(autoToggle);
         panel.Children.Add(autoRow);
 
+        // ── 自动下载专属：按模板建文件夹 + 命名模板（用户 2026-10-27）──────
+        // 与设置页那套**分开**：这里改了不影响「手动解析单条」用的模板，反之亦然。
+        panel.Children.Add(new Border
+        {
+            Height = new Thickness(1).Top + 1,
+            Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+            Margin = new Thickness(0, 4, 0, 4),
+        });
+
+        var folderRow = new Grid { ColumnSpacing = 8 };
+        folderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        folderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var folderText = new StackPanel { Spacing = 2 };
+        folderText.Children.Add(new TextBlock
+        {
+            Text = "在下载路径下按文件夹模板建子文件夹",
+            FontSize = 13,
+            Opacity = 0.85,
+        });
+        folderText.Children.Add(new TextBlock
+        {
+            Text = "关掉则所有文件直接落在下载根目录（不建子文件夹）",
+            FontSize = 11,
+            Opacity = 0.6,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        folderRow.Children.Add(folderText);
+        var folderToggle = new ToggleSwitch
+        {
+            IsOn = DouyinSettings.Current.AutoCreateFolder,
+            MinWidth = 0,
+            IsEnabled = !_auto.Running,
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(folderToggle, "按模板建文件夹");
+        folderToggle.Toggled += (_, _) =>
+        {
+            DouyinSettings.Mutate(c => c.AutoCreateFolder = folderToggle.IsOn);
+        };
+        Grid.SetColumn(folderToggle, 1);
+        folderRow.Children.Add(folderToggle);
+        panel.Children.Add(folderRow);
+
+        // 文件夹模板（自动下载专用）
+        var dirBox = new TextBox
+        {
+            Text = DouyinSettings.Current.EffectiveAutoDirTemplate,
+            PlaceholderText = "%AUTHOR%",
+            IsEnabled = !_auto.Running,
+            FontFamily = new FontFamily("Consolas"),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(dirBox, "自动下载文件夹模板");
+        dirBox.TextChanged += (_, _) =>
+        {
+            DouyinSettings.Mutate(c => c.AutoDirTemplate = dirBox.Text ?? "");
+        };
+        var dirHint = new TextBlock { FontSize = 11, Opacity = 0.6, TextWrapping = TextWrapping.Wrap };
+        panel.Children.Add(new TextBlock { Text = "文件夹模板", FontSize = 12, Opacity = 0.8 });
+        panel.Children.Add(dirBox);
+        panel.Children.Add(dirHint);
+
+        // 文件名模板（自动下载专用）
+        var nameBox = new TextBox
+        {
+            Text = DouyinSettings.Current.EffectiveAutoFileNameTemplate,
+            PlaceholderText = DouyinTemplate.DefaultFileNameTemplate,
+            IsEnabled = !_auto.Running,
+            FontFamily = new FontFamily("Consolas"),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(nameBox, "自动下载文件名模板");
+        nameBox.TextChanged += (_, _) =>
+        {
+            DouyinSettings.Mutate(c => c.AutoFileNameTemplate = nameBox.Text ?? "");
+        };
+        var nameHint = new TextBlock { FontSize = 11, Opacity = 0.6, TextWrapping = TextWrapping.Wrap };
+        panel.Children.Add(new TextBlock { Text = "文件名模板", FontSize = 12, Opacity = 0.8 });
+        panel.Children.Add(nameBox);
+        panel.Children.Add(nameHint);
+
+        // 记录最后聚焦的模板框
+        dirBox.GotFocus += (_, _) => _lastTemplateBox = dirBox;
+        nameBox.GotFocus += (_, _) => _lastTemplateBox = nameBox;
+
+        // 可用变量（点变量插到**最后聚焦的那个框**）
+        panel.Children.Add(new TextBlock
+        {
+            Text = "可用变量（点一下插入到上面最后点的那个框）",
+            FontSize = 11,
+            Opacity = 0.65,
+            Margin = new Thickness(0, 6, 0, 2),
+        });
+        var vars = new StackPanel { Spacing = 1 };
+        foreach (var v in DouyinTemplate.Vars)
+        {
+            var b2 = new Button
+            {
+                Content = v.Token + "    " + v.Desc,
+                FontSize = 11,
+                Padding = new Thickness(8, 3, 8, 3),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b2, "变量 " + v.Name);
+            b2.Click += (_, _) => InsertAtCaret(_lastTemplateBox ?? nameBox, v.Token);
+            vars.Children.Add(b2);
+        }
+        panel.Children.Add(vars);
+
+        // 预览与启用态：函数体捕获 dirBox/nameBox/dirHint/nameHint，
+        // 所以**必须在这些变量初始化之后**才能调用（C# 局部函数的调用顺序约束）。
+        void RefreshPreview()
+        {
+            var cfg = DouyinSettings.Current;
+            try
+            {
+                var (d, f) = DouyinTemplate.BuildTarget(PreviewItem(), cfg, auto: true);
+                dirHint.Text = "示例落点：" + d;
+                nameHint.Text = "示例文件名：" + f;
+            }
+            catch (Exception ex)
+            {
+                dirHint.Text = "模板展开失败：" + ex.Message;
+                nameHint.Text = "";
+            }
+        }
+        void SyncEnabled()
+        {
+            var on = !_auto.Running;
+            folderToggle.IsEnabled = on;
+            dirBox.IsEnabled = on && DouyinSettings.Current.AutoCreateFolder;
+            nameBox.IsEnabled = on;
+        }
+
+        folderToggle.Toggled += (_, _) => { SyncEnabled(); RefreshPreview(); };
+        dirBox.TextChanged += (_, _) => { SyncEnabled(); RefreshPreview(); };
+        nameBox.TextChanged += (_, _) => { SyncEnabled(); RefreshPreview(); };
+
+        SyncEnabled();
+        RefreshPreview();
         OptionCardHost.Children.Add(UiKit.SectionCard("跑批选项", panel));
     }
 
@@ -426,6 +571,10 @@ public sealed partial class DouyinAutoPage : Page
         try
         {
             var picker = new Windows.Storage.Pickers.FileOpenPicker();
+            // 用户 2026-10-27：名单是「视频插眼导出器」导出的 Markdown（.md）。
+            // 两种都给，反正解析器会自动认表格。
+            picker.FileTypeFilter.Add(".md");
+            picker.FileTypeFilter.Add(".markdown");
             picker.FileTypeFilter.Add(".txt");
             // WinUI 3 必须先把 picker 和窗口句柄关联，否则 ShowAsync 抛异常
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindow);
@@ -614,7 +763,8 @@ public sealed partial class DouyinAutoPage : Page
 
         if (!_auto.AutoDownload || batch.Items.Count == 0) return;
 
-        var result = await DouyinEnqueuer.EnqueueAsync(batch.Items, cfg);
+        // auto: true —— 用自动下载专属模板与建文件夹开关（与设置页那套分开）。
+        var result = await DouyinEnqueuer.EnqueueAsync(batch.Items, cfg, auto: true);
         task.Queued = result.Queued;
         _auto.Refresh();
         AppendLog("[" + task.Label + "] " + result.Message);
@@ -624,5 +774,32 @@ public sealed partial class DouyinAutoPage : Page
     {
         var msg = ex.Message ?? "";
         return msg.Length <= 120 ? msg : msg[..120] + "…";
+    }
+
+    /// <summary>把变量插到指定模板框的光标处（有选区则替换）。</summary>
+    private static void InsertAtCaret(TextBox box, string token)
+    {
+        var text = box.Text ?? "";
+        var start = box.SelectionStart;
+        if (start < 0 || start > text.Length) start = text.Length;
+        var len = box.SelectionLength;
+        if (len < 0 || start + len > text.Length) len = 0;
+        box.Text = text.Remove(start, len).Insert(start, token);
+        box.Focus(FocusState.Programmatic);
+        box.SelectionStart = start + token.Length;
+        box.SelectionLength = 0;
+    }
+
+    /// <summary>预览模板用的示例条目（不联网，只为让用户看见落点长什么样）。</summary>
+    private static DouyinItem PreviewItem()
+    {
+        var m = new DouyinItem
+        {
+            Id = "7412345678901234567",
+            Url = "https://www.douyin.com/video/7412345678901234567",
+            Text = "示例作品描述",
+            UserName = "示例作者",
+        };
+        return m;
     }
 }
