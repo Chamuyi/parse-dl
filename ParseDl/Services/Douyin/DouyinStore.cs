@@ -357,12 +357,17 @@ public sealed class DouyinStore
                 continue;
             }
 
-            // 「下载配套图片」关掉时，剔除实况图的静态图 —— 但**合成实况图时必须保留**，
-            // 静态图是合成的原料，少了它合不出单个 jpg（用户 2026-10-27 需求）。
-            if (!cfg.IncludeLiveImage && !cfg.LivePhotoAsMotionPhoto
-                && m.Type == DouyinMediaType.Image && m.Id != m.PostId)
+            // 「下载配套图片」关掉时，剔除实况图的静态图。
+            //
+            // **图片与视频完全独立控制**（用户 2026-10-27 明确要求）：
+            // 之前为了「合成必须有图」在这里强制保留图片（!LivePhotoAsMotionPhoto 才过滤），
+            // 导致开关形同虚设 —— 只要开着合成，关掉本开关也不生效。
+            // 现在：图片只按本开关走；合成阶段发现缺图就**跳过合成**并写日志，
+            // 绝不因为「想合成」而偷偷下用户没要的图。
+            if (!cfg.IncludeLiveImage && m.Type == DouyinMediaType.Image && m.Id != m.PostId)
             {
-                // 只剔除「实况图的静态图」：存在配对视频才说明它是实况图
+                // 只剔除「实况图的静态图」：存在配对视频才说明它是实况图；
+                // 普通图集的静态图不受本开关影响（那是作品本体，不是"配套图"）。
                 var hasPair = list.Any(x => x.Type == DouyinMediaType.Video
                     && x.Id == m.Id + "v");
                 if (hasPair) continue;

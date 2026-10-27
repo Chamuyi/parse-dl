@@ -474,7 +474,7 @@ public sealed partial class DouyinParsePage : Page
             if (_suppressOptionEvents) return;
             DouyinSettings.Mutate(c => c.IncludeLivePhoto = liveToggle.IsOn);
         };
-        OptionHost.Children.Add(ToggleRow("实况图配对视频", liveToggle));
+        OptionHost.Children.Add(ToggleRow("下载配套视频", liveToggle));
 
         // 「下载配套图片」（用户 2026-10-27：下载配套视频，图片也会一块下载吗）
         // 开：图 + 视频都下；关：只下配对视频、不下静态图。

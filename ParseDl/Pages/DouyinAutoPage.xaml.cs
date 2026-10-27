@@ -38,6 +38,19 @@ public sealed partial class DouyinAutoPage : Page
     private bool? _wideLayout;
     private DouyinAutoCollector? _collector;
 
+    /// <summary>自动下载的命名模板编辑器（与全局设置共用同一实现）。</summary>
+    private TemplateEditor? _autoTemplateEditor;
+    private TemplateField? _autoDirField;
+    private TemplateField? _autoNameField;
+
+    /// <summary>抖音变量表（转成 TemplateEditor 要的格式）。</summary>
+    private static readonly IReadOnlyList<TemplateVarInfo> DouyinAutoTemplateVars =
+        DouyinTemplate.Vars.Select(v => new TemplateVarInfo(v.Name, v.Desc, v.ParamExample, v.ParamDesc)).ToList();
+
+    private const string AutoVarHint =
+        "文件夹模板建议只用「作者 / 作品」级变量；%IMAGE_INDEX%、%EXT% 这类逐文件的变量" +
+        "会让每张媒体各建一个文件夹。";
+
     /// <summary>自动下载模板区里「最后聚焦的那个模板框」—— 点变量就往这里插。</summary>
     private TextBox? _lastTemplateBox;
 
@@ -358,7 +371,7 @@ public sealed partial class DouyinAutoPage : Page
             DouyinSettings.Current.IncludeBgm,
             v => DouyinSettings.Mutate(c => c.IncludeBgm = v)));
 
-        panel.Children.Add(ToggleRow("实况图配对视频",
+        panel.Children.Add(ToggleRow("下载配套视频",
             DouyinSettings.Current.IncludeLivePhoto,
             v => DouyinSettings.Mutate(c => c.IncludeLivePhoto = v)));
 
@@ -411,104 +424,62 @@ public sealed partial class DouyinAutoPage : Page
         folderRow.Children.Add(folderToggle);
         panel.Children.Add(folderRow);
 
-        // 文件夹模板（自动下载专用）
-        var dirBox = new TextBox
-        {
-            Text = DouyinSettings.Current.EffectiveAutoDirTemplate,
-            PlaceholderText = "%AUTHOR%",
-            IsEnabled = !_auto.Running,
-            FontFamily = new FontFamily("Consolas"),
-        };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(dirBox, "自动下载文件夹模板");
-        dirBox.TextChanged += (_, _) =>
-        {
-            DouyinSettings.Mutate(c => c.AutoDirTemplate = dirBox.Text ?? "");
-        };
-        var dirHint = new TextBlock { FontSize = 11, Opacity = 0.6, TextWrapping = TextWrapping.Wrap };
-        panel.Children.Add(new TextBlock { Text = "文件夹模板", FontSize = 12, Opacity = 0.8 });
-        panel.Children.Add(dirBox);
-        panel.Children.Add(dirHint);
+        // ── 命名模板（用与全局设置同一个 TemplateEditor）──────────────────
+        //
+        // 用户 2026-10-27：「抖音自动下载里面的变量，怎么没按照我的要求做，和全局那个一样做」。
+        // 之前这里是手搓的 TextBox + 一排变量按钮，与设置页那套 TemplateEditor 完全两样：
+        //   · 变量面板是常驻的一长串，不是「点击展开」；
+        //   · 没有「填入默认」「恢复默认模板」；
+        //   · 没有实时输出示例。
+        // 现在直接复用 TemplateEditor —— 与 X/抖音设置页**同一份实现**，行为完全一致：
+        // 每个模板框各带一份可展开的变量面板，点变量插到该框，默认折叠。
+        _autoTemplateEditor = new TemplateEditor(DouyinAutoTemplateVars, AutoVarHint);
 
-        // 文件名模板（自动下载专用）
-        var nameBox = new TextBox
+        _autoDirField = _autoTemplateEditor.AddField(new TemplateFieldOptions
         {
-            Text = DouyinSettings.Current.EffectiveAutoFileNameTemplate,
-            PlaceholderText = DouyinTemplate.DefaultFileNameTemplate,
-            IsEnabled = !_auto.Running,
-            FontFamily = new FontFamily("Consolas"),
-        };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(nameBox, "自动下载文件名模板");
-        nameBox.TextChanged += (_, _) =>
+            Label = "文件夹模板",
+            Hint = "%AUTHOR%",
+            DefaultTemplate = "%AUTHOR%",
+            EmptyHint = "留空则直接存到保存目录下",
+            Preview = RenderAutoDirTemplate,
+        }, DouyinSettings.Current.EffectiveAutoDirTemplate);
+
+        _autoNameField = _autoTemplateEditor.AddField(new TemplateFieldOptions
         {
-            DouyinSettings.Mutate(c => c.AutoFileNameTemplate = nameBox.Text ?? "");
+            Label = "文件名模板",
+            Hint = DouyinTemplate.DefaultFileNameTemplate,
+            DefaultTemplate = DouyinTemplate.DefaultFileNameTemplate,
+            EmptyHint = "留空则用默认模板",
+            Preview = RenderAutoNameTemplate,
+        }, DouyinSettings.Current.EffectiveAutoFileNameTemplate);
+
+        _autoTemplateEditor.FieldChanged += (_, e) =>
+        {
+            // 文件夹模板写 AutoDirTemplate，文件名模板写 AutoFileNameTemplate
+            if (ReferenceEquals(e.Field, _autoDirField))
+                DouyinSettings.Mutate(c => c.AutoDirTemplate = e.Value);
+            else
+                DouyinSettings.Mutate(c => c.AutoFileNameTemplate = e.Value);
         };
-        var nameHint = new TextBlock { FontSize = 11, Opacity = 0.6, TextWrapping = TextWrapping.Wrap };
-        panel.Children.Add(new TextBlock { Text = "文件名模板", FontSize = 12, Opacity = 0.8 });
-        panel.Children.Add(nameBox);
-        panel.Children.Add(nameHint);
+        panel.Children.Add(_autoTemplateEditor);
 
-        // 记录最后聚焦的模板框
-        dirBox.GotFocus += (_, _) => _lastTemplateBox = dirBox;
-        nameBox.GotFocus += (_, _) => _lastTemplateBox = nameBox;
+        // 建文件夹开关放在模板下方（它决定文件夹模板是否生效）
+        panel.Children.Add(ToggleRow("按模板建文件夹",
+            DouyinSettings.Current.AutoCreateFolder,
+            v =>
+            {
+                DouyinSettings.Mutate(c => c.AutoCreateFolder = v);
+                if (_autoDirField is not null) _autoDirField.SetEnabled(v);
+            }));
+        if (_autoDirField is not null) _autoDirField.SetEnabled(DouyinSettings.Current.AutoCreateFolder);
 
-        // 可用变量（点变量插到**最后聚焦的那个框**）
         panel.Children.Add(new TextBlock
         {
-            Text = "可用变量（点一下插入到上面最后点的那个框）",
-            FontSize = 11,
-            Opacity = 0.65,
-            Margin = new Thickness(0, 6, 0, 2),
+            Text = "模板改动会自动保存。",
+            FontSize = 11.5,
+            Opacity = 0.55,
+            TextWrapping = TextWrapping.Wrap,
         });
-        var vars = new StackPanel { Spacing = 1 };
-        foreach (var v in DouyinTemplate.Vars)
-        {
-            var b2 = new Button
-            {
-                Content = v.Token + "    " + v.Desc,
-                FontSize = 11,
-                Padding = new Thickness(8, 3, 8, 3),
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
-                BorderThickness = new Thickness(0),
-            };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b2, "变量 " + v.Name);
-            b2.Click += (_, _) => InsertAtCaret(_lastTemplateBox ?? nameBox, v.Token);
-            vars.Children.Add(b2);
-        }
-        panel.Children.Add(vars);
-
-        // 预览与启用态：函数体捕获 dirBox/nameBox/dirHint/nameHint，
-        // 所以**必须在这些变量初始化之后**才能调用（C# 局部函数的调用顺序约束）。
-        void RefreshPreview()
-        {
-            var cfg = DouyinSettings.Current;
-            try
-            {
-                var (d, f) = DouyinTemplate.BuildTarget(PreviewItem(), cfg, auto: true);
-                dirHint.Text = "示例落点：" + d;
-                nameHint.Text = "示例文件名：" + f;
-            }
-            catch (Exception ex)
-            {
-                dirHint.Text = "模板展开失败：" + ex.Message;
-                nameHint.Text = "";
-            }
-        }
-        void SyncEnabled()
-        {
-            var on = !_auto.Running;
-            folderToggle.IsEnabled = on;
-            dirBox.IsEnabled = on && DouyinSettings.Current.AutoCreateFolder;
-            nameBox.IsEnabled = on;
-        }
-
-        folderToggle.Toggled += (_, _) => { SyncEnabled(); RefreshPreview(); };
-        dirBox.TextChanged += (_, _) => { SyncEnabled(); RefreshPreview(); };
-        nameBox.TextChanged += (_, _) => { SyncEnabled(); RefreshPreview(); };
-
-        SyncEnabled();
-        RefreshPreview();
         OptionCardHost.Children.Add(UiKit.SectionCard("跑批选项", panel));
     }
 
@@ -910,5 +881,24 @@ public sealed partial class DouyinAutoPage : Page
         Grid.SetColumn(toggle, 1);
         row.Children.Add(toggle);
         return row;
+    }
+
+    /// <summary>文件夹模板的实时示例（用同一个模板引擎，避免预览与产出漂移）。</summary>
+    private static string RenderAutoDirTemplate(string tpl)
+    {
+        var cfg = DouyinSettings.Current.Clone();
+        cfg.AutoCreateFolder = true;
+        cfg.AutoDirTemplate = tpl;
+        var (dir, _) = DouyinTemplate.BuildTarget(PreviewItem(), cfg, auto: true);
+        return dir;
+    }
+
+    /// <summary>文件名模板的实时示例。</summary>
+    private static string RenderAutoNameTemplate(string tpl)
+    {
+        var cfg = DouyinSettings.Current.Clone();
+        cfg.AutoFileNameTemplate = tpl;
+        var (_, name) = DouyinTemplate.BuildTarget(PreviewItem(), cfg, auto: true);
+        return name;
     }
 }
