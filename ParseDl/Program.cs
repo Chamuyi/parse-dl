@@ -34,6 +34,12 @@ public static class Program
         //    csproj 里 WindowsAppSdkBootstrapInitialize=true 已经让构建注入
         //    「模块初始化器」，它在 Main 之前就完成 bootstrap。再手调一次会抛
         //    COMException 0x80040014（2026-10-26 实测踩过）。
+        // 诊断探针：--probe <url> —— 打开链接、抄载荷、落盘、退出。
+        // 放在 Application.Start 之前设标记，在 App 里启动探针窗口。
+        var probeIdx = Array.IndexOf(args, "--probe");
+        if (probeIdx >= 0 && probeIdx + 1 < args.Length)
+            Services.Douyin.DouyinProbe.Url = args[probeIdx + 1];
+
         // 4) UI 线程的 DispatcherQueue
         Application.Start(_ =>
         {

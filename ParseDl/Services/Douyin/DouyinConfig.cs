@@ -25,6 +25,14 @@ public sealed class DouyinConfig
     public bool FilterLowQuality { get; set; }
     public bool FilterByteVc1 { get; set; }
     public bool IncludeLivePhoto { get; set; } = true;
+
+    /// <summary>
+    /// 把实况图合成为**小米/安卓动态照片**（单个 .jpg，末尾内嵌 mp4）。
+    /// 用户 2026-10-27 需求：小米手机上要能直接看动图，手机拍出来的就是 jpg。
+    /// 打开后：下载完成时自动把「静态图 + 配对视频」合成一个 jpg，并删掉单独的 mp4。
+    /// 关掉则保持原来「图 + 视频」两个文件。
+    /// </summary>
+    public bool LivePhotoAsMotionPhoto { get; set; } = true;
     public bool IncludeBgm { get; set; }
     public bool SkipDownloaded { get; set; } = true;
     public bool GroupByAweme { get; set; } = true;
@@ -172,6 +180,7 @@ public static class DouyinSettings
                 FilterLowQuality = B("filterLowQuality", false),
                 FilterByteVc1 = B("filterByteVc1", false),
                 IncludeLivePhoto = B("includeLivePhoto", true),
+                LivePhotoAsMotionPhoto = B("livePhotoAsMotionPhoto", true),
                 IncludeBgm = B("includeBgm", false),
                 SkipDownloaded = B("skipDownloaded", true),
                 GroupByAweme = B("groupByAweme", true),
@@ -229,6 +238,7 @@ public static class DouyinSettings
                 ["filterLowQuality"] = c.FilterLowQuality,
                 ["filterByteVc1"] = c.FilterByteVc1,
                 ["includeLivePhoto"] = c.IncludeLivePhoto,
+                ["livePhotoAsMotionPhoto"] = c.LivePhotoAsMotionPhoto,
                 ["includeBgm"] = c.IncludeBgm,
                 ["skipDownloaded"] = c.SkipDownloaded,
                 ["groupByAweme"] = c.GroupByAweme,

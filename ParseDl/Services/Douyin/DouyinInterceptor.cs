@@ -715,6 +715,38 @@ public static class DouyinInterceptor
     return c;
   }
 
+  // ── 诊断：直接从页面内嵌数据里抽当前作品（作品详情页不发 XHR，只能读内嵌）
+  // 抖音单页应用把首屏数据塞在 <script id="RENDER_DATA"> 或 window._ROUTER_DATA 里。
+  // 这里把它整段吐出来，交给 C# 侧落盘分析。
+  window.__pdPageData = function () {
+    try {
+      var out = { found: false, source: '', raw: '' };
+      var el = document.getElementById('RENDER_DATA');
+      if (el && el.textContent && el.textContent.length > 200) {
+        out.found = true; out.source = 'RENDER_DATA';
+        out.raw = decodeURIComponent(el.textContent);
+        return JSON.stringify(out);
+      }
+      if (window._ROUTER_DATA) {
+        out.found = true; out.source = '_ROUTER_DATA';
+        out.raw = JSON.stringify(window._ROUTER_DATA);
+        return JSON.stringify(out);
+      }
+      // 兜底：把整个 document 里的 script 里最长的 JSON 片段挑出来
+      var scripts = document.querySelectorAll('script');
+      var best = '';
+      for (var i = 0; i < scripts.length; i++) {
+        var s = scripts[i].textContent || '';
+        if (s.length > best.length && s.indexOf('aweme') >= 0) { best = s; }
+      }
+      if (best.length > 200) {
+        out.found = true; out.source = 'script'; out.raw = best;
+      }
+      return JSON.stringify(out);
+    } catch (e) {
+      return JSON.stringify({ found: false, source: 'error', raw: String(e) });
+    }
+  };
   window.__pdDouyinInfo = function () {
     var eps = 0;
     for (var k in episodeMap) { eps++; }

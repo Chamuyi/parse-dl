@@ -203,6 +203,21 @@ public sealed partial class DouyinParsePage : Page
         catch { return; }
         if (string.IsNullOrEmpty(payload)) return;
 
+        // ── 诊断用：把拦截到的原始载荷落盘（只在设了环境变量 PARSE_DL_DUMP_PAYLOAD 时开）
+        // 用途：排查「实况图下不来」这类问题 → 必须看真实 images[].video 有没有值。
+        // 正常使用不写盘，不影响性能。
+        try
+        {
+            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PARSE_DL_DUMP_PAYLOAD")))
+            {
+                var dumpDir = System.IO.Path.Combine(AppPaths.DataDir, "payload_dump");
+                System.IO.Directory.CreateDirectory(dumpDir);
+                var f = System.IO.Path.Combine(dumpDir, DateTime.Now.ToString("HHmmss_fff") + ".json");
+                System.IO.File.WriteAllText(f, payload);
+            }
+        }
+        catch { }
+
         var result = DouyinPayloadParser.Parse(payload);
         if (result.Media.Count == 0) return;
 
@@ -457,6 +472,14 @@ public sealed partial class DouyinParsePage : Page
             DouyinSettings.Mutate(c => c.IncludeLivePhoto = liveToggle.IsOn);
         };
         OptionHost.Children.Add(ToggleRow("实况图配对视频", liveToggle));
+
+        // 用户 2026-10-27：手机上要能直接看动图（小米动态照片 = 单个 jpg 内嵌 mp4）
+        var mpToggle = new ToggleSwitch { IsOn = cfg.LivePhotoAsMotionPhoto, MinWidth = 0, OnContent = "开", OffContent = "关" };
+        mpToggle.Toggled += (_, _) =>
+        {
+            DouyinSettings.Mutate(c => c.LivePhotoAsMotionPhoto = mpToggle.IsOn);
+        };
+        OptionHost.Children.Add(ToggleRow("合成动态照片", mpToggle));
 
         _suppressOptionEvents = false;
     }

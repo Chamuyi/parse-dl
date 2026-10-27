@@ -36,6 +36,16 @@ public partial class App : Application
     /// <param name="args">Details about the launch request and process.</param>
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+        // 诊断探针：--probe <url> —— 打开链接、抄真实载荷、落盘、退出。
+        if (ParseDl.Services.Douyin.DouyinProbe.Enabled)
+        {
+            var probeUrl = ParseDl.Services.Douyin.DouyinProbe.Url!;
+            _ = ParseDl.Services.Douyin.DouyinProbe.RunAsync(probeUrl).ContinueWith(_ =>
+            {
+                try { Environment.Exit(0); } catch { }
+            });
+            return;
+        }
         // 自测入口：带 --selftest 启动时只跑离线自测、把结果写文件后退出。
         // 这样能不经界面验证纯逻辑（文件名模板等），也不会弹窗干扰用户。
         // 双通道触发：命令行参数 + 环境变量。
@@ -49,7 +59,11 @@ public partial class App : Application
             {
                 var report = ParseDl.Services.FileNameTemplateSelfTest.Run()
                     + Environment.NewLine + "===== 抖音名单解析自测 =====" + Environment.NewLine
-                    + ParseDl.Services.Douyin.DouyinRoster.SelfTest();
+                    + ParseDl.Services.Douyin.DouyinRoster.SelfTest()
+                    + Environment.NewLine + "===== 抖音模块自测（含实况图）=====" + Environment.NewLine
+                    + ParseDl.Services.Douyin.DouyinModuleSelfTest.Run()
+                    + Environment.NewLine + "===== 动态照片合成自测 =====" + Environment.NewLine
+                    + ParseDl.Services.Douyin.MotionPhoto.SelfTest();
                 var outPath = System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "selftest.txt");
                 System.IO.File.WriteAllText(outPath, report);
             }

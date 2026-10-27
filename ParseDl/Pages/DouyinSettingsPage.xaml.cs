@@ -106,6 +106,9 @@ public sealed partial class DouyinSettingsPage : Page
                 Toggle(cfg.FilterByteVc1, v => Mutate(c => c.FilterByteVc1 = v))),
             ("实况图配对视频", "图文作品的实况图额外下载配对视频",
                 Toggle(cfg.IncludeLivePhoto, v => Mutate(c => c.IncludeLivePhoto = v))),
+            // 用户 2026-10-27：小米手机上要能直接看动图（动态照片 = 单个 jpg 内嵌 mp4）
+            ("合成动态照片", "把实况图合成一个 jpg（小米/安卓动态照片），手机上直接看动图",
+                Toggle(cfg.LivePhotoAsMotionPhoto, v => Mutate(c => c.LivePhotoAsMotionPhoto = v))),
             ("附带 BGM", "图文作品附带下载 BGM（按地址在整批内去重）",
                 Toggle(cfg.IncludeBgm, v => Mutate(c => c.IncludeBgm = v))),
             ("跳过已下载", "按作品粒度台账跳过（推荐开着）",

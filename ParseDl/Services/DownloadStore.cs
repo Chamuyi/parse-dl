@@ -186,6 +186,12 @@ public sealed class DownloadStore
                         {
                             var full = System.IO.Path.Combine(it.Dir, it.FileName);
                             _ = ParseDl.Services.Bili.BiliMergePipeline.Instance.NotifyFileReadyAsync(full);
+
+                            // 抖音实况图 → 合成小米/安卓动态照片（单个 jpg，末尾内嵌 mp4）。
+                            // 用户 2026-10-27：手机上要能直接看动图，而不是「图 + 视频」两个文件。
+                            // 内部按「xxx_2.jpg ↔ xxx_2v.mp4」的命名约定配对，配不上就立刻返回，
+                            // 不影响普通图集/普通视频。
+                            ParseDl.Services.Douyin.MotionPhoto.TryPairOnComplete(full);
                         }
                     }
                 }
