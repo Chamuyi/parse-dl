@@ -83,6 +83,9 @@ public sealed partial class BiliPage : Page
         try
         {
             await Web.EnsureCoreWebView2Async();
+            // 让页面里的 target=_blank / window.open 在**当前 WebView 内**打开，
+            // 而不是弹系统浏览器（用户 2026-10-27 报 B 站点视频会开新窗口）。
+            ParseDl.Controls.WebViewHelper.KeepNavigationInPlace(Web.CoreWebView2);
             Web.CoreWebView2.Settings.UserAgent =
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";

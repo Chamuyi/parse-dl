@@ -120,6 +120,9 @@ public sealed partial class DouyinAutoPage : Page
         try
         {
             await Web.EnsureCoreWebView2Async();
+            // 让页面里的 target=_blank / window.open 在**当前 WebView 内**打开，
+            // 而不是弹系统浏览器（用户 2026-10-27 报 B 站点视频会开新窗口）。
+            ParseDl.Controls.WebViewHelper.KeepNavigationInPlace(Web.CoreWebView2, s => AppendLog(s));
             var core = Web.CoreWebView2;
             core.Settings.UserAgent =
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -312,6 +315,60 @@ public sealed partial class DouyinAutoPage : Page
         autoRow.Children.Add(autoToggle);
         panel.Children.Add(autoRow);
 
+        // ── 抓取/下载选项（用户 2026-10-27：「解析页有的都要有」）──────────
+        // 与解析页共用同一份 DouyinConfig，所以这里改了那边也是同一套值，
+        // 不存在「两个页面设置打架」的问题。
+        var optCfg = DouyinSettings.Current;
+
+        var sourceCombo = new ComboBox { Height = 32, HorizontalAlignment = HorizontalAlignment.Stretch, MinWidth = 0 };
+        foreach (var s in Enum.GetValues<DouyinSource>()) sourceCombo.Items.Add(s.Label());
+        sourceCombo.SelectedIndex = (int)optCfg.Source;
+        sourceCombo.SelectionChanged += (_, _) =>
+        {
+            DouyinSettings.Mutate(c => c.Source = (DouyinSource)Math.Max(0, sourceCombo.SelectedIndex));
+        };
+        panel.Children.Add(OptionRow("下载源", sourceCombo));
+
+        if (optCfg.Source.NeedsQualityMode())
+        {
+            var modeCombo = new ComboBox { Height = 32, HorizontalAlignment = HorizontalAlignment.Stretch, MinWidth = 0 };
+            foreach (var m in Enum.GetValues<DouyinQualityMode>()) modeCombo.Items.Add(m.Label());
+            modeCombo.SelectedIndex = (int)optCfg.QualityMode;
+            modeCombo.SelectionChanged += (_, _) =>
+            {
+                DouyinSettings.Mutate(c => c.QualityMode = (DouyinQualityMode)Math.Max(0, modeCombo.SelectedIndex));
+            };
+            panel.Children.Add(OptionRow("质量优先策略", modeCombo));
+        }
+
+        var imgCombo = new ComboBox { Height = 32, HorizontalAlignment = HorizontalAlignment.Stretch, MinWidth = 0 };
+        foreach (var f in Enum.GetValues<DouyinImageFormat>()) imgCombo.Items.Add(f.Label());
+        imgCombo.SelectedIndex = (int)optCfg.ImageFormat;
+        imgCombo.SelectionChanged += (_, _) =>
+        {
+            DouyinSettings.Mutate(c => c.ImageFormat = (DouyinImageFormat)Math.Max(0, imgCombo.SelectedIndex));
+        };
+        panel.Children.Add(OptionRow("图片格式", imgCombo));
+
+        panel.Children.Add(ToggleRow("跳过已下载",
+            DouyinSettings.Current.SkipDownloaded,
+            v => DouyinSettings.Mutate(c => c.SkipDownloaded = v)));
+
+        panel.Children.Add(ToggleRow("附带 BGM（图文）",
+            DouyinSettings.Current.IncludeBgm,
+            v => DouyinSettings.Mutate(c => c.IncludeBgm = v)));
+
+        panel.Children.Add(ToggleRow("实况图配对视频",
+            DouyinSettings.Current.IncludeLivePhoto,
+            v => DouyinSettings.Mutate(c => c.IncludeLivePhoto = v)));
+
+        panel.Children.Add(ToggleRow("下载配套图片",
+            DouyinSettings.Current.IncludeLiveImage,
+            v => DouyinSettings.Mutate(c => c.IncludeLiveImage = v)));
+
+        panel.Children.Add(ToggleRow("合成实况图（单个 jpg）",
+            DouyinSettings.Current.LivePhotoAsMotionPhoto,
+            v => DouyinSettings.Mutate(c => c.LivePhotoAsMotionPhoto = v)));
         // ── 自动下载专属：按模板建文件夹 + 命名模板（用户 2026-10-27）──────
         // 与设置页那套**分开**：这里改了不影响「手动解析单条」用的模板，反之亦然。
         panel.Children.Add(new Border
@@ -801,5 +858,57 @@ public sealed partial class DouyinAutoPage : Page
             UserName = "示例作者",
         };
         return m;
+    }
+
+    // ── 选项行辅助（与解析页同一套视觉规则）──────────────────────
+
+    /// <summary>标签列固定 88px + 控件列吃满剩余宽度，保证两个下拉同宽同高同基线。</summary>
+    private static Grid OptionRow(string label, FrameworkElement control)
+    {
+        var grid = new Grid { ColumnSpacing = 8 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 13,
+            Opacity = 0.8,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        control.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(control, 1);
+        grid.Children.Add(control);
+        return grid;
+    }
+
+    /// <summary>开关行：开关紧跟标题（距离 ≤24px，遵循用户 2026-09-30 约定）。</summary>
+    private static Grid ToggleRow(string label, bool value, Action<bool> onChanged)
+    {
+        // Grid 撑满整行（StackPanel 只按内容宽，右侧会空一大片 —— 用户 2026-10-27 圈出过）
+        var row = new Grid { ColumnSpacing = 12 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 13,
+            Opacity = 0.8,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var toggle = new ToggleSwitch
+        {
+            IsOn = value,
+            MinWidth = 0,
+            OnContent = "开",
+            OffContent = "关",
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, label);
+        toggle.Toggled += (_, _) => onChanged(toggle.IsOn);
+        Grid.SetColumn(toggle, 1);
+        row.Children.Add(toggle);
+        return row;
     }
 }

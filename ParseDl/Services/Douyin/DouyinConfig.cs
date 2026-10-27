@@ -27,6 +27,15 @@ public sealed class DouyinConfig
     public bool IncludeLivePhoto { get; set; } = true;
 
     /// <summary>
+    /// 下载实况图时**是否同时保留配套的静态图**（用户 2026-10-27：
+    /// 「下载配套视频，图片也会一块下载吗，加一个选择下载配套图片」）。
+    /// 开（默认）：图 + 视频都下；关：只下配对视频、不下静态图。
+    /// 注意：若同时开了「合成实况图」，静态图是合成的必需原料，
+    /// 此时即使这里关着也会保留图（否则合不出来）—— 见 DouyinStore.Assemble。
+    /// </summary>
+    public bool IncludeLiveImage { get; set; } = true;
+
+    /// <summary>
     /// 把实况图合成为**小米/安卓动态照片**（单个 .jpg，末尾内嵌 mp4）。
     /// 用户 2026-10-27 需求：小米手机上要能直接看动图，手机拍出来的就是 jpg。
     /// 打开后：下载完成时自动把「静态图 + 配对视频」合成一个 jpg，并删掉单独的 mp4。
@@ -180,6 +189,7 @@ public static class DouyinSettings
                 FilterLowQuality = B("filterLowQuality", false),
                 FilterByteVc1 = B("filterByteVc1", false),
                 IncludeLivePhoto = B("includeLivePhoto", true),
+                IncludeLiveImage = B("includeLiveImage", true),
                 LivePhotoAsMotionPhoto = B("livePhotoAsMotionPhoto", true),
                 IncludeBgm = B("includeBgm", false),
                 SkipDownloaded = B("skipDownloaded", true),
@@ -238,6 +248,7 @@ public static class DouyinSettings
                 ["filterLowQuality"] = c.FilterLowQuality,
                 ["filterByteVc1"] = c.FilterByteVc1,
                 ["includeLivePhoto"] = c.IncludeLivePhoto,
+                ["includeLiveImage"] = c.IncludeLiveImage,
                 ["livePhotoAsMotionPhoto"] = c.LivePhotoAsMotionPhoto,
                 ["includeBgm"] = c.IncludeBgm,
                 ["skipDownloaded"] = c.SkipDownloaded,

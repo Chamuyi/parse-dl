@@ -145,6 +145,9 @@ public sealed partial class DouyinParsePage : Page
         try
         {
             await Web.EnsureCoreWebView2Async();
+            // 让页面里的 target=_blank / window.open 在**当前 WebView 内**打开，
+            // 而不是弹系统浏览器（用户 2026-10-27 报 B 站点视频会开新窗口）。
+            ParseDl.Controls.WebViewHelper.KeepNavigationInPlace(Web.CoreWebView2);
 
             var core = Web.CoreWebView2;
             core.Settings.UserAgent =
@@ -473,13 +476,23 @@ public sealed partial class DouyinParsePage : Page
         };
         OptionHost.Children.Add(ToggleRow("实况图配对视频", liveToggle));
 
+        // 「下载配套图片」（用户 2026-10-27：下载配套视频，图片也会一块下载吗）
+        // 开：图 + 视频都下；关：只下配对视频、不下静态图。
+        // 注意：开了「合成实况图」时静态图是合成原料，会强制保留（见 DouyinStore.Assemble）。
+        var liveImgToggle = new ToggleSwitch { IsOn = cfg.IncludeLiveImage, MinWidth = 0, OnContent = "开", OffContent = "关" };
+        liveImgToggle.Toggled += (_, _) =>
+        {
+            DouyinSettings.Mutate(c => c.IncludeLiveImage = liveImgToggle.IsOn);
+        };
+        OptionHost.Children.Add(ToggleRow("下载配套图片", liveImgToggle));
+
         // 用户 2026-10-27：手机上要能直接看动图（小米动态照片 = 单个 jpg 内嵌 mp4）
         var mpToggle = new ToggleSwitch { IsOn = cfg.LivePhotoAsMotionPhoto, MinWidth = 0, OnContent = "开", OffContent = "关" };
         mpToggle.Toggled += (_, _) =>
         {
             DouyinSettings.Mutate(c => c.LivePhotoAsMotionPhoto = mpToggle.IsOn);
         };
-        OptionHost.Children.Add(ToggleRow("合成动态照片", mpToggle));
+        OptionHost.Children.Add(ToggleRow("合成实况图（单个 jpg）", mpToggle));
 
         _suppressOptionEvents = false;
     }
@@ -507,9 +520,16 @@ public sealed partial class DouyinParsePage : Page
     }
 
     /// <summary>开关行：开关紧跟标题（距离 ≤24px，遵循用户 2026-09-30 的约定）。</summary>
-    private static StackPanel ToggleRow(string label, ToggleSwitch toggle)
+    private static Grid ToggleRow(string label, ToggleSwitch toggle)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        // **用 Grid 撑满整行，不用 StackPanel**（用户 2026-10-27 圈出「这里怎么这么空」）：
+        // StackPanel 宽度只由内容决定，开关挤在左侧、右边一大片空。
+        // 改成标题列 Auto + 开关列 Auto + 尾部星号吃满剩余，整行高度与上面下拉行一致，
+        // 开关仍紧跟标题（≤24px，用户 2026-09-30 约定）。
+        var row = new Grid { ColumnSpacing = 12 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.Children.Add(new TextBlock
         {
             Text = label,
@@ -518,6 +538,7 @@ public sealed partial class DouyinParsePage : Page
             VerticalAlignment = VerticalAlignment.Center,
         });
         toggle.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(toggle, 1);
         row.Children.Add(toggle);
         return row;
     }
