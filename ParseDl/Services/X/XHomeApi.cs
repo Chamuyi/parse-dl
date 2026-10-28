@@ -417,7 +417,7 @@ public sealed class XHomeApi
     public Task<JsonDocument> GraphqlRawAsync(
         string operation, Dictionary<string, string> pars, CancellationToken ct = default)
         => GraphqlAsync(operation, pars, ct);
-    private static async Task<string> ResolveQueryIdAsync(string operation, CancellationToken ct)
+    private async Task<string> ResolveQueryIdAsync(string operation, CancellationToken ct)
     {
         if (QueryIdCache.TryGetValue(operation, out var hit) && !string.IsNullOrEmpty(hit)) return hit;
         if (QueryIdFallback.TryGetValue(operation, out var fb) && !string.IsNullOrEmpty(fb))
@@ -429,7 +429,7 @@ public sealed class XHomeApi
     }
 
     /// <summary>抓 x.com 首页 HTML → 找 JS bundle → 从 bundle 里解析 queryId。</summary>
-    private static async Task<string> RefreshQueryIdAsync(string operation, CancellationToken ct)
+    private async Task<string> RefreshQueryIdAsync(string operation, CancellationToken ct)
     {
         foreach (var page in new[] { "/home", "/" })
         {
@@ -463,6 +463,11 @@ public sealed class XHomeApi
         {
             "queryId:\"([^\"]{10,64})\",operationName:\"" + operation + "\"",
             "operationName:\"" + operation + "\",queryId:\"([^\"]{10,64})\"",
+            // **模块形式**（2026-10-28 实测）：X 的 bundle 里操作元数据写成
+            //   e.exports={queryId:"nxiL6UwEf7B1K1JNGPx-Jw",operationName:"Following",
+            //              operationType:"query",metadata:{...}}
+            // 前两条要求 queryId 与 operationName 紧邻，这里放开中间内容（不含大括号）。
+            "queryId:\"([^\"]{10,64})\"[^{}]{0,200}?operationName:\"" + operation + "\"",
         };
         foreach (var p in patterns)
         {
@@ -537,10 +542,16 @@ public sealed class XHomeApi
         throw new XHomeException(FriendlyNetworkError(last) ?? ("网络错误：" + (last?.Message ?? "未知")));
     }
 
-    private static async Task<string> GetTextAsync(string url, CancellationToken ct)
+    private async Task<string> GetTextAsync(string url, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
+        // **必须带 Cookie**（2026-10-28 修）：不带登录态时，X 首页返回的是「未登录版」
+        // JS bundle，里面**没有 Following 这类需要登录的 GraphQL 操作**，
+        // 于是 PickQueryId 永远解析不到 → 报「无法解析 Following 的 queryId」。
+        // 实测带 cookie 抓 bundle 能直接找到
+        //   e.exports={queryId:"nxiL6UwEf7B1K1JNGPx-Jw",operationName:"Following",...}
+        if (_cookie.Length > 0) req.Headers.TryAddWithoutValidation("Cookie", _cookie);
         using var resp = await Http.SendAsync(req, ct);
         if ((int)resp.StatusCode >= 400)
             throw new XHomeException("HTTP " + (int)resp.StatusCode, (int)resp.StatusCode);

@@ -71,3 +71,4 @@ ParseDl/bin/
 ParseDl/obj/
 build/
 .dart_tool/
+_verify_20261028/*.json

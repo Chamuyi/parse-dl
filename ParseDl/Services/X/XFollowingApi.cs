@@ -162,8 +162,26 @@ public sealed class XFollowingApi
 
                     // 用户条目
                     if (!e.TryGetProperty("content", out var content)) continue;
-                    if (!content.TryGetProperty("itemContent", out var item)) continue;
-                    if (!item.TryGetProperty("user_results", out var ur)) continue;
+
+                    // user_results 有两个可能位置（2026-10-28 实测确认）：
+                    //   ├─ content.user_results            ← **Following 实际用的是这个**
+                    //   └─ content.itemContent.user_results ← 别的时间线形态
+                    // 只认后者会一个用户都取不到（第一版就是这样，界面显示「0 人」）。
+                    JsonElement ur;
+                    if (content.TryGetProperty("user_results", out var urDirect))
+                    {
+                        ur = urDirect;
+                    }
+                    else if (content.TryGetProperty("itemContent", out var item)
+                             && item.TryGetProperty("user_results", out var urNested))
+                    {
+                        ur = urNested;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
                     if (!ur.TryGetProperty("result", out var r)) continue;
 
                     var u = ParseUser(r);
@@ -183,21 +201,57 @@ public sealed class XFollowingApi
             var id = Str(r, "rest_id");
             if (string.IsNullOrEmpty(id)) return null;
 
-            var legacy = r.TryGetProperty("legacy", out var l) ? l : r;
-            var sn = Str(legacy, "screen_name") ?? "";
+            // **X 现在把用户信息放在 core 里，不再有 legacy**（2026-10-28 用真实响应实测）：
+            //   {"rest_id":"2102...","core":{"screen_name":"Milfporn5hxm","name":"🦊妩媚-慧慧"},
+            //    "avatar":{...},"relationship_counts":{...},"tweet_counts":{...}}
+            // 只认 legacy.screen_name 的话，每个用户都会因为「取不到 screen_name」被丢掉 ——
+            // 界面表现就是「拉取成功但 0 人」，且不报错（第一版正是栽在这）。
+            // 所以下面 core 与 legacy **两条路都要走**，谁有就用谁。
+            var core = r.TryGetProperty("core", out var c) && c.ValueKind == JsonValueKind.Object
+                ? c
+                : default;
+            var legacy = r.TryGetProperty("legacy", out var l) && l.ValueKind == JsonValueKind.Object
+                ? l
+                : default;
+
+            string? Pick(string key)
+            {
+                var v = core.ValueKind == JsonValueKind.Object ? Str(core, key) : null;
+                if (!string.IsNullOrEmpty(v)) return v;
+                return legacy.ValueKind == JsonValueKind.Object ? Str(legacy, key) : null;
+            }
+
+            var sn = Pick("screen_name");
             if (string.IsNullOrEmpty(sn)) return null;
 
+            // 头像：core 里没有，两版都在 avatar.image_url
+            var avatar = "";
+            if (r.TryGetProperty("avatar", out var av) && av.ValueKind == JsonValueKind.Object)
+                avatar = Str(av, "image_url") ?? "";
+            if (avatar.Length == 0 && legacy.ValueKind == JsonValueKind.Object)
+                avatar = Str(legacy, "profile_image_url_https") ?? "";
+
+            // 作品数：新版在 tweet_counts.media_tweets，老版在 legacy.media_count
+            var mediaCount = 0;
+            if (r.TryGetProperty("tweet_counts", out var tc) && tc.ValueKind == JsonValueKind.Object)
+                mediaCount = Int(tc, "media_tweets");
+            if (mediaCount == 0 && legacy.ValueKind == JsonValueKind.Object)
+                mediaCount = Int(legacy, "media_count");
+
+            // 互关：新版在 relationship_perspectives.following
             var followingMe = false;
-            if (legacy.TryGetProperty("following", out var f))
+            if (r.TryGetProperty("relationship_perspectives", out var rp)
+                && rp.ValueKind == JsonValueKind.Object
+                && rp.TryGetProperty("following", out var f))
                 followingMe = f.ValueKind == JsonValueKind.True;
 
             return new XFollowingUser
             {
                 Id = id,
                 ScreenName = sn,
-                Name = Str(legacy, "name") ?? sn,
-                Avatar = (Str(legacy, "profile_image_url_https") ?? "").Replace("_normal", "_400x400"),
-                MediaCount = Int(legacy, "media_count"),
+                Name = Pick("name") ?? sn,
+                Avatar = avatar.Replace("_normal", "_400x400"),
+                MediaCount = mediaCount,
                 IsFollowingMe = followingMe,
             };
         }
@@ -215,9 +269,13 @@ public sealed class XFollowingApi
     /// <summary>Following 要的 features 开关（缺了会返回空列表，不是报错 —— 容易误判成"没关注"）。</summary>
     private static readonly Dictionary<string, bool> FollowingFeatures = new()
     {
+        // **这一组是 2026-10-28 用真实 cookie 实测跑通的组合**，别随便精简：
+        // 少一个开关 X 都可能返回空 timeline（表现为「拉取成功但 0 人」，
+        // 不报错，极难排查）。抖音/X 的 GraphQL features 都有这个脾气。
         ["rweb_video_screen_enabled"] = false,
-        ["payments_enabled"] = false,
+        ["rweb_cashtags_enabled"] = true,
         ["profile_label_improvements_pcf_label_in_post_enabled"] = true,
+        ["responsive_web_profile_redirect_enabled"] = true,
         ["rweb_tipjar_consumption_enabled"] = true,
         ["verified_phone_label_enabled"] = false,
         ["creator_subscriptions_tweet_preview_api_enabled"] = true,
@@ -226,10 +284,6 @@ public sealed class XFollowingApi
         ["premium_content_api_read_enabled"] = false,
         ["communities_web_enable_tweet_community_results_fetch"] = true,
         ["c9s_tweet_anatomy_moderator_badge_enabled"] = true,
-        ["responsive_web_grok_analyze_button_fetch_trends_enabled"] = false,
-        ["responsive_web_grok_analyze_post_followups_enabled"] = true,
-        ["responsive_web_jetfuel_frame"] = false,
-        ["responsive_web_grok_share_attachment_enabled"] = true,
         ["articles_preview_enabled"] = true,
         ["responsive_web_edit_tweet_api_enabled"] = true,
         ["graphql_is_translatable_rweb_tweet_is_translatable_enabled"] = true,
@@ -237,16 +291,11 @@ public sealed class XFollowingApi
         ["longform_notetweets_consumption_enabled"] = true,
         ["responsive_web_twitter_article_tweet_consumption_enabled"] = true,
         ["tweet_awards_web_tipping_enabled"] = false,
-        ["responsive_web_grok_show_grok_translated_post"] = false,
-        ["responsive_web_grok_analysis_button_from_backend"] = false,
-        ["creator_subscriptions_quote_tweet_preview_enabled"] = false,
         ["freedom_of_speech_not_reach_fetch_enabled"] = true,
         ["standardized_nudges_misinfo"] = true,
         ["tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled"] = true,
         ["longform_notetweets_rich_text_read_enabled"] = true,
         ["longform_notetweets_inline_media_enabled"] = true,
-        ["responsive_web_grok_image_annotation_enabled"] = true,
-        ["responsive_web_grok_community_note_auto_translation_is_enabled"] = false,
         ["responsive_web_enhance_cards_enabled"] = false,
     };
 
@@ -263,7 +312,7 @@ public sealed class XFollowingApi
           ""data"": { ""user"": { ""result"": { ""timeline"": { ""timeline"": {
             ""instructions"": [ { ""type"": ""TimelineAddEntries"", ""entries"": [
               { ""entryId"": ""user-111"", ""content"": { ""itemContent"": { ""user_results"": { ""result"": {
-                  ""rest_id"": ""111"", ""legacy"": { ""screen_name"": ""alice"", ""name"": ""Alice"", ""media_count"": 42, ""following"": true } } } } } },
+                  ""rest_id"": ""111"", ""core"": { ""screen_name"": ""alice"", ""name"": ""Alice"" }, ""relationship_perspectives"": { ""following"": true }, ""tweet_counts"": { ""media_tweets"": 42 } } } } } },
               { ""entryId"": ""user-222"", ""content"": { ""itemContent"": { ""user_results"": { ""result"": {
                   ""rest_id"": ""222"", ""legacy"": { ""screen_name"": ""bob"", ""name"": ""Bob"", ""media_count"": 7 } } } } } },
               { ""entryId"": ""cursor-bottom-999"", ""content"": { ""value"": ""CURSOR_NEXT"" } }
@@ -297,6 +346,24 @@ public sealed class XFollowingApi
         sb.AppendLine("[负例] 空响应不崩且 0 用户：" +
             (p2.Users.Count == 0 && !p2.HasMore ? "OK" : "FAIL"));
 
-        return sb.ToString();
+        
+        // **真实样本回归**（存在才跑）：合成 JSON 只能证明"我以为的结构"，
+        // 真实样本才能证明"X 实际的结构"。
+        try
+        {
+            var sample = System.IO.Path.Combine(AppPaths.DataDir, "following_sample.json");
+            if (System.IO.File.Exists(sample))
+            {
+                using var rdoc = JsonDocument.Parse(System.IO.File.ReadAllText(sample));
+                var rp = ParseFollowing(rdoc.RootElement);
+                sb.AppendLine("[真实样本] 用户数 " + rp.Users.Count
+                    + "，游标 " + (rp.NextCursor is null ? "null" : "有"));
+                sb.AppendLine("[真实样本] 解析出用户 > 0："
+                    + (rp.Users.Count > 0 ? " OK" : " FAIL（结构又变了？）"));
+            }
+            else sb.AppendLine("[真实样本] 未找到样本，跳过");
+        }
+        catch (Exception ex) { sb.AppendLine("[真实样本] 读取失败：" + ex.Message); }
+return sb.ToString();
     }
 }
