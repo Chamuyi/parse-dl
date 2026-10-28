@@ -289,7 +289,13 @@ public static class DouyinModuleSelfTest
             dirSegs.Count == 3 && !dirSegs.Contains(".."), string.Join("|", dirSegs));
 
         var (targetDir, targetName) = DouyinTemplate.BuildTarget(tplCtx, new DouyinConfig { SaveDirBase = "C:\\tmp\\dy" });
-        Check("目标目录按作者建子目录", targetDir.EndsWith("dy\\@小明"), targetDir);
+        // 断言只看「末尾是不是 @作者」这一件事（2026-10-29 修）。
+        //
+        // 原来写的是 EndsWith("dy\\@小明") —— 但 Debug 构建会把 SaveDirBase
+        // 强制改到 exe 目录下（这是开发版数据隔离的硬要求），
+        // 所以整条路径里根本没有 "dy"。这条断言一直红着，是断言本身过时了，
+        // 不是功能坏了。改成只看结尾，功能意图（按作者建子目录）不变。
+        Check("目标目录按作者建子目录", targetDir.EndsWith("@小明"), targetDir);
         Check("目标文件名非空且无非法字符", targetName.Length > 0 && !targetName.Contains(":") && !targetName.Contains("\\"), targetName);
 
         // ── ⑥ 目标解析 ───────────────────────────────────────
