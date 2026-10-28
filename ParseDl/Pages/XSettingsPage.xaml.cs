@@ -469,7 +469,21 @@ public sealed partial class XSettingsPage : Page
         }
     }
 
-    /// <summary>调 verify_credentials 取 @screen_name；失败抛异常，拿不到名字返回 null。</summary>
+    /// <summary>
+    /// 验证登录态并取回 @screen_name。
+    ///
+    /// ### 为什么不用 verify_credentials（2026-10-28 实测结论）
+    /// 原来走的是 REST v1.1 `account/verify_credentials.json`。实测（用真实登录 cookie）：
+    ///   · api.x.com / api.twitter.com / x.com 三个域下的 v1.1 该端点**全部返回 404**
+    ///     `{"errors":[{"message":"Sorry, that page does not exist","code":34}]}`；
+    ///   · 同一份 cookie 走 GraphQL `Viewer` 却返回 **200** 且能拿到 screen_name。
+    /// 说明 **X 已下线 v1.1 用户端点**，不是用户的 cookie 或代理有问题。
+    ///
+    /// ### 现在的做法
+    /// 调 GraphQL `Viewer`（无参查询，返回当前登录账号信息）。
+    /// queryId 从 x.com 首页的 JS bundle 里解析（X 每 2~4 周轮换一次，硬编码必然过期）；
+    /// 解析失败时退回内置兜底值。
+    /// </summary>
     private static async Task<string?> FetchScreenNameAsync(string authToken, string ct0)
     {
         var handler = new HttpClientHandler { UseCookies = false };
@@ -480,24 +494,89 @@ public sealed partial class XSettingsPage : Page
             handler.UseProxy = true;
         }
 
-        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
-        using var req = new HttpRequestMessage(HttpMethod.Get,
-            "https://api.x.com/1.1/account/verify_credentials.json?skip_status=true&include_entities=false");
+        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(25) };
+
+        var queryId = await ResolveViewerQueryIdAsync(http, ct0);
+        var url = "https://x.com/i/api/graphql/" + queryId + "/Viewer?variables="
+                  + Uri.EscapeDataString("{}");
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Bearer);
         req.Headers.TryAddWithoutValidation("Cookie", $"auth_token={authToken}; ct0={ct0}");
         req.Headers.TryAddWithoutValidation("x-csrf-token", ct0);
+        req.Headers.TryAddWithoutValidation("x-twitter-active-user", "yes");
+        req.Headers.TryAddWithoutValidation("x-twitter-auth-type", "OAuth2Session");
         req.Headers.TryAddWithoutValidation("User-Agent",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36");
 
         using var res = await http.SendAsync(req);
         var body = await res.Content.ReadAsStringAsync();
         if (!res.IsSuccessStatusCode)
-            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}（cookie 可能已失效）");
+            throw new InvalidOperationException(DescribeFailure((int)res.StatusCode, body));
 
         var m = Regex.Match(body, "\"screen_name\"\\s*:\\s*\"([^\"]+)\"");
         return m.Success ? m.Groups[1].Value : null;
     }
 
+    /// <summary>
+    /// 把失败原因说清楚 —— 不再一律报「cookie 可能已失效」。
+    /// 用户 2026-10-28 反馈：网络/端点问题被包装成 cookie 失效，误导排查方向。
+    /// </summary>
+    private static string DescribeFailure(int code, string body)
+    {
+        if (code == 401 || code == 403)
+            return $"HTTP {code}：cookie 无效或已过期，请重新从 DevTools 复制 auth_token 与 ct0";
+        if (code == 404)
+            return $"HTTP 404：接口不存在（X 可能改版了）。这不是 cookie 问题，请把这条反馈给开发者";
+        if (code == 429)
+            return "HTTP 429：请求太频繁，被 X 限流，等几分钟再试";
+        var hint = body.Length > 0 && body.Length < 200 ? "　" + body : "";
+        return $"HTTP {code}{hint}";
+    }
+
+    /// <summary>
+    /// 解析 GraphQL `Viewer` 的 queryId：抓 x.com 首页 → 找 JS bundle → 正则提取。
+    /// 失败时退回 <see cref="ViewerQueryIdFallback"/>（可能已过期，但总比没有强）。
+    /// </summary>
+    private static async Task<string> ResolveViewerQueryIdAsync(HttpClient http, string ct0)
+    {
+        try
+        {
+            using var homeReq = new HttpRequestMessage(HttpMethod.Get, "https://x.com/");
+            homeReq.Headers.TryAddWithoutValidation("Cookie", $"ct0={ct0}");
+            homeReq.Headers.TryAddWithoutValidation("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36");
+            using var homeRes = await http.SendAsync(homeReq);
+            var html = await homeRes.Content.ReadAsStringAsync();
+
+            var bundles = Regex.Matches(html,
+                    "https://abs\\.twimg\\.com/(?:responsive-web/client-web|x-web)[^\"'\\s\\\\]+\\.js")
+                .Select(x => x.Value).Distinct().Take(25);
+
+            foreach (var b in bundles)
+            {
+                try
+                {
+                    using var br = new HttpRequestMessage(HttpMethod.Get, b);
+                    using var bres = await http.SendAsync(br);
+                    if (!bres.IsSuccessStatusCode) continue;
+                    var js = await bres.Content.ReadAsStringAsync();
+
+                    var m = Regex.Match(js, "queryId:\"([A-Za-z0-9_-]{15,})\",operationName:\"Viewer\"");
+                    if (!m.Success)
+                        m = Regex.Match(js, "operationName:\"Viewer\".{0,200}?queryId:\"([A-Za-z0-9_-]{15,})\"");
+                    if (m.Success) return m.Groups[1].Value;
+                }
+                catch { }
+            }
+        }
+        catch { }
+
+        return ViewerQueryIdFallback;
+    }
+
+    /// <summary>Viewer 的 queryId 兜底值（2026-10-28 从 bundle 实测取得，过期后由上面的解析覆盖）。</summary>
+    private const string ViewerQueryIdFallback = "TpQxQtWMTMnIAMPlMGMqNw";
     private void Logout()
     {
         S.AuthToken = "";
