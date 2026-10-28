@@ -103,7 +103,20 @@ public sealed class Aria2Engine : IDisposable
             "--rpc-allow-origin-all=false",
             "--continue=true",
             "--auto-file-renaming=false",
-            "--allow-overwrite=false",
+
+            // **必须允许覆盖**（2026-10-29 找到的真凶之二）：
+            //
+            // 之前是 `--allow-overwrite=false`，配合 `--continue=true` 会踩到这个坑：
+            // 目标文件已存在、但 `.aria2` 控制文件不存在时，aria2 报
+            // `errorCode=13: File ... exists, but a control file(*.aria2) does not exist.
+            //  Download was canceled in order to prevent your file from being truncated to 0.`
+            // 然后**直接失败**，一个字节都不下。
+            //
+            // 实测：153 个任务全部是这个错，界面看着就是「下载卡住」。
+            //
+            // 允许覆盖之后，已存在但没有控制文件的会**重新下载覆盖**；
+            // 有 `.aria2` 控制文件的仍然正常续传（`--continue=true` 优先）。
+            "--allow-overwrite=true",
             "--file-allocation=none",
             "--summary-interval=0",
             "--console-log-level=warn",
@@ -159,12 +172,22 @@ public sealed class Aria2Engine : IDisposable
         args.Add("--user-agent=" + DownloadUserAgent);
 
 
+        // **不能重定向 stdout/stderr 而不读取**（2026-10-29 找到的真凶）：
+        //
+        // 之前这里 RedirectStandardOutput/Error 都开着，但**代码从来没读过这两个流**。
+        // 子进程的管道缓冲区（约 4KB）填满之后，aria2 会**阻塞在写日志那一步**——
+        // 于是整个进程卡死：RPC 全部超时（实测 tellActive 30 秒不返回）、
+        // 下载速度恒为 0、.aria2 控制文件永远是空的。
+        //
+        // 这正是用户反复说的「下载卡住了」。
+        // 现在不重定向：CreateNoWindow 下子进程输出直接丢弃，
+        // aria2 永远不会因为写日志而卡住。
         var psi = new ProcessStartInfo(exe)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            RedirectStandardOutput = false,
+            RedirectStandardError = false,
             WorkingDirectory = Path.GetDirectoryName(exe)!,
         };
         foreach (var a in args) psi.ArgumentList.Add(a);

@@ -38,6 +38,9 @@ public sealed partial class DownloadsPage : Page
     /// <summary>上一次渲染「任务创建中」区块的内容签名。</summary>
     private string _creationSignature = "";
 
+    /// <summary>已提示过的最近完成任务 id（避免重复弹同一句）。</summary>
+    private string _lastCreationResult = "";
+
     private DownloadFeed _feed = DownloadFeed.X;
     private DownloadTabSpec _tab = DownloadFeed.DefaultTabs[0];
 
@@ -58,6 +61,18 @@ public sealed partial class DownloadsPage : Page
         _tab = _feed.Tabs[0];
         BuildChrome();
         RebuildTabs();
+
+        // **先立刻用本地已有数据画一遍**（2026-10-29 修「返回页面先空白」）：
+        //
+        // 之前这里只有 `_ = EnsureEngineThenRefreshAsync()`，它内部第一步是
+        // `await EnsureEngineAsync()` —— 引擎没起来时要等它启动（几百毫秒到几秒），
+        // 期间页面**一片空白**，然后列表才「突然出现」。
+        //
+        // DownloadStore 里的任务列表本来就是进程级单例、一直在内存里，
+        // 所以进页面时**同步画一次**就够了，用户立刻看到内容；
+        // 之后的引擎启动 / 队列恢复 / 数据刷新再慢慢补上。
+        UiRefresh();
+
         _ = EnsureEngineThenRefreshAsync();
         StartTimer();
     }
@@ -701,11 +716,29 @@ public sealed partial class DownloadsPage : Page
         var tasks = CreationTaskStore.Instance.Tasks;
 
         // 只有 X 模块显示
-        if (!_feed.ModuleKeys.Contains("X 媒体") || tasks.Count == 0)
+        if (!_feed.ModuleKeys.Contains("X 媒体"))
         {
             if (CreationCard.Visibility == Visibility.Visible)
                 CreationCard.Visibility = Visibility.Collapsed;
             _creationSignature = "";
+            return;
+        }
+
+        // **任务跑完了要留一条结果**（2026-10-29）：
+        // 之前跑完立刻摘掉、区块瞬间消失，用户完全不知道结果 ——
+        // 全部跳过时会以为「下载卡住了」。现在把最后一条的结果留在工具栏上。
+        if (tasks.Count == 0)
+        {
+            if (CreationCard.Visibility == Visibility.Visible)
+                CreationCard.Visibility = Visibility.Collapsed;
+            _creationSignature = "";
+
+            var done = CreationTaskStore.Instance.LastFinished;
+            if (done is not null && _lastCreationResult != done.Id)
+            {
+                _lastCreationResult = done.Id;
+                ToolbarHint.Text = done.DisplayName + "：" + done.ResultText;
+            }
             return;
         }
 

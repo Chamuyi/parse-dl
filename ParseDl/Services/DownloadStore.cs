@@ -180,7 +180,31 @@ public sealed class DownloadStore
         if (!await EnsureEngineAsync())
             return (false, "下载引擎未就绪：" + EngineMessage);
 
-        var gid = await _engine.AddUriAsync(url, dir ?? Aria2Engine.DefaultDir(), outName);
+        var targetDir = dir ?? Aria2Engine.DefaultDir();
+
+        // **提交前先处理「同名文件存在但控制文件缺失」**（2026-10-29 找到的真凶之三）。
+        //
+        // aria2 在 `--continue=true` 下遇到这种情况会**直接失败**，报：
+        //   errorCode=13: File ... exists, but a control file(*.aria2) does not exist.
+        //   Download was canceled in order to prevent your file from being truncated to 0.
+        // 而且**加了 --allow-overwrite=true 也不管用** —— 实测确认（153 个任务全部失败）。
+        //
+        // 所以只能自己先删掉那个「没有控制文件的旧文件」，让 aria2 当成全新下载。
+        // 这正是原项目「跳过已下载」开关存在的意义：不想重下就别入队；
+        // 既然入队了，就是要这个文件。
+        if (!string.IsNullOrEmpty(outName))
+        {
+            try
+            {
+                var full = System.IO.Path.Combine(targetDir, outName);
+                var ctrl = full + ".aria2";
+                if (System.IO.File.Exists(full) && !System.IO.File.Exists(ctrl))
+                    System.IO.File.Delete(full);
+            }
+            catch { }
+        }
+
+        var gid = await _engine.AddUriAsync(url, targetDir, outName);
         if (string.IsNullOrEmpty(gid)) return (false, "aria2 拒绝该任务");
 
         var item = new DownloadItem { Gid = gid, Url = url, Module = module };
@@ -423,8 +447,26 @@ public sealed class DownloadStore
             if (string.IsNullOrWhiteSpace(e.Url)) continue;
             try
             {
-                var gid = await _engine.AddUriAsync(e.Url, e.Dir,
-                    string.IsNullOrWhiteSpace(e.FileName) ? null : e.FileName);
+                // **恢复时也要做同样的前置清理**（2026-10-29）：
+                // 这条路径直接调 _engine.AddUriAsync，绕过了 AddAsync 里的清理逻辑，
+                // 于是重启后恢复队列时，那些「文件已存在但无控制文件」的任务
+                // 仍然全部 errorCode=13 失败 —— 界面看着就是「下载卡住」。
+                var fileName = string.IsNullOrWhiteSpace(e.FileName) ? null : e.FileName;
+
+                // 文件已存在且非空 → 认为已经下完，不再重复提交
+                // （否则 aria2 会报 errorCode=13「文件存在但无控制文件」直接失败）
+                if (!string.IsNullOrEmpty(fileName) && !string.IsNullOrEmpty(e.Dir))
+                {
+                    try
+                    {
+                        var full = System.IO.Path.Combine(e.Dir, fileName);
+                        if (System.IO.File.Exists(full) && new System.IO.FileInfo(full).Length > 0)
+                            continue;
+                    }
+                    catch { }
+                }
+
+                var gid = await _engine.AddUriAsync(e.Url, e.Dir, fileName);
                 if (string.IsNullOrEmpty(gid)) continue;
 
                 var item = new DownloadItem

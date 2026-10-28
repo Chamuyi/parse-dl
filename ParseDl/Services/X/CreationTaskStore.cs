@@ -49,6 +49,21 @@ public sealed class CreationTask
 
     public bool IsActive => Status == CreationStatus.Active;
 
+    /// <summary>跑完之后的一句话结果（界面用来告诉用户到底发生了什么）。</summary>
+    public string ResultText
+    {
+        get
+        {
+            if (Error is not null) return "失败：" + Error;
+            if (CompleteCount == 0 && FailCount == 0 && SkipCount > 0)
+                return "全部 " + SkipCount + " 个都已存在，已跳过";
+            var s = "已加入 " + CompleteCount + " 个";
+            if (SkipCount > 0) s += "，跳过 " + SkipCount + " 个已存在";
+            if (FailCount > 0) s += "，" + FailCount + " 个失败";
+            return s;
+        }
+    }
+
     public string ProgressText => "已发送 " + CompleteCount + "　已跳过 " + SkipCount
         + (FailCount > 0 ? "　失败 " + FailCount : "");
 }
@@ -121,8 +136,17 @@ public sealed class CreationTaskStore
         Notify();
     }
 
+    /// <summary>
+    /// 最近一个跑完的任务（保留一小会儿，让界面能告诉用户「到底发生了什么」）。
+    ///
+    /// 为什么需要：任务跑完立刻从队列摘掉，用户只看到「任务创建中」一闪而过，
+    /// 完全不知道结果 —— 全部跳过时会以为「下载卡住了」（2026-10-29 实测踩到）。
+    /// </summary>
+    public CreationTask? LastFinished { get; private set; }
+
     private void Remove(CreationTask t)
     {
+        LastFinished = t;
         lock (_tasks) _tasks.Remove(t);
         Notify();
     }
