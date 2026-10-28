@@ -40,8 +40,17 @@ public sealed partial class XSettingsPage : Page
     private const string Bearer =
         "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 
+    /// <summary>
+    /// X 文件名模板的默认值。
+    ///
+    /// **2026-10-28 同步自用户实际在用的 Flutter 版（D:\app\解析下载器\userdata\settings.json）**：
+    /// 用户要求「统一测试」，把发行版里调好的那套模板搬过来，避免两版行为不一致。
+    /// 与原值（%POST_TIME% %USER_SCREEN_NAME% %POST_ID%-%MEDIA_INDEX%%EXT%）的差别：
+    ///   · 加上了 %USER_NAME%（昵称）—— 用户按昵称认人，光看 @handle 不好找；
+    ///   · 用 %CONTENT%（推文内容）替代 %POST_ID%-%MEDIA_INDEX% —— 从文件名就能看出内容。
+    /// </summary>
     private const string DefaultNameTpl =
-        "%POST_TIME% %USER_SCREEN_NAME% %POST_ID%-%MEDIA_INDEX%%EXT%";
+        "%POST_TIME%%USER_NAME%%USER_SCREEN_NAME%%CONTENT%%EXT%";
 
     /// <summary>
     /// X 侧可用变量（与 Flutter 版 kXTemplateVars 逐条一致：13 个、顺序照抄
@@ -67,7 +76,11 @@ public sealed partial class XSettingsPage : Page
     };
 
     /// <summary>文件夹模板的「填入默认」值（对齐 Flutter 版 download_section 的 onUseDefault）。</summary>
-    private const string DefaultDirTpl = "%USER_SCREEN_NAME%";
+    /// <summary>
+    /// X 文件夹模板的默认值。2026-10-28 同步自用户实际在用的 Flutter 版：
+    /// 原来是 %USER_SCREEN_NAME%（只有 @handle），加上 %USER_NAME%（昵称）更好认。
+    /// </summary>
+    private const string DefaultDirTpl = "%USER_NAME%%USER_SCREEN_NAME%";
 
     private ModuleSettings S => AppSettings.Instance.ForModule(ModuleKey);
 

@@ -154,10 +154,15 @@ public static class FileNameTemplate
                 if (e.Length == 0) return "";
                 return e.StartsWith((char)46) ? e : "." + e;
             case "CONTENT":
+                // **默认截断 32 字**（2026-10-28 对齐原项目）：
+                // Flutter 版 TemplateParam('t', '截断长度', '32') 的第三个参数是默认值，
+                // 即用户写 %CONTENT% 不写参数时也按 32 截断。原来这里「没参数就不截断」，
+                // 会让同一份模板在两版产出**不一样长的文件名** —— 用户要求两版同步，必须一致。
                 var text = c.Content ?? "";
-                if (p.TryGetValue("t", out var ts) && int.TryParse(ts, out var trim) && trim > 0)
-                    return UnicodeSubstring(text, 0, trim);
-                return text;
+                var trim = 32;
+                if (p.TryGetValue("t", out var ts) && int.TryParse(ts, out var parsed) && parsed >= 0)
+                    trim = parsed;
+                return UnicodeSubstring(text, 0, trim);
             case "PLAY_COUNT": return c.PlayCount ?? "";
             case "LIKE_COUNT": return c.LikeCount ?? "";
             case "BILI_TITLE": return c.BiliTitle ?? "";
