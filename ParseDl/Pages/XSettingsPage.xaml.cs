@@ -149,7 +149,7 @@ public sealed partial class XSettingsPage : Page
         _authTokenBox = new TextBox
         {
             Text = S.AuthToken,
-            PlaceholderText = "auth_token —— 十六进制字符串（约 40 位）",
+            PlaceholderText = "auth_token —— 从 DevTools 复制 Value，长度不限",
             FontFamily = new FontFamily("Consolas"),
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_authTokenBox, "auth_token");
@@ -159,12 +159,12 @@ public sealed partial class XSettingsPage : Page
         _ct0Box = new TextBox
         {
             Text = S.Ct0,
-            PlaceholderText = "ct0 —— 32 位十六进制（CSRF token）",
+            PlaceholderText = "ct0 —— 从 DevTools 复制 Value，长度不限",
             FontFamily = new FontFamily("Consolas"),
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_ct0Box, "ct0");
         _ct0Box.TextChanged += (_, _) => OnCookieChanged();
-        panel.Children.Add(SettingRows.Row("ct0", "CSRF token，必须是 32 位十六进制；X 会校验格式。", _ct0Box));
+        panel.Children.Add(SettingRows.Row("ct0", "CSRF token。长度不固定（实测有 160 位的），从 DevTools 原样复制完整值即可。", _ct0Box));
 
         // 操作行
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -298,17 +298,11 @@ public sealed partial class XSettingsPage : Page
         at ??= ValueAfterLabel(text, "auth_token");
         ct0 ??= ValueAfterLabel(text, "ct0");
 
-        var lower = text.ToLowerInvariant();
-        if (ct0 is null && lower.Contains("ct0"))
-        {
-            var m = Regex.Match(lower, "[0-9a-f]{32}");
-            if (m.Success) ct0 = m.Value;
-        }
-        if (at is null && lower.Contains("auth_token"))
-        {
-            var m = Regex.Match(lower, "[0-9a-f]{35,80}");
-            if (m.Success && m.Value != ct0) at = m.Value;
-        }
+        // **不要用「抠 32 位十六进制」兜底**（2026-10-28 修正，与 Flutter 版同步）。
+        // 原来的写法用 [0-9a-f]{32} 从整段文本里抓一段，在 ct0 实际长度不是 32 时
+        // 会把用户的真实值**静默截断成前 32 位**，导致登录必然失败且看不出原因。
+        // ct0 长度并不固定（实测见过 160 位）。现在只靠上面的「k=v」与「标签后取值」
+        // 两条路，取不到就返回 null，让用户看到明确提示而不是拿到一个被截断的值。
 
         if (at is null || ct0 is null || at == ct0) return null;
         return (at, ct0);
@@ -423,14 +417,24 @@ public sealed partial class XSettingsPage : Page
             _loginStatus.Text = "❌ auth_token 和 ct0 都要填";
             return;
         }
-        if (!Regex.IsMatch(ct0, "^[0-9a-fA-F]{32}$"))
+        // **不要硬性校验长度**（2026-10-28 修正，与 Flutter 版同步）。
+        // 原来这里强制 ct0 必须「恰好 32 位十六进制」、auth_token ≥20 位 —— 都是没验证过的假设。
+        // 实测 ct0 长度并不固定（见过 160 位），这条校验会把正常值判死，登录必然失败。
+        // 现在只保留两条最低限度检查：
+        //   ① 长度 ≥8（防止明显没粘全）；
+        //   ② 不含分隔符（空格/分号/换行/引号/等号）—— 那说明用户误粘了整段 cookie。
+        if (ct0.Length < 8 || HasCookieSeparators(ct0))
         {
-            _loginStatus.Text = $"❌ ct0 必须是 32 位十六进制（当前 {ct0.Length} 位）";
+            _loginStatus.Text = ct0.Length < 8
+                ? $"❌ ct0 太短（当前 {ct0.Length} 位），可能没粘全"
+                : "❌ ct0 里含有空格/分号/引号等分隔符 —— 请只粘 Value 那一串";
             return;
         }
-        if (at.Length < 20)
+        if (at.Length < 8 || HasCookieSeparators(at))
         {
-            _loginStatus.Text = $"❌ auth_token 看起来不完整（当前 {at.Length} 位）";
+            _loginStatus.Text = at.Length < 8
+                ? $"❌ auth_token 太短（当前 {at.Length} 位），可能没粘全"
+                : "❌ auth_token 里含有空格/分号/引号等分隔符 —— 请只粘 Value 那一串";
             return;
         }
 
@@ -804,4 +808,14 @@ public sealed partial class XSettingsPage : Page
             "所以这里只作说明，没有可点的清理按钮（不摆一个点了没反应的按钮）。"));
         return SettingRows.Card("接口缓存", "X 接口标识缓存（排障）", panel);
     }
+
+    /// <summary>
+    /// 值里是不是混进了 cookie 分隔符 —— 用来判断「用户是不是把整段 cookie 粘进来了」。
+    /// 比「必须 32 位十六进制」这种长度/格式假设可靠得多：
+    /// X 的 auth_token / ct0 长度都不固定，但**值本身一定不含分隔符**。
+    /// </summary>
+    private static bool HasCookieSeparators(string v)
+        => v.IndexOf(' ') >= 0 || v.IndexOf(';') >= 0 || v.IndexOf('=') >= 0
+           || v.IndexOf('"') >= 0 || v.IndexOf('\n') >= 0 || v.IndexOf('\r') >= 0
+           || v.IndexOf('\t') >= 0;
 }
