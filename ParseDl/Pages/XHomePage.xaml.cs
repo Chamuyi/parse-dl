@@ -275,13 +275,11 @@ public sealed partial class XHomePage : Page
             // **不能调 LoadMoreAsync**（2026-10-28 修）：它开头有 `if (... || _busy) return;`，
             // 而这里 _busy 正是 true —— 调用被静默吞掉，一页都不加载。
             // 表现：显示「共 68 个媒体」但作品列表 0 条，必须用户自己点「加载更多」。
+            // 首次加载**只拉一页**（用户 2026-10-28：「默认在作品列表加载几个，
+            // 不用全部加载出来，想看的话自己点加载更多，但是下载必须全部」）。
+            // 所以这里不自动补全剩余页 —— 想看全部由用户点「加载更多」，
+            // 或由「开始下载」在入队前自动拉全（见 StartDownloadAsync）。
             await LoadOnePageLockedAsync();
-
-            // 第一页拿到后**自动把剩下的页也拉完**（用户 2026-10-28：
-            // 「下载是要全部下载，不是下载已经加载出来的几个」；
-            // 「不点加载更多，不会显示作品也不能下载」）。
-            // 这样点一次「加载」就等于「把这个人所有作品都列出来」。
-            if (_store.HasMore) await LoadAllPagesAsync();
         }
         catch (Exception ex)
         {
@@ -980,7 +978,7 @@ public sealed partial class XHomePage : Page
     /// 收敛判据与 <see cref="XHomeStore.PageHasMore"/> 一致：连续多页没有新增即认为到底，
     /// 避免 X 在末尾反复返回「还有下一页」但内容为空时无限翻。
     /// </summary>
-    private async Task LoadAllPagesAsync()
+    private async Task LoadAllPagesAsync(bool render = true)
     {
         var userId = _store.User?.Id;
         if (string.IsNullOrEmpty(userId) || _api is null) return;
