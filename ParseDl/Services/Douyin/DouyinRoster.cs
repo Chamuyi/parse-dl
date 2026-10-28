@@ -49,9 +49,28 @@ public static class DouyinRoster
             var line = rawLine.Trim().TrimEnd('\r');
             if (line.Length == 0) continue;
 
-            // 表格行必须以 | 开头。非表格行（标题、- 条数、导出时间等）直接忽略 ——
-            // 它们不是用户写的目标，报「认不出来」只会刷屏。
-            if (!line.StartsWith('|')) continue;
+            // 表格行必须以 | 开头；**但也接受纯链接行**（2026-10-29 补）。
+            //
+            // 之前这里只有 `if (!line.StartsWith('|')) continue;` ——
+            // 用户粘 5 行纯链接时**全部被忽略**，界面显示「识别 0 个目标」或只认出 1 个。
+            // 页面提示里明明写着「一行一个目标：主页链接 / 视频链接 / 短链 / 作品 ID」，
+            // 所以纯链接行必须认。
+            if (!line.StartsWith('|'))
+            {
+                // 非表格行：先试着当纯链接 / 纯 ID 解析
+                var bareUrl = DouyinUrl.Normalize(line);
+                if (bareUrl is null)
+                {
+                    var mm = Regex.Match(line, @"https?://(?:www\.)?douyin\.com/(?:user|video)/[^\s|]+");
+                    if (mm.Success) bareUrl = DouyinUrl.Normalize(mm.Value);
+                }
+                if (bareUrl is null) continue;   // 标题、条数、导出时间等，忽略
+
+                if (!seen.Add(bareUrl)) continue;
+                if (tasks.Count >= maxTargets) { truncated++; continue; }
+                tasks.Add(new DouyinAutoTask(line, bareUrl));
+                continue;
+            }
 
             var cells = SplitCells(line);
 

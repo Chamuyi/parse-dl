@@ -61,6 +61,12 @@ public sealed partial class DouyinAutoPage : Page
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
+
+        // **无人值守测试入口**（2026-10-29）：
+        // UIA 的 SetValue 会吞掉换行符（实测 5 条链接粘成一行、长度 524 无换行），
+        // SetFocus 在沉底窗口上又拿不到焦点。所以自动化测试改走环境变量。
+        // 只在设置了 PARSE_DL_DOUYIN_TARGETS 时触发，正常使用完全不受影响。
+        TryAutoRunForTest();
         base.OnNavigatedTo(e);
         HeaderHost.Children.Add(UiKit.PageHeader("抖音自动下载",
             "按目标批量滚动抓取 → 收集作品 → 自动提交下载", "\uE945"));
@@ -900,5 +906,40 @@ public sealed partial class DouyinAutoPage : Page
         cfg.AutoFileNameTemplate = tpl;
         var (_, name) = DouyinTemplate.BuildTarget(PreviewItem(), cfg, auto: true);
         return name;
+    }
+
+    /// <summary>
+    /// 无人值守测试入口：环境变量 PARSE_DL_DOUYIN_TARGETS 放目标（换行分隔），
+    /// 进页面自动填进输入框并开跑。不设变量时完全不触发。
+    /// </summary>
+    private void TryAutoRunForTest()
+    {
+        try
+        {
+            var raw = Environment.GetEnvironmentVariable("PARSE_DL_DOUYIN_TARGETS");
+            if (string.IsNullOrWhiteSpace(raw)) return;
+
+            // **直接写 store，不碰 UI 控件**：输入框是代码动态建的，没有 x:Name。
+            _auto.SetRawText(raw.Replace("\\n", Environment.NewLine));
+            Aria2Engine.Log("[DouyinAutoPage] 自动测试：注入 " + _auto.RawText.Length + " 字符，识别 " + _auto.Tasks.Count + " 个目标");
+
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                await Task.Delay(1500);
+                try
+                {
+                    OnStartClick(this, new RoutedEventArgs());
+                    Aria2Engine.Log("[DouyinAutoPage] 自动测试：已提交");
+                }
+                catch (Exception ex)
+                {
+                    Aria2Engine.Log("[DouyinAutoPage] 自动测试异常：" + ex.Message);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            Aria2Engine.Log("[DouyinAutoPage] 自动测试入口异常：" + ex.Message);
+        }
     }
 }
