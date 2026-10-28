@@ -192,6 +192,14 @@ public sealed partial class BiliPage : Page
             // 登录后把 cookie 也从页面里带出来一份：**注意这是本版已知偏离**
             // （Flutter 版刻意不落盘 cookie）。这里只在内存里存着给直链接口的
             // 请求头用，落盘由 BiliConfig.Cookie 那一处显式决定。
+            //
+            // **实现**（2026-10-29 补）：上面这段注释原来只是个 TODO，代码一行没写 ——
+            // 结果是「用户在 B 站页面明明登录了，但 Cfg.Cookie 一直是空的」，
+            // 所以 playurl 永远按未登录处理，只能取 480P。
+            //
+            // 这里用 CookieManager 把 SESSDATA 等取出来，**只在内存里给本次会话用**，
+            // 不落盘（Flutter 版刻意不落盘 cookie，这里保持一致）。
+            await BiliConfig.CaptureCookieFromWebViewAsync(Web.CoreWebView2);
         }
         catch (Exception ex)
         {
@@ -309,7 +317,7 @@ public sealed partial class BiliPage : Page
         try
         {
             Cfg.Load();
-            _api ??= new BiliApi(Cfg.Cookie);
+            _api ??= new BiliApi(Cfg.EffectiveCookie);
             _saveDir = Cfg.ResolvedSaveDir;
 
             var refInfo = await ResolveRefAsync(raw);
@@ -629,7 +637,7 @@ public sealed partial class BiliPage : Page
         if (chosen.Count == 0) { SetStatus("没有勾选任何分 P"); return; }
 
         DownloadButton.IsEnabled = false;
-        var api = _api ??= new BiliApi(Cfg.Cookie);
+        var api = _api ??= new BiliApi(Cfg.EffectiveCookie);
         var info = _info;
         var saveDir = Cfg.ResolvedSaveDir;
         var interval = Math.Max(300, Cfg.RequestIntervalMs);
@@ -685,7 +693,7 @@ public sealed partial class BiliPage : Page
                 try
                 {
                     await BiliAdditionalRunner.ProduceAsync(
-                        new BiliApi(Cfg.Cookie), Cfg, partDir, outBase, info, cid,
+                        new BiliApi(Cfg.EffectiveCookie), Cfg, partDir, outBase, info, cid,
                         part.Title, part.Page);
                 }
                 catch { }

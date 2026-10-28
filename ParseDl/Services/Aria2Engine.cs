@@ -139,6 +139,12 @@ public sealed class Aria2Engine : IDisposable
             // 但 X 的图片全在 pbs.twimg.com **同一个域名**下 —— 默认值理论上够；
             // 真正的问题是 `--max-concurrent-downloads=5` 之外，
             // 每个下载还会额外建 DNS/TLS 辅助连接。这里显式收紧：
+            // **B 站 1080P 视频流必须带 Referer**（2026-10-29 实测）：
+            // 480P 的 CDN 不校验，1080P 的校验 —— 不带就 errorCode=1。
+            // 音频不校验所以之前一直「音频成功、视频失败」，合并自然起不来。
+            "--referer=https://www.bilibili.com/",
+            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          + "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
             "--max-connection-per-server=1",
             "--split=1",
             "--min-split-size=1M",

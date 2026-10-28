@@ -172,6 +172,54 @@ public sealed class BiliConfig
     public int MaxConcurrent { get; set; } = 4;
 
     // ── 登录态 ──────────────────────────────────────────
+    /// <summary>
+    /// **会话级 cookie**（仅内存，不落盘）。
+    ///
+    /// 从内嵌浏览器的 CookieManager 里取出来的 SESSDATA 等，
+    /// 只给本次运行用 —— 与 Flutter 版「刻意不落盘 cookie」保持一致。
+    /// 落盘的是 <see cref="Cookie"/>（用户手填或扫码登录显式保存的）。
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string SessionCookie { get; set; } = "";
+
+    /// <summary>实际请求要用的 cookie：会话级的优先，其次落盘的那份。</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string EffectiveCookie =>
+        !string.IsNullOrWhiteSpace(SessionCookie) ? SessionCookie : Cookie;
+
+    /// <summary>
+    /// **从内嵌浏览器取出登录 cookie 存进会话**（2026-10-29）。
+    ///
+    /// B 站的 SESSDATA 是 HttpOnly，JS 读不到、HttpClient 也没有 ——
+    /// 但它就在 WebView 的会话里，CookieManager 能取。
+    /// 取出后放 <see cref="SessionCookie"/>（仅内存），playurl 就会按已登录请求，
+    /// 从而拿到 1080P 而不是 480P。
+    ///
+    /// 返回取到的项数；0 表示页面里没登录。
+    /// </summary>
+    public static async Task<int> CaptureCookieFromWebViewAsync(
+        Microsoft.Web.WebView2.Core.CoreWebView2 core)
+    {
+        try
+        {
+            var cookies = await core.CookieManager.GetCookiesAsync("https://www.bilibili.com");
+            var wanted = new[] { "SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid" };
+            var parts = new List<string>();
+            foreach (var c in cookies)
+                if (Array.IndexOf(wanted, c.Name) >= 0) parts.Add(c.Name + "=" + c.Value);
+            if (parts.Count == 0) return 0;
+
+            Instance.SessionCookie = string.Join("; ", parts);
+            Aria2Engine.Log("[BiliConfig] 已从页面取出登录 cookie（" + parts.Count + " 项）");
+            return parts.Count;
+        }
+        catch (Exception ex)
+        {
+            Aria2Engine.Log("[BiliConfig] 取 cookie 失败：" + ex.Message);
+            return 0;
+        }
+    }
+
     /// <summary>SESSDATA 等登录 cookie。空 = 未登录（只能取 480P）。</summary>
     public string Cookie { get; set; } = "";
 

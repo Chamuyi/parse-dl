@@ -163,7 +163,7 @@ public sealed partial class BiliBatchPage : Page
                 return;
             }
 
-            var api = new BiliApi(Cfg.Cookie);
+            var api = new BiliApi(Cfg.EffectiveCookie);
             var data = await api.GetDataPublicAsync(
                 "/x/v3/fav/folder/created/list-all?up_mid=" + mid);
             var urls = new List<string>();
@@ -237,7 +237,7 @@ public sealed partial class BiliBatchPage : Page
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
 
-        var api = new BiliApi(Cfg.Cookie);
+        var api = new BiliApi(Cfg.EffectiveCookie);
         var listApi = new BiliListApi(api);
         var saveDir = Cfg.ResolvedSaveDir;
         var limit = LimitBox.SelectedIndex >= 0 ? Limits[LimitBox.SelectedIndex].Value : 0;
@@ -503,7 +503,7 @@ public sealed partial class BiliBatchPage : Page
             try
             {
                 await BiliAdditionalRunner.ProduceAsync(
-                    new BiliApi(Cfg.Cookie), Cfg, partDir, outBase, info, cid,
+                    new BiliApi(Cfg.EffectiveCookie), Cfg, partDir, outBase, info, cid,
                     part.Title, part.Page, ct);
             }
             catch { }
@@ -602,6 +602,8 @@ public sealed partial class BiliBatchPage : Page
                     catch { }
                 }
                 Aria2Engine.Log("[BiliBatchPage] WebView 就绪检查完成");
+            // 取登录 cookie，否则 playurl 只能拿 480P
+            await BiliConfig.CaptureCookieFromWebViewAsync(Web.CoreWebView2);
                 try
                 {
                     await StartBatchAsync();

@@ -696,7 +696,7 @@ public sealed partial class BiliSettingsPage : Page
         {
             _loginCts?.Cancel();
             _loginCts = new CancellationTokenSource();
-            var login = new BiliLogin(new BiliApi(Cfg.Cookie));
+            var login = new BiliLogin(new BiliApi(Cfg.EffectiveCookie));
             var qr = await login.GenerateQrCodeAsync(_loginCts.Token);
 
             _qrImage.Source = new BitmapImage(new Uri(qr.Url));

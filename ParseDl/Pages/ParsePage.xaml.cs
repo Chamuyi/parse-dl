@@ -232,7 +232,7 @@ public sealed partial class ParsePage : Page
         try
         {
             Cfg.Load();
-            _biliApi = new BiliApi(Cfg.Cookie);
+            _biliApi = new BiliApi(Cfg.EffectiveCookie);
 
             _biliInfo = await _biliApi.GetVideoInfoAsync(refInfo.Bvid, refInfo.Aid);
             var info = _biliInfo;
@@ -472,7 +472,7 @@ public sealed partial class ParsePage : Page
         try
         {
             var outcome = await BiliAdditionalRunner.ProduceAsync(
-                new BiliApi(Cfg.Cookie), Cfg, saveDir, outBase, info, play.Cid,
+                new BiliApi(Cfg.EffectiveCookie), Cfg, saveDir, outBase, info, play.Cid,
                 pageTitle, pageNo);
             if (outcome.Written.Count > 0)
                 notes.Add("附加文件 " + outcome.Written.Count + " 个：" + string.Join("、", outcome.Written));
