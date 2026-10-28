@@ -66,6 +66,9 @@ public sealed partial class AutoTaskPage : Page
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
+        // **无人值守测试入口**（2026-10-29）：环境变量 PARSE_DL_AUTOTASK_USERS
+        // 放账号名（换行分隔），进页面自动灌名单并开跑。不设变量时完全不触发。
+        TryAutoRunForTest();
         base.OnNavigatedTo(e);
         _store.Changed += OnStoreChanged;
         Build();
@@ -1257,5 +1260,32 @@ public sealed partial class AutoTaskPage : Page
         SetNotice("已把 " + picked.Count + " 个关注用户填入名单，可以直接点开始");
         RefreshSource();
         RefreshButtons();
+    }
+
+    /// <summary>无人值守测试入口：环境变量灌名单并开跑。</summary>
+    private void TryAutoRunForTest()
+    {
+        try
+        {
+            var raw = Environment.GetEnvironmentVariable("PARSE_DL_AUTOTASK_USERS");
+            if (string.IsNullOrWhiteSpace(raw)) return;
+
+            var text = raw.Replace("\\n", Environment.NewLine);
+            _store.SetRawText(text);
+            if (_rawBox is not null) _rawBox.Text = _store.RawText;
+            Aria2Engine.Log("[AutoTaskPage] 自动测试：注入 " + text.Length + " 字符");
+
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                await Task.Delay(1500);
+                try
+                {
+                    await StartRunAsync();
+                    Aria2Engine.Log("[AutoTaskPage] 自动测试：已启动");
+                }
+                catch (Exception ex) { Aria2Engine.Log("[AutoTaskPage] 启动异常：" + ex.Message); }
+            });
+        }
+        catch (Exception ex) { Aria2Engine.Log("[AutoTaskPage] 测试入口异常：" + ex.Message); }
     }
 }
