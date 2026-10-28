@@ -86,7 +86,23 @@ public static class BiliAdditionalRunner
                 }
                 else
                 {
-                    if (cfg.DanmakuFormat == BiliDanmakuFormat.Xml)
+                    if (cfg.DanmakuFormat == BiliDanmakuFormat.Ass)
+                    {
+                        // **ASS 是枚举里的第一项（默认值）**（2026-10-29 补）：
+                        // 之前这里只有 Xml / Json 两个分支，选 ASS 会一个文件都不生成 ——
+                        // 用户以为「弹幕没下下来」，其实是代码里根本没这条分支。
+                        var name = BiliAdditional.AdditionalName(outBase, "弹幕", null, "ass");
+                        var ass = BiliDanmakuAss.Build(
+                            dms,
+                            Math.Max(1, cfg.DanmakuFontSize),
+                            Math.Max(0, cfg.DanmakuMarginV),
+                            Math.Clamp(cfg.DanmakuOpacity, 0, 100) / 100.0,
+                            pageTitle + (info.Pages.Count > 1 ? " P" + (pageIndex + 1) : ""));
+                        await File.WriteAllTextAsync(Path.Combine(saveDir, name),
+                            ass.Ass, System.Text.Encoding.UTF8, ct);
+                        written.Add(name);
+                    }
+                    else if (cfg.DanmakuFormat == BiliDanmakuFormat.Xml)
                     {
                         var name = BiliAdditional.AdditionalName(outBase, "弹幕", null, "xml");
                         await File.WriteAllTextAsync(Path.Combine(saveDir, name),

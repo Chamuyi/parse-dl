@@ -156,6 +156,8 @@ public partial class App : Application
                     + ParseDl.Services.Douyin.DouyinRoster.SelfTest()
                     + Environment.NewLine + "===== 抖音模块自测（含实况图）=====" + Environment.NewLine
                     + ParseDl.Services.Douyin.DouyinModuleSelfTest.Run()
+                    + ParseDl.Services.Bili.BiliDanmakuAss.SelfTest()
+                    + ParseDl.Services.Bili.BiliSubtitleService.SelfTest()
                     + Environment.NewLine + "===== 动态照片合成自测 =====" + Environment.NewLine
                     + ParseDl.Services.Douyin.MotionPhoto.SelfTest()
                     + Environment.NewLine + "===== X 关注列表解析自测 =====" + Environment.NewLine
