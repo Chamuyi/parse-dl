@@ -318,6 +318,24 @@ public sealed partial class BiliBatchPage : Page
         var refInfo = BiliLink.Parse(target);
         if (refInfo is null && long.TryParse(target, out var midOnly))
             refInfo = new BiliRef { Mid = midOnly };
+        // **也认「UP 主名字」**（2026-10-29 新增）：用户常常只知道名字（影视飓风 / 极客湾），
+        // 拿不到 mid。这里先用搜索接口把名字换成 mid，再走原来的投稿列表路径。
+        // 只在前面几条都没命中时才搜，避免把 BV 号之类也当名字搜一遍。
+        if (refInfo is null && !string.IsNullOrWhiteSpace(target) && !target.Contains("://"))
+        {
+            try
+            {
+                var hits = await listApi.SearchUserAsync(target, 5, ct);
+                var best = hits.FirstOrDefault();
+                if (best is not null && best.Mid > 0)
+                {
+                    refInfo = new BiliRef { Mid = best.Mid };
+                    SetHint("按名字「" + target + "」找到 UP 主：" + best.Name
+                            + "（mid=" + best.Mid + "，粉丝 " + best.Fans + "）");
+                }
+            }
+            catch { }
+        }
         if (refInfo is null) return new List<BiliListItem>();
 
         var pageSize = limit > 0 ? Math.Min(limit, 30) : 30;
@@ -378,6 +396,13 @@ public sealed partial class BiliBatchPage : Page
             if (ct.IsCancellationRequested) break;
             if (part.Cid is not string cidStr || !long.TryParse(cidStr, out var cid)) continue;
 
+            // **跳过已下载的分 P**（2026-10-29 接上台账）：
+            // 之前这个开关是死的（设置页说明写着「台账未接时此项无实际效果」）。
+            // 判重口径与原项目一致：pending 与 done 都算「已处理过」，
+            // 否则用户手快再点一次会重复提交同一个分 P。
+            if (Cfg.SkipDownloaded && BiliLedger.Instance.Contains(info.Bvid, cid))
+                continue;
+
             var play = await api.GetPlayInfoAsync(
                 info.Bvid, cid, BiliConfig.QnOf(Cfg.Quality), info.Aid, ct);
             var pair = BiliDownloadPlan.Plan(play, Cfg.Quality, Cfg.Codec);
@@ -393,6 +418,8 @@ public sealed partial class BiliBatchPage : Page
             var (a, _) = await DownloadStore.Instance.AddAsync(
                 pair.Video!.Url, "B 站", partDir, videoName);
             if (!a) continue;
+            // 入队成功 → 台账记一笔 pending（防重复提交；下完后由轮询改 done）
+            try { BiliLedger.Instance.MarkPending(info.Bvid, cid, info.Title, null); } catch { }
 
             if (pair.IsDash && pair.Audio is not null)
             {
@@ -443,4 +470,14 @@ public sealed partial class BiliBatchPage : Page
     }
 
     private static string Shorten(string s) => s.Length <= 56 ? s : (s.Substring(0, 56) + "…");
+
+    /// <summary>往状态栏写一句（批量页顶部那条提示）。</summary>
+    private void SetHint(string text)
+    {
+        try
+        {
+            if (FindName("HintText") is TextBlock tb) tb.Text = text;
+        }
+        catch { }
+    }
 }

@@ -37,6 +37,20 @@ public sealed record BiliListPage
 ///
 /// 全部为公开接口，不需要登录；但收藏夹需要它是「公开收藏夹」，私密的要 cookie。
 /// </summary>
+/// <summary>按名称搜到的 UP 主。</summary>
+public sealed record BiliUserHit
+{
+    public long Mid { get; init; }
+    public string Name { get; init; } = "";
+    public string Avatar { get; init; } = "";
+    public long Fans { get; init; }
+    public int Videos { get; init; }
+    public string Sign { get; init; } = "";
+
+    /// <summary>主页链接（用户可点）。</summary>
+    public string SpaceUrl => "https://space.bilibili.com/" + Mid;
+}
+
 public sealed class BiliListApi
 {
     private readonly BiliApi _api;
@@ -95,12 +109,85 @@ public sealed class BiliListApi
         return new BiliListPage { Items = items, HasMore = hasMore, Total = total };
     }
 
+    /// <summary>
+    /// **按 UP 主名称搜索**（用户 2026-10-29 要求「搜索影视飓风和极客湾」）。
+    ///
+    /// ### 为什么需要它
+    /// 原来的 GetSpaceVideosAsync 只吃 mid（数字 UID），用户拿到的却是**名字**。
+    /// 没有这一步，「按名字找 UP 主再下他的视频」这条最自然的用法根本走不通。
+    ///
+    /// ### 为什么走公开搜索接口
+    /// B站 /x/web-interface/wbi/search/type 需要 WBI 签名。签名要 img_key/sub_key，
+    /// 那两个 key 又要先请求 nav 接口 —— 链路长且易被风控。
+    /// 这里先用公开路径试；被风控时调用方可以改走 BiliInPage 页内 fetch（浏览器自动带 Cookie）。
+    /// 两条路都留着，是因为页内 fetch 需要 WebView 就绪，而批量页可能是纯接口路径。
+    /// </summary>
+    public async Task<List<BiliUserHit>> SearchUserAsync(
+        string keyword, int limit = 10, CancellationToken ct = default)
+    {
+        var list = new List<BiliUserHit>();
+        if (string.IsNullOrWhiteSpace(keyword)) return list;
+
+        var kw = Uri.EscapeDataString(keyword.Trim());
+        var path = "/x/web-interface/wbi/search/type?search_type=bili_user&keyword=" + kw
+                   + "&page=1&page_size=" + Math.Clamp(limit, 1, 30);
+
+        JsonElement data;
+        try { data = await _api.GetDataPublicAsync(path, ct); }
+        catch { return list; }
+
+        if (!data.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
+            return list;
+
+        foreach (var r in result.EnumerateArray())
+        {
+            var mid = r.TryGetProperty("mid", out var m) ? m.GetInt64() : 0;
+            if (mid <= 0) continue;
+
+            // 搜索接口的字段带 <em class="keyword"> 高亮标签，要去掉
+            var name = StripTags(r.TryGetProperty("uname", out var u) ? u.GetString() ?? "" : "");
+            var avatar = r.TryGetProperty("upic", out var a) ? (a.GetString() ?? "") : "";
+            if (avatar.StartsWith("//")) avatar = "https:" + avatar;
+
+            list.Add(new BiliUserHit
+            {
+                Mid = mid,
+                Name = name,
+                Avatar = avatar,
+                Fans = r.TryGetProperty("fans", out var f) ? f.GetInt64() : 0,
+                Videos = r.TryGetProperty("videos", out var v) ? v.GetInt32() : 0,
+                Sign = StripTags(r.TryGetProperty("usign", out var s) ? s.GetString() ?? "" : ""),
+            });
+
+            if (list.Count >= limit) break;
+        }
+        return list;
+    }
+
+    /// <summary>去掉搜索结果里的高亮标签。</summary>
+    private static string StripTags(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        return System.Text.RegularExpressions.Regex.Replace(s, "<[^>]+>", "");
+    }
+
     /// <summary>UP 主投稿列表（第一页，按发布时间倒序）。</summary>
     public async Task<BiliListPage> GetSpaceVideosAsync(
         long mid, int pageNum = 1, int pageSize = 30, CancellationToken ct = default)
     {
-        var path = $"/x/space/wbi/arc/search?mid={mid}&ps={pageSize}&pn={pageNum}&order=pubdate";
-        var data = await _api.GetDataPublicAsync(path, ct);
+        // **必须走签名接口**（2026-10-29 实测）：未签名的 arc/search 直接返回 HTML 反爬页，
+        // 不是 JSON —— 表现为「取不到投稿」但也不报错。
+        var path = "/x/space/wbi/arc/search";
+        var pars = new Dictionary<string, string?>
+        {
+            ["mid"] = mid.ToString(),
+            ["ps"] = pageSize.ToString(),
+            ["pn"] = pageNum.ToString(),
+            ["order"] = "pubdate",
+            ["platform"] = "web",
+            ["web_location"] = "1550101",
+        };
+        var data = await _api.GetSignedDataPublicAsync(path, pars, ct);
 
         var items = new List<BiliListItem>();
         if (data.TryGetProperty("list", out var list) &&
