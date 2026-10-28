@@ -55,6 +55,54 @@ public sealed class BiliMergeWatcher
         EnsureRunning();
     }
 
+    /// <summary>
+    /// **扫一遍目录，把遗留的 m4s 对补登记**（2026-10-29 补）。
+    ///
+    /// 为什么需要：<see cref="Register"/> 只在「本次运行入队时」登记。
+    /// 如果程序在两条流下完之后、合并之前被关掉（用户关窗、崩溃、更新），
+    /// 下次启动时那些 .video.m4s + .audio.m4s 就**永远没人管** ——
+    /// 目录里躺着两条流却永远不会变成 mp4。实测就踩到了。
+    ///
+    /// 这里在启动时扫一遍下载根目录，凡是「同名 .video.m4s 与 .audio.m4s 都在
+    /// 且输出 mp4 不存在」的，全部补登记。
+    /// </summary>
+    public void SweepLeftovers(string rootDir)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(rootDir) || !Directory.Exists(rootDir)) return;
+            var found = 0;
+            foreach (var v in Directory.EnumerateFiles(rootDir, "*.video.m4s", SearchOption.AllDirectories))
+            {
+                var baseNoExt = v[..^".video.m4s".Length];
+                var audio = baseNoExt + ".audio.m4s";
+                if (!File.Exists(audio)) continue;
+
+                // 已经合并过就不管
+                var merged = baseNoExt + ".mp4";
+                if (File.Exists(merged) && new FileInfo(merged).Length > 0) continue;
+
+                Register(new BiliMergeRequest
+                {
+                    OutBase = Path.GetFileName(baseNoExt),
+                    Dir = Path.GetDirectoryName(v) ?? rootDir,
+                    VideoPath = v,
+                    AudioPath = audio,
+                    OutputPath = merged,
+                    Container = "mp4",
+                    DeleteSource = true,
+                });
+                found++;
+            }
+            if (found > 0)
+                Aria2Engine.Log("[BiliMerge] 启动扫描：补登记 " + found + " 对遗留 m4s");
+        }
+        catch (Exception ex)
+        {
+            Aria2Engine.Log("[BiliMerge] 启动扫描失败：" + ex.Message);
+        }
+    }
+
     private void EnsureRunning()
     {
         if (_running) return;

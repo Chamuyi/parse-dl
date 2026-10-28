@@ -1,3 +1,4 @@
+using ParseDl.Services;
 using ParseDl.Services.Bili;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -131,6 +132,9 @@ public partial class App : Application
     /// <param name="args">Details about the launch request and process.</param>
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+            // 启动时补登记遗留的 m4s 对（上次运行没来得及合并的）
+            try { BiliMergeWatcher.Instance.SweepLeftovers(AppPaths.DefaultDownloadDir); } catch { }
+
         // 诊断探针：--probe <url> —— 打开链接、抄真实载荷、落盘、退出。
         if (ParseDl.Services.Douyin.DouyinProbe.Enabled)
         {
