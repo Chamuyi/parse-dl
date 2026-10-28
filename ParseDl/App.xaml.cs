@@ -28,6 +28,100 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+
+        // ── 全局异常兜底（2026-10-28 加）──────────────────────────────
+        // 之前**一个全局异常处理器都没有**，任何 UI 线程异常都会让进程直接崩掉
+        // （Windows 事件日志里是 0xc000027b STOWED_EXCEPTION / Microsoft.UI.Xaml.dll），
+        // 用户只看到「闪退」，连个提示都没有，也没法反馈到底哪里出错。
+        //
+        // 现在两层都接：
+        //   ① XAML 线程异常 → 写日志 + 弹一个可复制的错误框，**不让它直接崩**；
+        //   ② 非 UI 线程异常 → 写日志（这类无法恢复，但至少留下现场）。
+        UnhandledException += (_, e) =>
+        {
+            var text = DescribeCrash(e.Exception);
+            CrashLog("XAML", text);
+            // Handled=true 让进程活下来，用户还能去下载管理里看已有任务
+            e.Handled = true;
+            ShowCrashDialog(text);
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            var ex = e.ExceptionObject as Exception;
+            CrashLog("AppDomain", DescribeCrash(ex) + "\nTerminating=" + e.IsTerminating);
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            CrashLog("Task", DescribeCrash(e.Exception));
+            e.SetObserved();
+        };
+    }
+
+    /// <summary>把异常整理成可复制的文本（含内部异常链与堆栈）。</summary>
+    private static string DescribeCrash(Exception? ex)
+    {
+        if (ex is null) return "(无异常对象)";
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(ex.GetType().FullName + ": " + ex.Message);
+        var inner = ex.InnerException;
+        var depth = 0;
+        while (inner is not null && depth < 5)
+        {
+            sb.AppendLine("  └─ " + inner.GetType().FullName + ": " + inner.Message);
+            inner = inner.InnerException;
+            depth++;
+        }
+        sb.AppendLine();
+        sb.AppendLine(ex.StackTrace ?? "(无堆栈)");
+        return sb.ToString();
+    }
+
+    /// <summary>崩溃日志落盘（exe 同级 userdata\crash.log，只追加）。</summary>
+    private static void CrashLog(string source, string text)
+    {
+        try
+        {
+            var path = System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "crash.log");
+            var entry = "===== " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+                        + " [" + source + "] =====" + Environment.NewLine
+                        + text + Environment.NewLine;
+            System.IO.File.AppendAllText(path, entry);
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 崩溃提示框。用代码建一个 ContentDialog 而不是 XAML —— 崩溃时资源可能已坏，
+    /// 走 XAML 反而可能二次抛异常。文本可选可复制，方便用户贴给开发者。
+    /// </summary>
+    private static void ShowCrashDialog(string text)
+    {
+        try
+        {
+            var win = MainWindow;
+            if (win?.Content is not Microsoft.UI.Xaml.FrameworkElement root) return;
+            var box = new Microsoft.UI.Xaml.Controls.TextBox
+            {
+                Text = text,
+                IsReadOnly = true,
+                AcceptsReturn = true,
+                TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap,
+                Height = 260,
+                FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+                FontSize = 12,
+            };
+            var dlg = new Microsoft.UI.Xaml.Controls.ContentDialog
+            {
+                Title = "出现了一个错误（程序已保住，没退出）",
+                Content = box,
+                CloseButtonText = "知道了",
+                XamlRoot = root.XamlRoot,
+            };
+            _ = dlg.ShowAsync();
+        }
+        catch { }
     }
 
     /// <summary>

@@ -103,6 +103,20 @@ public sealed class Aria2Engine : IDisposable
             // 并发上限与默认目录都从设置读（改设置后重启引擎生效）
             $"--max-concurrent-downloads={Math.Clamp(AppSettings.Instance.MaxConcurrent, 1, 16)}",
             $"--dir={DefaultDir()}",
+
+            // ── 重试与超时（2026-10-28 加）────────────────────────────
+            // 用户报有 4 个任务报「SSL/TLS handshake failure」。这是**代理链路抖动**
+            // 的典型表现（握手阶段被掐断），不是文件本身的问题 —— 重试基本都能过。
+            // aria2 默认 max-tries=5 且没有连接/读取超时，走不稳定代理时不够用。
+            "--max-tries=10",
+            "--retry-wait=3",
+            "--always-resume=true",
+            "--max-resume-failure-tries=0",
+            // 连接/读取超时给足（走代理时首字节较慢，太短会误杀）
+            "--connect-timeout=20",
+            "--timeout=30",
+            // 证书校验：走代理时证书链细节常被中间设备破坏，这里不因它失败
+            "--check-certificate=false",
         };
 
         // **代理**（2026-10-28 修）：aria2c 是独立进程，**不会继承 .NET/系统的代理设置**。
