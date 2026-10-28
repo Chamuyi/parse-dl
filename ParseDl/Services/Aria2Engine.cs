@@ -105,6 +105,26 @@ public sealed class Aria2Engine : IDisposable
             $"--dir={DefaultDir()}",
         };
 
+        // **代理**（2026-10-28 修）：aria2c 是独立进程，**不会继承 .NET/系统的代理设置**。
+        // 之前一个代理参数都没传，而 X 的图片在 pbs.twimg.com、抖音在 CDN 上，
+        // 国内直连不通 → 任务永远停在「等待中」（超时前不报错，界面看起来就是卡死）。
+        // 所以这里显式把代理传给 aria2c，取值口径与应用内 HTTP 一致：
+        //   · ProxyEnable 关 → 不传；
+        //   · 用系统代理 → 直接读 IE 设置里的 ProxyServer；
+        //   · 自定义 → 用 ProxyUrl。
+        var proxy = ResolveProxyForAria2();
+        if (!string.IsNullOrEmpty(proxy))
+        {
+            // http/https 都走同一个代理（all-proxy 覆盖全部协议）
+            args.Add("--all-proxy=" + proxy);
+            // 代理是本机时别走 loopback 例外，否则等于没走代理
+            args.Add("--no-proxy=");
+        }
+
+        // **UA**：X 与抖音的图床/CDN 会对默认的 aria2 UA 返回 403，必须伪装成浏览器。
+        args.Add("--user-agent=" + DownloadUserAgent);
+
+
         var psi = new ProcessStartInfo(exe)
         {
             UseShellExecute = false,
@@ -180,6 +200,63 @@ public sealed class Aria2Engine : IDisposable
         var dir = AppPaths.DefaultDownloadDir;
         try { System.IO.Directory.CreateDirectory(dir); } catch { }
         return dir;
+    }
+
+    /// <summary>下载用的浏览器 UA（X/抖音的图床会拒绝 aria2 默认 UA）。</summary>
+    private const string DownloadUserAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+
+    /// <summary>
+    /// 给 aria2c 用的代理地址。
+    ///
+    /// aria2c 是**独立进程**，不会自动继承系统的 .NET 代理配置 —— 必须显式传。
+    /// 取值顺序与应用内 HttpClient 保持一致：
+    ///   1. ProxyEnable 关 → 返回空（直连）；
+    ///   2. ProxyUseSystem → 读注册表里 IE/系统代理的 ProxyServer；
+    ///   3. 否则用设置里的 ProxyUrl。
+    /// 系统代理是分协议写法（如 <c>http=127.0.0.1:7897;https=127.0.0.1:7897</c>）时，
+    /// 取 http 那一项即可（aria2 的 all-proxy 对两种协议都用它）。
+    /// </summary>
+    private static string ResolveProxyForAria2()
+    {
+        try
+        {
+            var cfg = AppSettings.Instance;
+            if (!cfg.ProxyEnable) return "";
+
+            string raw;
+            if (cfg.ProxyUseSystem)
+            {
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Internet Settings");
+                if (key?.GetValue("ProxyEnable") is not int on || on == 0) return "";
+                raw = key.GetValue("ProxyServer") as string ?? "";
+            }
+            else
+            {
+                raw = cfg.ProxyUrl ?? "";
+            }
+
+            raw = raw.Trim();
+            if (raw.Length == 0) return "";
+
+            // 分协议写法：取 http= 那一项
+            if (raw.Contains((char)61))
+            {
+                foreach (var part in raw.Split((char)59))
+                {
+                    var kv = part.Split((char)61, 2);
+                    if (kv.Length == 2 && kv[0].Trim().Equals("http", StringComparison.OrdinalIgnoreCase))
+                    { raw = kv[1].Trim(); break; }
+                }
+            }
+
+            if (raw.Length == 0) return "";
+            // 没写协议就补 http://（aria2 要求带 scheme）
+            if (!raw.Contains("://")) raw = "http://" + raw;
+            return raw;
+        }
+        catch { return ""; }
     }
 
 
@@ -483,4 +560,5 @@ internal static class ChildProcessGuard
         }
         AssignProcessToJobObject(_job, p.Handle);
     }
+
 }

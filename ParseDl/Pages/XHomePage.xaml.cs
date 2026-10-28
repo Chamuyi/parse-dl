@@ -272,7 +272,16 @@ public sealed partial class XHomePage : Page
                 SetStatus("接口没返回用户 ID，无法加载作品列表");
                 return;
             }
-            await LoadMoreAsync();
+            // **不能调 LoadMoreAsync**（2026-10-28 修）：它开头有 `if (... || _busy) return;`，
+            // 而这里 _busy 正是 true —— 调用被静默吞掉，一页都不加载。
+            // 表现：显示「共 68 个媒体」但作品列表 0 条，必须用户自己点「加载更多」。
+            await LoadOnePageLockedAsync();
+
+            // 第一页拿到后**自动把剩下的页也拉完**（用户 2026-10-28：
+            // 「下载是要全部下载，不是下载已经加载出来的几个」；
+            // 「不点加载更多，不会显示作品也不能下载」）。
+            // 这样点一次「加载」就等于「把这个人所有作品都列出来」。
+            if (_store.HasMore) await LoadAllPagesAsync();
         }
         catch (Exception ex)
         {
@@ -289,6 +298,16 @@ public sealed partial class XHomePage : Page
     private async Task LoadMoreAsync()
     {
         if (_api is null || _store.LoadingMore || _busy) return;
+        await LoadOnePageLockedAsync();
+    }
+
+    /// <summary>
+    /// 拉一页并渲染。**不检查 _busy** —— 供首次加载复用（那时 _busy 必然是 true）。
+    /// 并发保护只靠 <c>_store.LoadingMore</c>，够用：它包住整个拉取+渲染过程。
+    /// </summary>
+    private async Task LoadOnePageLockedAsync()
+    {
+        if (_api is null || _store.LoadingMore) return;
         var userId = _store.User?.Id;
         if (string.IsNullOrEmpty(userId) || !_store.HasMore) return;
 
@@ -771,6 +790,19 @@ public sealed partial class XHomePage : Page
         if (_busy) return;
         if (_store.User is null) return;
 
+        // **未勾选 = 下载全部，先把所有页拉完再下**（用户 2026-10-28：
+        // 「下载是要全部下载，不是下载已经加载出来的几个」）。
+        //
+        // 之前只下「当前已加载」的那几页：实测 @veth_bel 实际有 68 个媒体，
+        // 但界面只加载了 27 个（用户滚到哪就加载到哪），于是只下 27 个。
+        // X 的时间线是游标分页的，把「滚到哪」当成「一共多少作品」是错的。
+        //
+        // 勾选了作品时**不拉全量** —— 用户明确只想下勾中的那几个。
+        if (_store.SelectedCount == 0 && _store.HasMore)
+        {
+            await LoadAllPagesAsync();
+        }
+
         var posts = _store.PostsForDownload();
         if (posts.Count == 0)
         {
@@ -940,5 +972,49 @@ public sealed partial class XHomePage : Page
             XamlRoot = XamlRoot,
         };
         await dlg.ShowAsync();
+    }
+
+    /// <summary>
+    /// 把所有分页都拉完（直到没有下一页，或触发安全上限）。
+    ///
+    /// 收敛判据与 <see cref="XHomeStore.PageHasMore"/> 一致：连续多页没有新增即认为到底，
+    /// 避免 X 在末尾反复返回「还有下一页」但内容为空时无限翻。
+    /// </summary>
+    private async Task LoadAllPagesAsync()
+    {
+        var userId = _store.User?.Id;
+        if (string.IsNullOrEmpty(userId) || _api is null) return;
+
+        const int maxPages = 200;   // 防护上限：200 页 × 20 条 = 4000 条
+        var page = 0;
+        var noGrowth = 0;
+
+        while (_store.HasMore && page < maxPages)
+        {
+            var before = _store.Posts.Count;
+            page++;
+            SetStatus("正在加载全部作品… 第 " + page + " 页，已有 " + before + " 条");
+
+            try
+            {
+                var cursor = _store.NextCursor;
+                var res = await _api.GetMediasAsync(userId, cursor);
+                _store.Append(res, cursor);
+            }
+            catch (Exception ex)
+            {
+                // 中途失败不丢弃已加载的，如实告知
+                RenderResults();
+                SetStatus("加载中断（已加载 " + _store.Posts.Count + " 条）：" + XHomeApi.MapError(ex));
+                return;
+            }
+
+            noGrowth = _store.Posts.Count > before ? 0 : noGrowth + 1;
+            if (noGrowth >= 3) break;
+        }
+
+        RenderResults();
+        SetStatus("已加载全部 " + _store.Posts.Count + " 条作品 · " + _store.TotalMedia + " 个媒体"
+                  + (_store.HasMore ? "（已达翻页上限）" : "（已到底）"));
     }
 }
