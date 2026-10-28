@@ -391,8 +391,27 @@ public sealed partial class BiliBatchPage : Page
                 return Trim(pageList, limit);
 
             Aria2Engine.Log("[BiliBatch] 页内 fetch 未拿到，回落接口 mid=" + mid3);
-            var p = await listApi.GetSpaceVideosAsync(mid3, 1, pageSize, ct);
-            return Trim(p.Items, limit);
+            try
+            {
+                var p = await listApi.GetSpaceVideosAsync(mid3, 1, pageSize, ct);
+                if (p.Items.Count > 0) return Trim(p.Items, limit);
+            }
+            catch (Exception ex)
+            {
+                Aria2Engine.Log("[BiliBatch] arc/search 被风控，改用视频搜索：" + ex.Message);
+            }
+
+            // **最后兜底：按 UP 名搜他的视频**（2026-10-29）：
+            // arc/search 被 B 站持续风控（实测连续 5 次 -352），
+            // 但 search/type?search_type=video 仍可用，且每条都带 mid/bvid。
+            var bySearch = await listApi.SearchVideosAsync(target, mid3, 1, pageSize, ct);
+            if (bySearch.Items.Count > 0)
+            {
+                Aria2Engine.Log("[BiliBatch] 视频搜索兜底成功 mid=" + mid3
+                                + " 拿到 " + bySearch.Items.Count + " 条");
+                return Trim(bySearch.Items, limit);
+            }
+            return new List<BiliListItem>();
         }
 
         if (refInfo.IsVideo)
@@ -462,6 +481,21 @@ public sealed partial class BiliBatchPage : Page
                     pair.Audio.Url, "B 站（音频）", partDir,
                     BiliDownloadPlan.AudioStreamName(outBase));
                 if (!a2) continue;
+
+                // **登记待合并对**（2026-10-29 补）：
+                // 之前 DASH 的两条流下完了没人管 —— 目录里只剩 .audio.m4s + .video.m4s，
+                // 永远不会有 mp4。这里把「视频/音频/输出」三件事记进合并队列，
+                // 下载完成后由 <see cref="BiliMergeWatcher"/> 触发 ffmpeg 合并。
+                BiliMergeWatcher.Instance.Register(new BiliMergeRequest
+                {
+                    OutBase = outBase,
+                    Dir = partDir,
+                    VideoPath = Path.Combine(partDir, BiliDownloadPlan.VideoStreamName(outBase)),
+                    AudioPath = Path.Combine(partDir, BiliDownloadPlan.AudioStreamName(outBase)),
+                    OutputPath = Path.Combine(partDir, BiliDownloadPlan.MergedName(outBase, Cfg.Container)),
+                    Container = Cfg.Container.ToString().ToLowerInvariant(),
+                    DeleteSource = true,
+                });
             }
 
             try

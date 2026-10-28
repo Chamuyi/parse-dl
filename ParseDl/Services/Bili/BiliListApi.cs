@@ -184,6 +184,92 @@ public sealed class BiliListApi
         return list;
     }
 
+    /// <summary>
+    /// **按 UP 主名搜索他的视频**（`arc/search` 被风控时的备用路径）。
+    ///
+    /// ### 为什么需要
+    /// B 站对 `/x/space/wbi/arc/search`（取 UP 投稿）做了持续风控，
+    /// 实测连续 5 次全是 `-352 风控校验失败`，连 curl 都过不去。
+    /// 但 `/x/web-interface/wbi/search/type?search_type=video` **仍然可用**，
+    /// 而且它返回的每一条都带 `mid` / `author` / `bvid` / `arcurl` ——
+    /// 正好够拼出「这个 UP 主的视频列表」。
+    ///
+    /// 代价：搜索结果只有前 1000 条（numResults 上限），且按相关度而非时间排。
+    /// 所以它是**备用**，`GetSpaceVideosAsync` 能过时优先用那个。
+    /// </summary>
+    public async Task<BiliListPage> SearchVideosAsync(
+        string keyword, long? onlyMid = null, int pageNum = 1, int pageSize = 30,
+        CancellationToken ct = default)
+    {
+        var items = new List<BiliListItem>();
+        if (string.IsNullOrWhiteSpace(keyword)) return new BiliListPage();
+
+        var path = "/x/web-interface/wbi/search/type?search_type=video"
+                   + "&keyword=" + Uri.EscapeDataString(keyword.Trim())
+                   + "&page=" + pageNum
+                   + "&page_size=" + Math.Clamp(pageSize, 1, 50)
+                   + "&order=pubdate";   // 按发布时间倒序，与投稿列表口径一致
+
+        // **必须匿名取数**（2026-10-29 决定性实测）：
+        // 不带 cookie → code:0 正常；带 buvid3 → 立刻回 v_voucher 风控。
+        JsonElement data;
+        try { data = await _api.GetDataAnonymousAsync(path, ct); }
+        catch (Exception ex)
+        {
+            Aria2Engine.Log("[BiliListApi] 视频搜索「" + keyword + "」失败：" + ex.Message);
+            return new BiliListPage();
+        }
+
+        if (!data.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
+            return new BiliListPage();
+
+        foreach (var v in result.EnumerateArray())
+        {
+            var mid = v.TryGetProperty("mid", out var m) ? m.GetInt64() : 0;
+            // 指定了 UP 主就只留他的（搜索结果里会混进别人的视频）
+            if (onlyMid is long want && mid != want) continue;
+
+            var bvid = v.TryGetProperty("bvid", out var b) ? b.GetString() ?? "" : "";
+            if (string.IsNullOrEmpty(bvid)) continue;
+
+            // 搜索结果的 pic 是 //i0.hdslb.com/... 形式，要补 https:
+            var pic = v.TryGetProperty("pic", out var pc) ? pc.GetString() ?? "" : "";
+            if (pic.StartsWith("//")) pic = "https:" + pic;
+            else if (pic.StartsWith("http://")) pic = pic.Replace("http://", "https://");
+
+            items.Add(new BiliListItem
+            {
+                Bvid = bvid,
+                Aid = v.TryGetProperty("aid", out var a) ? a.GetInt64() : 0,
+                Title = StripTags(v.TryGetProperty("title", out var tt) ? tt.GetString() ?? "" : ""),
+                Cover = pic,
+                DurationSec = ParseDurationSecStr(v),
+                PubDateUnix = v.TryGetProperty("pubdate", out var pd) ? pd.GetInt64() : 0,
+            });
+        }
+
+        var total = 0;
+        if (data.TryGetProperty("numResults", out var nr)) total = nr.GetInt32();
+
+        return new BiliListPage
+        {
+            Items = items,
+            HasMore = items.Count >= pageSize,
+            Total = total,
+        };
+    }
+
+    /// <summary>搜索结果的时长是 "12:34" 或 "1:02:03" 字符串，转秒。</summary>
+    private static int ParseDurationSecStr(JsonElement e)
+    {
+        if (!e.TryGetProperty("duration", out var d)) return 0;
+        var s = d.GetString() ?? "";
+        var total = 0;
+        foreach (var part in s.Split((char)58))
+            if (int.TryParse(part, out var v)) total = total * 60 + v;
+        return total;
+    }
+
     /// <summary>去掉搜索结果里的高亮标签。</summary>
     private static string StripTags(string s)
     {
