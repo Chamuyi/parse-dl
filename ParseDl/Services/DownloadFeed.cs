@@ -19,7 +19,20 @@ public enum DownloadModuleKind
 public sealed class DownloadTabSpec
 {
     public string Title { get; init; } = "";
+
+    /// <summary>主状态。null = 不按状态过滤（旧「全部」Tab 用）。</summary>
     public AriaStatus? Status { get; init; }
+
+    /// <summary>
+    /// **额外归入本 Tab 的状态**（2026-10-28）。
+    /// 用户要求「只要下载中 / 错误 / 已完成」三个 Tab，但等待中和已暂停的任务
+    /// 不能就此消失 —— 它们都是「还没下完」，跟下载中放一起才符合直觉。
+    /// </summary>
+    public AriaStatus[] AlsoStatuses { get; init; } = Array.Empty<AriaStatus>();
+
+    /// <summary>这条任务的状态是否落在本 Tab 里。</summary>
+    public bool AcceptsStatus(AriaStatus s)
+        => Status is null || s == Status || Array.IndexOf(AlsoStatuses, s) >= 0;
 }
 
 /// <summary>
@@ -79,10 +92,14 @@ public sealed class DownloadFeed
     /// </summary>
     public static readonly IReadOnlyList<DownloadTabSpec> DefaultTabs = new[]
     {
-        new DownloadTabSpec { Title = "全部" },
-        new DownloadTabSpec { Title = "下载中", Status = AriaStatus.Active },
-        new DownloadTabSpec { Title = "等待中", Status = AriaStatus.Waiting },
-        new DownloadTabSpec { Title = "已暂停", Status = AriaStatus.Paused },
+        // 等待中 / 已暂停 都归到「下载中」—— 它们都是「还没下完」，
+        // 原项目也是把 waiting 与 active 一起放在同一个 Tab 里。
+        new DownloadTabSpec
+        {
+            Title = "下载中",
+            Status = AriaStatus.Active,
+            AlsoStatuses = new[] { AriaStatus.Waiting, AriaStatus.Paused },
+        },
         new DownloadTabSpec { Title = "错误", Status = AriaStatus.Error },
         new DownloadTabSpec { Title = "已完成", Status = AriaStatus.Complete },
     };
@@ -93,7 +110,7 @@ public sealed class DownloadFeed
 
     /// <summary>这条任务在给定 Tab 下是否可见（模块 + 状态双过滤）。</summary>
     public bool Accepts(DownloadItem item, DownloadTabSpec tab) =>
-        Matches(item) && (tab.Status is null || item.Status == tab.Status);
+        Matches(item) && tab.AcceptsStatus(item.Status);
 
     /// <summary>取本模块在给定 Tab 下的任务（保持队列原顺序：新的在前）。</summary>
     public List<DownloadItem> ItemsFor(DownloadTabSpec tab) =>

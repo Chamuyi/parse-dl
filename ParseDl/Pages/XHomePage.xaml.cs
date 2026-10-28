@@ -889,6 +889,26 @@ public sealed partial class XHomePage : Page
                     // **每条媒体单独算目录**（2026-10-28）：文件夹模板里的变量是逐作品的，
                     // 不同作品要落到不同子文件夹，不能在循环外算一次。
                     var mediaDir = XDirFor(post, i);
+
+                    // 全路径 260 保护（对齐原项目 clampNameForFullPath）：
+                    // 模板能拼出很长的中文名，配上多级目录就越过 Windows MAX_PATH，
+                    // 表现不是报错而是「文件建不出来 / 删不掉」。
+                    name = FileNameTemplate.ClampForFullPath(mediaDir ?? "", name);
+
+                    // 同名跳过（对齐原项目 sameFileSkip）：目标文件已存在就不重复入队。
+                    if (skip && !string.IsNullOrEmpty(mediaDir))
+                    {
+                        try
+                        {
+                            if (System.IO.File.Exists(System.IO.Path.Combine(mediaDir, name)))
+                            {
+                                skipped++;
+                                continue;
+                            }
+                        }
+                        catch { }
+                    }
+
                     // 对齐原版：AddAsync 只加任务不刷新，状态交给轮询。
                     var (ok, msg) = await DownloadStore.Instance.AddAsync(m.Url, ModuleName, mediaDir, name);
                     if (ok)

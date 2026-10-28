@@ -31,6 +31,9 @@ public sealed partial class DownloadsPage : Page
     /// <summary>本进程是否已尝试恢复过队列（避免反复进出页面重复提交任务）。</summary>
     private static bool _queueRestored;
 
+    /// <summary>上一次渲染历史台账的内容签名（一样就跳过重建，避免闪烁）。</summary>
+    private string _historySignature = "";
+
     private DownloadFeed _feed = DownloadFeed.X;
     private DownloadTabSpec _tab = DownloadFeed.DefaultTabs[0];
 
@@ -229,21 +232,28 @@ public sealed partial class DownloadsPage : Page
             return;
         }
 
-        // 内容没变就不重设 ItemsSource —— 重设会让 ListView 整表重建，
-        // 每 0.8 秒一次仍然很浪费。行内文字由 UpdateRowTexts 就地更新。
-        if (!ReferenceEquals(_renderedSource, items))
+        // **按「条目签名」判断要不要重设 ItemsSource**（2026-10-28 修闪烁）。
+        //
+        // 之前用 ReferenceEquals 比对 —— 但 ItemsFor() 每次都 ToList() 返回新列表，
+        // 引用永远不相等，于是每 0.8 秒都整表重设一次 → 列表持续闪。
+        // 现在比内容：任务数 + 首尾 GID + 各条状态。
+        var sig = items.Count + "|" + items[0].Gid + "|" + items[^1].Gid
+                  + "|" + items[0].Status + "|" + items[^1].Status
+                  + "|" + string.Join((char)44, items.Select(i => (int)i.Status));
+        if (sig == _renderedSignature)
         {
-            _renderedSource = items;
-            TaskList.ItemsSource = items;
-        }
-        else
-        {
+            // 内容没变：只就地更新可见行的文字（进度/速度会变），不重建列表。
             UpdateRowTexts();
+            return;
         }
+
+        _renderedSignature = sig;
+        TaskList.ItemsSource = items;
     }
 
     /// <summary>上一次塞进 ListView 的集合引用（用于判断要不要整表重设）。</summary>
-    private object? _renderedSource;
+    /// <summary>上一次渲染的任务列表内容签名（一样就不重设 ItemsSource，避免闪烁）。</summary>
+    private string _renderedSignature = "";
 
     /// <summary>就地更新已生成行的文字（不重建控件）。</summary>
     private void UpdateRowTexts()
@@ -291,11 +301,25 @@ public sealed partial class DownloadsPage : Page
     }
 
     /// <summary>渲染本模块的历史台账。</summary>
+    /// <summary>
+    /// 渲染历史台账。**内容没变就完全不动控件**（2026-10-28 修闪烁）。
+    ///
+    /// 之前每 0.8 秒 `Children.Clear()` 再重建一遍，即使数据一个字没变 ——
+    /// 界面就会持续闪。现在先比对「条目签名」，一样就直接返回。
+    /// </summary>
     private void RenderHistory()
     {
-        HistoryPanel.Children.Clear();
-
         var entries = _feed.History();
+
+        // 用「条数 + 首尾条目」做轻量签名，够判断有没有变化。
+        var signature = entries.Count == 0
+            ? "empty"
+            : entries.Count + "|" + entries[0].FileName + "|" + entries[^1].FileName
+                          + "|" + entries[0].Status + "|" + entries[^1].Status;
+        if (signature == _historySignature) return;
+        _historySignature = signature;
+
+        HistoryPanel.Children.Clear();
         if (entries.Count == 0)
         {
             HistoryPanel.Children.Add(new TextBlock

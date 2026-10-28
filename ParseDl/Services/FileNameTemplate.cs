@@ -266,4 +266,46 @@ public static class FileNameTemplate
         }
         return sb.ToString();
     }
+
+    // ── 全路径 260 保护（对齐原项目 clampNameForFullPath）──────────────
+
+    /// <summary>Windows MAX_PATH 上限（含结尾   的那一格不算，这里用 259）。</summary>
+    private const int WindowsMaxPath = 259;
+
+    /// <summary>留一点余量给 aria2 生成的 .aria2 控制文件（它会在文件名后再加后缀）。</summary>
+    private const int PathSlack = 12;
+
+    /// <summary>
+    /// 把文件名裁到「目录 + 名字」不超过 Windows MAX_PATH。
+    ///
+    /// ### 为什么需要（移植自原项目 file_name_template.dart:917）
+    /// 模板能拼出很长的中文名，配上多级模板目录和保存根目录就越过 MAX_PATH。
+    /// **跨过去的表现不是报错**，而是 aria2 建文件失败、或文件在资源管理器里
+    /// 打不开也删不掉 —— 所以宁可在入队前把名字裁短。
+    ///
+    /// 裁剪时保留扩展名，且**不要切在代理对中间**（那样会留下半个 emoji，
+    /// Windows 那边变成非法字符）。
+    /// </summary>
+    public static string ClampForFullPath(string saveDir, string fileName)
+    {
+        if (string.IsNullOrEmpty(fileName)) return fileName;
+
+        // 目录与文件名之间还有一个分隔符，所以再减 1
+        var budget = WindowsMaxPath - PathSlack - (saveDir?.Length ?? 0) - 1;
+        if (budget < 1) return fileName;                 // 目录本身就已经太长，裁名字也救不了
+        if (fileName.Length <= budget) return fileName;
+
+        var dot = fileName.LastIndexOf((char)46);        // 找扩展名的点
+        var hasExt = dot > 0;                            // 开头的点不算扩展名（.gitignore）
+        var ext = hasExt ? fileName[dot..] : "";
+        var stem = hasExt ? fileName[..dot] : fileName;
+
+        var stemBudget = budget - ext.Length;
+        if (stemBudget <= 0) return fileName;
+
+        var cutLen = Math.Min(stem.Length, stemBudget);
+        // 不要正好切在代理对中间（会留下半个 emoji）
+        if (cutLen > 0 && char.IsHighSurrogate(stem[cutLen - 1])) cutLen--;
+        return stem[..cutLen] + ext;
+    }
 }
