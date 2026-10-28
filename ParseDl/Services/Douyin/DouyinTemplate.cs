@@ -330,9 +330,11 @@ public static class DouyinTemplate
     /// </summary>
     public static (string Dir, string FileName) BuildTarget(DouyinItem item, DouyinConfig cfg, bool auto)
     {
-        var baseDir = !string.IsNullOrWhiteSpace(cfg.SaveDirBase)
-            ? cfg.SaveDirBase!
-            : Aria2Engine.DefaultDir();
+        // 开发版（Debug）一律锁在 exe\downloads（用户 2026-10-28：开发版数据含下载
+        // 必须严格在 exe 目录内）。发行版仍按用户配置的目录走。
+        var baseDir = AppPaths.ResolveDownloadDir(cfg.SaveDirBase, out _);
+        if (!AppPaths.LockToInstallDir && string.IsNullOrWhiteSpace(cfg.SaveDirBase))
+            baseDir = Aria2Engine.DefaultDir();
 
         var useFolder = auto ? cfg.AutoCreateFolder : cfg.EnableSaveFolder;
         var dirTemplate = auto ? cfg.EffectiveAutoDirTemplate : cfg.DirTemplate;

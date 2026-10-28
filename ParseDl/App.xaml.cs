@@ -65,7 +65,9 @@ public partial class App : Application
                     + Environment.NewLine + "===== 动态照片合成自测 =====" + Environment.NewLine
                     + ParseDl.Services.Douyin.MotionPhoto.SelfTest()
                     + Environment.NewLine + "===== X 关注列表解析自测 =====" + Environment.NewLine
-                    + ParseDl.Services.X.XFollowingApi.SelfTest();
+                    + ParseDl.Services.X.XFollowingApi.SelfTest()
+                    + Environment.NewLine + "===== 开发版目录锁自测 =====" + Environment.NewLine
+                    + DirLockSelfTest();
                 var outPath = System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "selftest.txt");
                 System.IO.File.WriteAllText(outPath, report);
             }
@@ -92,5 +94,32 @@ public partial class App : Application
         _window = new MainWindow();
         MainWindow = _window;
         _window.Activate();
+    }
+
+    /// <summary>
+    /// 开发版目录锁自测（用户 2026-10-28：「开发版数据包括下载，要严格在测试目录，就 exe 目录里面」）。
+    /// 核心判据：**无论配置里写什么外部路径，Debug 版解析出来的下载目录都必须在 exe 目录内**。
+    /// </summary>
+    private static string DirLockSelfTest()
+    {
+        var sb = new System.Text.StringBuilder();
+        var install = ParseDl.Services.AppPaths.InstallDir;
+        sb.AppendLine("安装目录: " + install);
+        sb.AppendLine("LockToInstallDir = " + ParseDl.Services.AppPaths.LockToInstallDir
+            + "（Debug 应为 True）");
+
+        var cases = new[] { "D:\\下载目录", "D:\\somewhere", "", install + "\\downloads" };
+        foreach (var c in cases)
+        {
+            var resolved = ParseDl.Services.AppPaths.ResolveDownloadDir(c, out var locked);
+            var inside = ParseDl.Services.AppPaths.IsUnder(resolved, install);
+            var label = c.Length == 0 ? "<空>" : c;
+            sb.AppendLine("  配置=" + label + "  →  实际=" + resolved
+                + "  在exe内=" + inside + (locked ? "  [已强制改写]" : ""));
+#if DEBUG
+            if (!inside) sb.AppendLine("    ✘ 违反：Debug 版必须锁在 exe 目录内");
+#endif
+        }
+        return sb.ToString();
     }
 }

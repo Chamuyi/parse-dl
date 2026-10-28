@@ -140,6 +140,21 @@ public sealed class Aria2Engine : IDisposable
     {
         LastDirError = "";
         var configured = AppSettings.Instance.SaveDirBase;
+
+        // 开发版（Debug）：严格锁在 exe\downloads（用户 2026-10-28 要求）。
+        // 配置里哪怕写着外部盘，也一律忽略，避免测试产物写到别的盘去。
+        var resolved = AppPaths.ResolveDownloadDir(configured, out var locked);
+        if (locked)
+        {
+            LastDirError = $"开发版已忽略外部目录「{configured}」，强制使用 {resolved}";
+            Log(LastDirError);
+        }
+        if (AppPaths.LockToInstallDir)
+        {
+            System.IO.Directory.CreateDirectory(resolved);
+            return resolved;
+        }
+
         if (!string.IsNullOrWhiteSpace(configured))
         {
             try
