@@ -223,16 +223,23 @@ public sealed class XHomeApi
             using var doc = await GraphqlAsync("UserByScreenName", pars, ct);
             var user = ParseUserGraphql(doc.RootElement);
             if (user is not null) return user;
-            throw new XHomeException("找不到该用户：" + target.Value, 404);
+
+            // **200 但没有用户数据 = X 明确告知这个账号不可用**（2026-10-28 实测）。
+            // 响应形如 data.user.result = { __typename:"UserUnavailable",
+            //   message:"User is suspended", reason:"Suspended" }。
+            //
+            // 以前这里抛 404，然后被下面的 catch(Exception) 降级到 REST v1.1 ——
+            // 但 **v1.1 用户端点已被 X 下线**，那条路必然返回 403，
+            // 最终用户看到「被 X 拒绝访问（403）：登录可能已失效」，完全指错方向。
+            // 现在把 X 给的原因直接翻译出来，并且**不再降级**。
+            var why = DescribeUserUnavailable(doc.RootElement);
+            throw new XHomeException(why ?? ("找不到该用户：" + target.Value), 0);
         }
-        catch (XHomeException e) when (e.StatusCode is 401 or 403)
+        catch (XHomeException)
         {
+            // 业务性失败（账号被封/不存在、限流等）原样抛，**不再降级到 v1.1**：
+            // v1.1 用户端点已被下线，降级只会把真实原因盖成 403。
             throw;
-        }
-        catch (Exception)
-        {
-            // GraphQL 这条路不可用 → REST v1.1（同样认 screen_name）
-            return await GetUserRestAsync("screen_name", target.Value, ct);
         }
     }
 
@@ -606,4 +613,36 @@ public sealed class XHomeApi
 
     private static string Truncate(string s, int n)
         => string.IsNullOrEmpty(s) ? "" : (s.Length <= n ? s : s[..n]);
+
+    /// <summary>
+    /// 把 GraphQL 的 <c>UserUnavailable</c> 翻译成给人看的中文。
+    /// 不是这类响应就返回 null（交给调用方按「找不到用户」处理）。
+    ///
+    /// X 的原始返回（2026-10-28 实测）：
+    /// <code>{"data":{"user":{"result":{"__typename":"UserUnavailable",
+    ///        "message":"User is suspended","reason":"Suspended"}}}}</code>
+    /// </summary>
+    private static string? DescribeUserUnavailable(JsonElement root)
+    {
+        try
+        {
+            if (!root.TryGetProperty("data", out var d)) return null;
+            if (!d.TryGetProperty("user", out var u)) return null;
+            if (!u.TryGetProperty("result", out var r)) return null;
+            var type = r.TryGetProperty("__typename", out var tn) ? tn.GetString() : null;
+            if (type != "UserUnavailable") return null;
+
+            var reason = r.TryGetProperty("reason", out var rs) ? rs.GetString() : null;
+            var message = r.TryGetProperty("message", out var ms) ? ms.GetString() : null;
+
+            return reason switch
+            {
+                "Suspended" => "该账号已被 X 封禁（suspended），无法获取作品",
+                "NotAuthorized" => "无权查看该账号（可能是私密账号或已被限制）",
+                "Unsafe" => "该账号被 X 标记为不安全内容，接口不返回数据",
+                _ => "该账号当前不可用" + (string.IsNullOrWhiteSpace(message) ? "" : "：" + message),
+            };
+        }
+        catch { return null; }
+    }
 }
