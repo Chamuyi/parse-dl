@@ -30,6 +30,7 @@ public sealed partial class BiliBatchPage : Page
     private BiliConfig Cfg => BiliConfig.Instance;
     private const string HomeUrl = "https://www.bilibili.com/";
 
+    private MainWindow? _host;
     private bool _webReady;
     private CancellationTokenSource? _cts;
     private int _targetCount;
@@ -45,6 +46,7 @@ public sealed partial class BiliBatchPage : Page
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
+        _host = e.Parameter as MainWindow;
         // **无人值守测试入口**（2026-10-29）：
         // UIA 读不到本页控件（WebView2 覆盖内容区，WinUI 控件没进 UIA 树），
         // 所以自动化测试改走这里 —— 用环境变量把目标喂进来，进页面就自动跑。
@@ -715,5 +717,31 @@ public sealed partial class BiliBatchPage : Page
         foreach (var part in s.Split((char)58))
             if (int.TryParse(part, out var v)) total = total * 60 + v;
         return total;
+    }
+
+    /// <summary>
+    /// 批量跑完后给一个「去下载管理」直达按钮（2026-10-29 补）。
+    ///
+    /// 原项目 bili_page / bili_batch_page 都有这个入口：跑完一批之后
+    /// 用户最想干的事就是看队列，让他自己去侧边栏点一遍是多余的。
+    /// </summary>
+    private void ShowGoDownloadsButton()
+    {
+        try
+        {
+            if (_host is null) return;
+            if (FindName("GoDownloadsButton") is Button) return;   // 已经有了，不重复加
+
+            var btn = new Button
+            {
+                Name = "GoDownloadsButton",
+                Content = "去下载管理",
+                MinWidth = 110,
+                Margin = new Thickness(0, 8, 0, 0),
+            };
+            btn.Click += (_, _) => _host?.Navigate("bili-downloads");
+            Root.Children.Add(btn);
+        }
+        catch { }
     }
 }

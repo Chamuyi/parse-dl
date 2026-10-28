@@ -60,6 +60,9 @@ public sealed partial class AboutPage : Page
         info.Children.Add(UiKit.InfoRow("版本", AppVersion(), selectable: true));
         info.Children.Add(UiKit.InfoRow("架构", "WinUI 3 · Windows App SDK", selectable: true));
         info.Children.Add(UiKit.InfoRow("许可", "MIT License", selectable: true));
+        info.Children.Add(UiKit.InfoRow("作者", "parse-dl 项目组", selectable: true));
+        info.Children.Add(UiKit.InfoRow("系统要求", "Windows 10 1809+ / Windows 11 · 需 Edge WebView2 运行时", selectable: true));
+        info.Children.Add(UiKit.InfoRow("日志目录", System.IO.Path.Combine(AppPaths.DataDir, "logs"), selectable: true));
         info.Children.Add(UiKit.InfoRow("数据目录", AppPaths.DataDir, selectable: true));
         left.Children.Add(info);
 
@@ -192,6 +195,7 @@ public sealed partial class AboutPage : Page
         selfTest.Children.Add(loginBtn2);
         selfTest.Children.Add(resultText);
         Root.Children.Add(UiKit.SectionCard("自测", selfTest, "离线，不联网"));
+        BuildLicenseAndCredits();
     }
 
     private static string AppVersion()
@@ -206,5 +210,66 @@ public sealed partial class AboutPage : Page
         {
             return "1.3";
         }
+    }
+
+    /// <summary>
+    /// 条款全文 + 开源组件（2026-10-29 补）。
+    ///
+    /// 原项目 about_page 有这两块，WinUI3 版之前只有版本/环境信息 ——
+    /// 用户在原版能看到的许可条款与依赖清单，这边看不到。
+    /// </summary>
+    private void BuildLicenseAndCredits()
+    {
+        var panel = new StackPanel { Spacing = 8 };
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "MIT License",
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Copyright (c) 2026 parse-dl",
+            FontSize = 12,
+            Opacity = 0.75,
+            IsTextSelectionEnabled = true,
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Permission is hereby granted, free of charge, to any person obtaining a copy of "
+                 + "this software and associated documentation files (the \"Software\"), to deal in the "
+                 + "Software without restriction, including without limitation the rights to use, copy, "
+                 + "modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, "
+                 + "and to permit persons to whom the Software is furnished to do so, subject to the "
+                 + "following conditions:\n\n"
+                 + "The above copyright notice and this permission notice shall be included in all "
+                 + "copies or substantial portions of the Software.\n\n"
+                 + "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, "
+                 + "INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A "
+                 + "PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT "
+                 + "HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF "
+                 + "CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE "
+                 + "OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.",
+            FontSize = 11.5,
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        });
+        Root.Children.Add(UiKit.SectionCard("条款全文", panel, "MIT License"));
+
+        var credits = new StackPanel { Spacing = 4 };
+        foreach (var (name, note) in new (string, string)[]
+        {
+            ("Windows App SDK (WinUI 3)", "MIT · 界面框架与窗口材质"),
+            ("aria2c", "GPL-2.0 · 下载引擎（独立进程）"),
+            ("ffmpeg", "LGPL/GPL · B 站 DASH 音视频合并"),
+            ("WebView2", "Microsoft · 抖音 / B 站内嵌浏览"),
+            ("CommunityToolkit", "MIT · 辅助控件"),
+        })
+        {
+            credits.Children.Add(UiKit.InfoRow(name, note));
+        }
+        Root.Children.Add(UiKit.SectionCard("使用的开源组件", credits, "各自的许可证见其仓库"));
     }
 }
