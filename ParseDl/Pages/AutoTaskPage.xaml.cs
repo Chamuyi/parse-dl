@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using ParseDl.Controls;
 using ParseDl.Services;
+using ParseDl.Services.X;
 using Windows.UI;
 
 namespace ParseDl.Pages;
@@ -46,6 +47,14 @@ public sealed partial class AutoTaskPage : Page
     private Button? _pauseBtn;
     private Button? _stopBtn;
     private Button? _clearBtn;
+
+    // ── 关注列表（用户 2026-10-28 需求）───────────────────────────
+    // 「可自选」= 既支持全选也支持只挑几个：拉取后逐个人勾选，再把选中的填进名单。
+    private TextBlock? _followingStatus;
+    private StackPanel? _followingListHost;
+    private Button? _fetchFollowingBtn;
+    private readonly List<XFollowingUser> _following = new();
+    private readonly HashSet<string> _followingChecked = new(StringComparer.Ordinal);
 
     /// <summary>下载配置区所有 chip（点一下只重刷这几处的配色，不重建整页）。</summary>
     private readonly List<(Button Btn, TextBlock Text, Func<bool> Selected)> _configChips = new();
@@ -116,6 +125,7 @@ public sealed partial class AutoTaskPage : Page
 
         var left = new StackPanel { Spacing = 14 };
         left.Children.Add(BuildSourceCard());
+        left.Children.Add(BuildFollowingCard());
         left.Children.Add(BuildPresetsCard());
         left.Children.Add(BuildConfigCard());
         left.Children.Add(BuildExecutionCard());
@@ -141,6 +151,7 @@ public sealed partial class AutoTaskPage : Page
 
         RefreshAlerts();
         RefreshSource();
+        RefreshFollowing();
         RefreshPresets();
         RefreshConfig();
         RefreshResults();
@@ -1085,4 +1096,166 @@ public sealed partial class AutoTaskPage : Page
     }
 
     private string _shownFileName = "";
+
+    // ── ③-1b 关注列表 ───────────────────────────────────────────
+
+    /// <summary>
+    /// 「按关注列表下载」卡片。用户 2026-10-28：「在 x 自动下载里面加一个，按照关注列表下载」。
+    ///
+    /// 交互按用户确认的「可自选」来做：
+    ///   ① 点「拉取关注列表」→ 分页拉完（关注几百人会有多页）；
+    ///   ② 列表里逐个人显示头像/昵称/@handle，**默认全勾上**，可以取消；
+    ///   ③ 点「把勾选的填入名单」→ 写进上面的名单输入框（走现有批量执行流程，不另造一套执行器）。
+    /// </summary>
+    private UIElement BuildFollowingCard()
+    {
+        var panel = new StackPanel { Spacing = 10 };
+
+        var row = new Grid { ColumnSpacing = 10 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        _followingStatus = new TextBlock
+        {
+            Text = "还没拉取。关注几百人时会翻很多页，稍等。",
+            FontSize = 12.5,
+            Opacity = 0.75,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(_followingStatus, 0);
+        row.Children.Add(_followingStatus);
+
+        _fetchFollowingBtn = new Button { Content = "拉取关注列表", MinWidth = 110 };
+        _fetchFollowingBtn.Click += async (_, _) => await FetchFollowingAsync();
+        Grid.SetColumn(_fetchFollowingBtn, 1);
+        row.Children.Add(_fetchFollowingBtn);
+
+        var fillBtn = new Button { Content = "把勾选的填入名单", MinWidth = 130 };
+        fillBtn.Click += (_, _) => FillFromFollowing();
+        Grid.SetColumn(fillBtn, 2);
+        row.Children.Add(fillBtn);
+
+        panel.Children.Add(row);
+
+        // 全选 / 全不选 / 只看有作品的
+        var ops = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var allBtn = new Button { Content = "全选", MinWidth = 70 };
+        allBtn.Click += (_, _) => { foreach (var u in _following) _followingChecked.Add(u.Id); RefreshFollowing(); };
+        ops.Children.Add(allBtn);
+        var noneBtn = new Button { Content = "全不选", MinWidth = 70 };
+        noneBtn.Click += (_, _) => { _followingChecked.Clear(); RefreshFollowing(); };
+        ops.Children.Add(noneBtn);
+        panel.Children.Add(ops);
+
+        _followingListHost = new StackPanel { Spacing = 2 };
+        panel.Children.Add(_followingListHost);
+
+        return UiKit.SectionCard("按关注列表下载", panel);
+    }
+
+    private void RefreshFollowing()
+    {
+        if (_followingListHost is null || _followingStatus is null) return;
+        _followingListHost.Children.Clear();
+
+        if (_following.Count == 0)
+        {
+            _followingStatus.Text = "还没拉取。关注几百人时会翻很多页，稍等。";
+            return;
+        }
+
+        _followingStatus.Text = "共 " + _following.Count + " 个关注，已勾选 " + _followingChecked.Count + " 个";
+
+        // 列表可能几百行：只渲染前 200 个，其余用文字说明，避免一次性堆控件卡住界面
+        const int showMax = 200;
+        foreach (var u in _following.Take(showMax))
+        {
+            var item = new CheckBox
+            {
+                IsChecked = _followingChecked.Contains(u.Id),
+                Content = u.Name + "  @" + u.ScreenName +
+                          (u.MediaCount > 0 ? "  （" + u.MediaCount + " 个作品）" : ""),
+                FontSize = 12.5,
+            };
+            item.Checked += (_, _) => _followingChecked.Add(u.Id);
+            item.Unchecked += (_, _) => _followingChecked.Remove(u.Id);
+            _followingListHost.Children.Add(item);
+        }
+        if (_following.Count > showMax)
+        {
+            _followingListHost.Children.Add(new TextBlock
+            {
+                Text = "（列表较长，只显示前 " + showMax + " 个；全选仍会作用于全部 " + _following.Count + " 个）",
+                FontSize = 11.5,
+                Opacity = 0.6,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+    }
+
+    private async Task FetchFollowingAsync()
+    {
+        if (_fetchFollowingBtn is null || _followingStatus is null) return;
+        _fetchFollowingBtn.IsEnabled = false;
+        _followingStatus.Text = "正在拉取…";
+        try
+        {
+            var api = new ParseDl.Services.X.XHomeApi(AppSettings.Instance.ForModule(ModuleKey).EffectiveCookie);
+            if (!api.HasLogin) { _followingStatus.Text = "未登录：请先在 X 下载设置里填入 Cookie"; return; }
+
+            // 关注列表接口要「当前登录账号的 user_id」。
+            // 设置里存的是 LastVerifiedUser（@handle），用它反查 user_id。
+            var sn = AppSettings.Instance.ForModule(ModuleKey).LastVerifiedUser;
+            if (string.IsNullOrWhiteSpace(sn))
+            {
+                _followingStatus.Text = "读不到当前账号，请先到「X 下载设置」点一次「保存并验证」";
+                return;
+            }
+            _followingStatus.Text = "正在确认当前账号…";
+            var me = (await api.GetUserAsync(sn)).Id;
+            if (string.IsNullOrWhiteSpace(me))
+            {
+                _followingStatus.Text = "确认当前账号失败（拿不到 user_id）";
+                return;
+            }
+
+            var following = new ParseDl.Services.X.XFollowingApi(api);
+            var users = await following.GetAllFollowingAsync(me, maxPages: 20,
+                onProgress: (page, count) => DispatcherQueue.TryEnqueue(() =>
+                    _followingStatus.Text = "正在拉取…第 " + page + " 页，已拿到 " + count + " 人"));
+
+            _following.Clear();
+            _followingChecked.Clear();
+            _following.AddRange(users);
+            // 默认全勾上（用户可再取消）
+            foreach (var u in users) _followingChecked.Add(u.Id);
+            RefreshFollowing();
+        }
+        catch (Exception ex)
+        {
+            _followingStatus.Text = "拉取失败：" + ex.Message;
+        }
+        finally
+        {
+            _fetchFollowingBtn.IsEnabled = true;
+        }
+    }
+
+    /// <summary>把勾选的关注用户填进名单输入框（走现有批量执行流程）。</summary>
+    private void FillFromFollowing()
+    {
+        var picked = _following.Where(u => _followingChecked.Contains(u.Id)).ToList();
+        if (picked.Count == 0) { SetNotice("没有勾选任何人", error: true); return; }
+
+        // 用 @handle 而不是裸数字 ID —— 名单解析器认得多，而且用户肉眼能核对
+        var text = string.Join(Environment.NewLine, picked.Select(u => "@" + u.ScreenName));
+        if (_rawBox is not null) _rawBox.Text = text;
+        _store.SetRawText(text);
+        _store.SetFileName("来自关注列表（" + picked.Count + " 人）");
+        SetNotice("已把 " + picked.Count + " 个关注用户填入名单，可以直接点开始");
+        RefreshSource();
+        RefreshButtons();
+    }
 }

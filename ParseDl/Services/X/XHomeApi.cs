@@ -403,6 +403,13 @@ public sealed class XHomeApi
         }
     }
 
+    /// <summary>
+    /// 对外的通用 GraphQL 入口（给 XFollowingApi 这类「另一个文件里的新操作」用）。
+    /// 复用同一套 queryId 解析 + 轮换重试 + Cookie，不重复实现 HTTP。
+    /// </summary>
+    public Task<JsonDocument> GraphqlRawAsync(
+        string operation, Dictionary<string, string> pars, CancellationToken ct = default)
+        => GraphqlAsync(operation, pars, ct);
     private static async Task<string> ResolveQueryIdAsync(string operation, CancellationToken ct)
     {
         if (QueryIdCache.TryGetValue(operation, out var hit) && !string.IsNullOrEmpty(hit)) return hit;

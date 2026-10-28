@@ -63,7 +63,9 @@ public partial class App : Application
                     + Environment.NewLine + "===== 抖音模块自测（含实况图）=====" + Environment.NewLine
                     + ParseDl.Services.Douyin.DouyinModuleSelfTest.Run()
                     + Environment.NewLine + "===== 动态照片合成自测 =====" + Environment.NewLine
-                    + ParseDl.Services.Douyin.MotionPhoto.SelfTest();
+                    + ParseDl.Services.Douyin.MotionPhoto.SelfTest()
+                    + Environment.NewLine + "===== X 关注列表解析自测 =====" + Environment.NewLine
+                    + ParseDl.Services.X.XFollowingApi.SelfTest();
                 var outPath = System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "selftest.txt");
                 System.IO.File.WriteAllText(outPath, report);
             }
