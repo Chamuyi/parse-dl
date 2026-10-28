@@ -95,6 +95,9 @@
                     Click="OnResumeAllClick" />
             <Button x:Name="ClearCompletedButton" Content="清除已完成" MinWidth="110"
                     Click="OnClearCompletedClick" />
+            <!-- 一键清空整个下载列表（用户 2026-10-28：「怎么不能一键清空下载列表」） -->
+            <Button x:Name="ClearAllButton" Content="清空列表" MinWidth="100"
+                    Click="OnClearAllClick" />
             <Button x:Name="OpenDirButton" Content="打开下载目录" MinWidth="120"
                     Click="OnOpenDirClick" />
             <Button x:Name="MergeButton" Content="合并音视频" MinWidth="110"
@@ -142,6 +145,23 @@
                         </Style>
                     </ListView.ItemContainerStyle>
                 </ListView>
+
+                <!--
+                    空态。**必须独立于 ListView**（2026-10-28 修闪退）：
+                    之前把 StackPanel 塞进 ItemsSource 当「空态行」，但 ItemTemplate
+                    声明了 x:DataType="services:DownloadItem"，x:Bind 会把它 cast 成
+                    DownloadItem → 抛 InvalidCastException → 整个程序闪退。
+                    空态就老老实实用一个 TextBlock 叠在列表位置。
+                -->
+                <StackPanel x:Name="EmptyHint" Grid.Row="1" Spacing="6"
+                            Visibility="Collapsed"
+                            VerticalAlignment="Top" Margin="0,24,0,24">
+                    <TextBlock x:Name="EmptyTitle" FontSize="15" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" />
+                    <TextBlock x:Name="EmptyDetail" FontSize="13" Opacity="0.6"
+                               TextWrapping="Wrap" TextAlignment="Center"
+                               HorizontalAlignment="Center" />
+                </StackPanel>
             </Grid>
         </Border>
 

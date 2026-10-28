@@ -468,4 +468,36 @@ public sealed class DownloadStore
 
         return Task.FromResult(gids.Count);
     }
+
+    /// <summary>
+    /// **批量移除**（2026-10-28）：本地列表先清空、界面立刻归零，
+    /// 再在后台逐条通知 aria2。
+    ///
+    /// 为什么不能逐条 await：aria2 的 RPC 在任务多时要排队，
+    /// 188 条逐个等会花几十秒，用户看到的是「点了清空只少了 1 个」。
+    /// </summary>
+    public Task<int> RemoveManyAsync(IReadOnlyList<DownloadItem> items)
+    {
+        if (items.Count == 0) return Task.FromResult(0);
+
+        var gids = items.Select(i => i.Gid).Where(g => !string.IsNullOrEmpty(g)).ToList();
+
+        // 本地立刻移除：界面马上归零
+        OnUi(() =>
+        {
+            foreach (var it in items) Items.Remove(it);
+        });
+        ScheduleSave();
+
+        // 后台通知 aria2 删任务，不阻塞界面
+        _ = Task.Run(async () =>
+        {
+            foreach (var g in gids)
+            {
+                try { await _engine.RemoveAsync(g); } catch { }
+            }
+        });
+
+        return Task.FromResult(items.Count);
+    }
 }

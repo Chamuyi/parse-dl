@@ -202,36 +202,19 @@ public sealed partial class DownloadsPage : Page
         var items = _feed.ItemsFor(_tab);
         if (items.Count == 0)
         {
-            TaskList.ItemsSource = new object[]
-            {
-                new StackPanel
-                {
-                    Margin = new Thickness(0, 24, 0, 24),
-                    Spacing = 6,
-                    Children =
-                    {
-                        new TextBlock
-                        {
-                            Text = $"「{_tab.Title}」里还没有任务",
-                            FontSize = 15,
-                            FontWeight = FontWeights.SemiBold,
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                        },
-                        new TextBlock
-                        {
-                            Text = _feed.EmptyHint,
-                            FontSize = 13,
-                            Opacity = 0.6,
-                            TextWrapping = TextWrapping.Wrap,
-                            TextAlignment = TextAlignment.Center,
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                        },
-                    },
-                },
-            };
+            // **空态用独立的 TextBlock，不往 ItemsSource 里塞控件**（2026-10-28 修闪退）：
+            // ItemTemplate 声明了 x:DataType=DownloadItem，塞别的对象会 x:Bind cast 失败
+            // → InvalidCastException → 整个程序闪退（crash.log 里抓到过）。
+            TaskList.Visibility = Visibility.Collapsed;
+            EmptyHint.Visibility = Visibility.Visible;
+            EmptyTitle.Text = "「" + _tab.Title + "」里还没有任务";
+            EmptyDetail.Text = _feed.EmptyHint;
+            _renderedSignature = "";
             return;
         }
 
+        TaskList.Visibility = Visibility.Visible;
+        EmptyHint.Visibility = Visibility.Collapsed;
         // **按「条目签名」判断要不要重设 ItemsSource**（2026-10-28 修闪烁）。
         //
         // 之前用 ReferenceEquals 比对 —— 但 ItemsFor() 每次都 ToList() 返回新列表，
@@ -650,5 +633,52 @@ public sealed partial class DownloadsPage : Page
         if (ItemOf(sender) is not { } it) return;
         await DownloadStore.Instance.RemoveAsync(it);
         await RefreshAsync();
+    }
+
+    // ── 一键清空整个下载列表（用户 2026-10-28）────────────────────
+
+    /// <summary>
+    /// 清空本模块的**全部**下载任务（不只是已完成的）。
+    ///
+    /// 与「清除已完成」的区别：那个只清终态（完成/错误/移除），
+    /// 这个连正在下载、等待中的一起清掉 —— 用户要的是「列表归零重来」。
+    /// 会先确认，避免误点。**只影响本模块**，不碰其它模块的队列。
+    /// </summary>
+    private async void OnClearAllClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var all = _feed.AllItems();
+            if (all.Count == 0) { await ShowInfoAsync("列表已经是空的"); return; }
+
+            var dlg = new ContentDialog
+            {
+                Title = "清空下载列表？",
+                Content = "将移除本模块的全部 " + all.Count + " 个任务（含正在下载的）。" + Environment.NewLine
+                          + "已下载到磁盘的文件不会被删除。",
+                PrimaryButtonText = "清空",
+                CloseButtonText = "取消",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = XamlRoot,
+            };
+            var r = await dlg.ShowAsync();
+            if (r != ContentDialogResult.Primary) return;
+
+            ClearAllButton.IsEnabled = false;
+            ToolbarHint.Text = "正在清空 " + all.Count + " 个任务…";
+
+            // 本地先清空 + 后台通知 aria2（逐条 await 会让 188 条清几分钟）
+            var ok = DownloadStore.Instance.RemoveManyAsync(all).Result;
+
+            await RefreshAsync();
+            ClearAllButton.IsEnabled = true;
+            await ShowInfoAsync("已清空 " + ok + " / " + all.Count + " 个任务");
+        }
+        catch (Exception ex)
+        {
+            // **不静默吞**：清空失败必须让人知道，否则看起来就是「按了没反应」。
+            ClearAllButton.IsEnabled = true;
+            try { await ShowInfoAsync("清空失败：" + ex.Message); } catch { }
+        }
     }
 }
