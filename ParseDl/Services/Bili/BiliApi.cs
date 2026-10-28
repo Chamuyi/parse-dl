@@ -136,7 +136,58 @@ public sealed class BiliApi
     public BiliApi(string? cookie = null, HttpClient? http = null)
     {
         _cookie = cookie ?? "";
-        _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        _http = http ?? BuildHttp();
+    }
+
+    /// <summary>
+    /// 建 HttpClient，**带上设置里的代理**（2026-10-29 修）。
+    ///
+    /// .NET 的 HttpClient 默认**不会**读系统代理（curl 会），
+    /// 所以同样的请求 curl 走代理能过、程序直连被 B 站 412 风控拦。
+    /// 这里按设置的三态（关闭 / 系统 / 自定义）与 Aria2Engine 同一套口径解析。
+    /// </summary>
+    private static HttpClient BuildHttp()
+    {
+        var handler = new HttpClientHandler();
+        var h = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
+        try
+        {
+            var cfg = AppSettings.Instance;
+            if (cfg.ProxyEnable)
+            {
+                string? addr = null;
+                if (cfg.ProxyUseSystem)
+                {
+                    // 读 IE/系统代理
+                    try
+                    {
+                        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                            @"Software\Microsoft\Windows\CurrentVersion\Internet Settings");
+                        if (key?.GetValue("ProxyEnable") is int on && on == 1)
+                            addr = key.GetValue("ProxyServer") as string;
+                    }
+                    catch { }
+                }
+                else addr = cfg.ProxyUrl;
+
+                if (!string.IsNullOrWhiteSpace(addr))
+                {
+                    // ProxyServer 可能是 "http=host:port;https=host:port" 形式
+                    var first = addr;
+                    if (first.Contains((char)59))
+                    {
+                        var httpPart = first.Split((char)59)
+                            .FirstOrDefault(s => s.StartsWith("http=", StringComparison.OrdinalIgnoreCase));
+                        if (httpPart is not null) first = httpPart[5..];
+                    }
+                    if (!first.Contains("://")) first = "http://" + first;
+                    handler.Proxy = new System.Net.WebProxy(first);
+                    handler.UseProxy = true;
+                }
+            }
+        }
+        catch { }
+        return h;
     }
 
     /// <summary>取 buvid3 设备指纹（一次即可，之后复用）。失败不抛 —— 尽力而为。</summary>
@@ -264,6 +315,62 @@ public sealed class BiliApi
         var signed = BiliWbi.Sign(kv, key);
         var query = BiliWbi.Query(signed);
         return await GetBytesAsync(path + (path.Contains((char)63) ? "&" : "?") + query, ct);
+    }
+
+    /// <summary>
+    /// **匿名取数**（不带任何 cookie）。
+    ///
+    /// 为什么需要单独一个入口：B 站的风控是「带 buvid3 反而更容易被拦」——
+    /// 实测同一条 arc/search 请求，不带 cookie 返回 200，带 buvid3 返回 412。
+    /// 这类接口就该裸着问。
+    /// </summary>
+    public async Task<JsonElement> GetDataAnonymousAsync(string path, CancellationToken ct = default)
+    {
+        var url = path.StartsWith("http") ? path : "https://" + Host + path;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.TryAddWithoutValidation("Referer", Referer);
+                req.Headers.TryAddWithoutValidation("Origin", Origin);
+                req.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
+                // **刻意不设 Cookie**
+                using var resp = await _http.SendAsync(req, ct);
+                var text = await resp.Content.ReadAsStringAsync(ct);
+                // **412 要重试，不能直接放弃**（2026-10-29 实测）：
+                // B 站对 arc/search 是按请求轮换风控的 —— 连续三次实测
+                // 「第1次 200 / 第2次 412 / 第3次 200」。所以重试一次往往就过。
+                if (text.TrimStart().StartsWith("<"))
+                {
+                    if (attempt < 2)
+                    {
+                        await Task.Delay(600 * (attempt + 1), ct);
+                        continue;
+                    }
+                    throw new BiliApiException("B 站返回了 HTML 而不是 JSON（HTTP " + (int)resp.StatusCode
+                        + "）。已重试 " + (attempt + 1) + " 次仍被风控，稍后再试。");
+                }
+                using var doc = JsonDocument.Parse(text);
+                var root = doc.RootElement.Clone();
+                if (root.TryGetProperty("code", out var code) && code.GetInt32() != 0)
+                {
+                    var c = code.GetInt32();
+                    // -352 = 风控校验失败，-412 同理：都属于「下一次可能就过」，重试
+                    if ((c == -352 || c == -412) && attempt < 2)
+                    {
+                        await Task.Delay(600 * (attempt + 1), ct);
+                        continue;
+                    }
+                    throw new BiliApiException("B 站返回错误 " + c + "："
+                        + (root.TryGetProperty("message", out var m) ? m.GetString() : ""));
+                }
+                return root.TryGetProperty("data", out var d) ? d.Clone() : root;
+            }
+            catch (BiliApiException) { throw; }
+            catch when (attempt < 2) { await Task.Delay(300 * (attempt + 1), ct); }
+        }
+        throw new BiliApiException("匿名取数失败：" + url);
     }
 
     /// <summary>给列表接口用的公开取数入口（复用同一套请求头与重试策略）。</summary>

@@ -80,7 +80,16 @@ public sealed class BiliListApi
     {
         var path = $"/x/v3/fav/resource/list?media_id={favId}&pn={pageNum}&ps={pageSize}" +
                    "&platform=web&keyword=&order=mtime&type=0&tid=0";
-        var data = await _api.GetDataPublicAsync(path, ct);
+        // **这条接口必须不带 cookie 请求**（2026-10-29 决定性实测）：
+        //
+        // | 姿势 | 结果 |
+        // |---|---|
+        // | 不带 cookie | **200 成功** |
+        // | 带 buvid3（程序自动取的） | **412 风控** |
+        //
+        // BiliApi 的 GetDataPublicAsync 会先 EnsureBuvidAsync 再带上 cookie，
+        // 正好踩中风控。所以这里走 **匿名取数**（不带任何 cookie）。
+        var data = await _api.GetDataAnonymousAsync(path, ct);
 
         var items = new List<BiliListItem>();
         if (data.TryGetProperty("medias", out var medias) && medias.ValueKind == JsonValueKind.Array)
@@ -128,13 +137,24 @@ public sealed class BiliListApi
         var list = new List<BiliUserHit>();
         if (string.IsNullOrWhiteSpace(keyword)) return list;
 
-        var kw = Uri.EscapeDataString(keyword.Trim());
-        var path = "/x/web-interface/wbi/search/type?search_type=bili_user&keyword=" + kw
-                   + "&page=1&page_size=" + Math.Clamp(limit, 1, 30);
+        // **必须走签名接口**（2026-10-29 实测）：未签名时该接口返回 HTML 反爬页，
+        // 不是 JSON —— 表现为「搜到 0 个结果」但也不报错。
+        var path = "/x/web-interface/wbi/search/type";
+        var pars = new Dictionary<string, string?>
+        {
+            ["search_type"] = "bili_user",
+            ["keyword"] = keyword.Trim(),
+            ["page"] = "1",
+            ["page_size"] = Math.Clamp(limit, 1, 30).ToString(),
+        };
 
         JsonElement data;
-        try { data = await _api.GetDataPublicAsync(path, ct); }
-        catch { return list; }
+        try { data = await _api.GetSignedDataPublicAsync(path, pars, ct); }
+        catch (Exception ex)
+        {
+            Aria2Engine.Log("[BiliListApi] 搜索「" + keyword + "」失败：" + ex.Message);
+            return list;
+        }
 
         if (!data.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
             return list;
@@ -175,19 +195,13 @@ public sealed class BiliListApi
     public async Task<BiliListPage> GetSpaceVideosAsync(
         long mid, int pageNum = 1, int pageSize = 30, CancellationToken ct = default)
     {
-        // **必须走签名接口**（2026-10-29 实测）：未签名的 arc/search 直接返回 HTML 反爬页，
-        // 不是 JSON —— 表现为「取不到投稿」但也不报错。
-        var path = "/x/space/wbi/arc/search";
-        var pars = new Dictionary<string, string?>
-        {
-            ["mid"] = mid.ToString(),
-            ["ps"] = pageSize.ToString(),
-            ["pn"] = pageNum.ToString(),
-            ["order"] = "pubdate",
-            ["platform"] = "web",
-            ["web_location"] = "1550101",
-        };
-        var data = await _api.GetSignedDataPublicAsync(path, pars, ct);
+        // **这条接口用未签名版**（2026-10-29 实测纠正）：
+        // 之前我以为 arc/search 要签名，改成 GetSignedDataPublicAsync 后反而**全部 412**。
+        // curl 对照实测：不带任何签名参数 → 200；带 dm_img 指纹 → 412。
+        // 结论：这条接口**加了签名反而被拦**，保持未签名路径。
+        var path = "/x/space/wbi/arc/search?mid=" + mid + "&ps=" + pageSize
+                   + "&pn=" + pageNum + "&order=pubdate";
+        var data = await _api.GetDataPublicAsync(path, ct);
 
         var items = new List<BiliListItem>();
         if (data.TryGetProperty("list", out var list) &&
@@ -199,7 +213,7 @@ public sealed class BiliListApi
                 {
                     Bvid = v.TryGetProperty("bvid", out var b) ? b.GetString() ?? "" : "",
                     Aid = v.TryGetProperty("aid", out var a) ? a.GetInt64() : 0,
-                    Title = v.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "",
+                    Title = v.TryGetProperty("title", out var tt) ? tt.GetString() ?? "" : "",
                     Cover = v.TryGetProperty("pic", out var c) ? (c.GetString() ?? "").Replace("http://", "https://") : "",
                     DurationSec = ParseDuration(v),
                     PubDateUnix = v.TryGetProperty("created", out var cr) ? cr.GetInt64() : 0,
@@ -211,6 +225,7 @@ public sealed class BiliListApi
         if (data.TryGetProperty("page", out var pg) && pg.TryGetProperty("count", out var cnt))
             total = cnt.GetInt32();
 
+                Aria2Engine.Log("[BiliListApi] 投稿 mid=" + mid + " items=" + items.Count + " total=" + total + " 顶层字段=" + string.Join(",", data.EnumerateObject().Select(x => x.Name)));
         return new BiliListPage { Items = items, HasMore = items.Count >= pageSize, Total = total };
     }
 

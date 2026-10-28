@@ -37,7 +37,11 @@ public static class BiliInPage
         // ① 发起请求：把结果写进 window[key]
         var startScript =
             "(function(){try{window[" + keyLit + "]=" + pendingLit + ";" +
-            "fetch(" + urlLit + ",{credentials:'include'})" +
+            // **必须带 Referer**（2026-10-29 修）：B 站的 space 系列接口会校验 Referer，
+            // 不带时直接回 code=-403「访问权限不足」。
+            // 浏览器里 fetch 不能直接设 Referer 头（被禁止的头），
+            // 但可以用 referrer 选项，浏览器会照它发。
+            "fetch(" + urlLit + ",{credentials:'include',referrer:'https://space.bilibili.com/'})" +
             ".then(function(r){return r.text();})" +
             ".then(function(t){window[" + keyLit + "]=t;})" +
             ".catch(function(e){window[" + keyLit + "]=" + errLit + "+String(e);});" +

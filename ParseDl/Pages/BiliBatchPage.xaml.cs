@@ -45,6 +45,18 @@ public sealed partial class BiliBatchPage : Page
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
+        // **无人值守测试入口**（2026-10-29）：
+        // UIA 读不到本页控件（WebView2 覆盖内容区，WinUI 控件没进 UIA 树），
+        // 所以自动化测试改走这里 —— 用环境变量把目标喂进来，进页面就自动跑。
+        // 只在设置了 PARSE_DL_BATCH_TARGETS 时触发，正常使用完全不受影响。
+        TryAutoRunForTest();
+        // 诊断日志（2026-10-29）：页面内容区在 UIA 里读不到，先确认是否走到了这里
+        try
+        {
+            Aria2Engine.Log("[BiliBatchPage] OnNavigatedTo，Root 子元素数=" + Root.Children.Count
+                            + "，TargetsBox=" + (TargetsBox is null ? "null" : "ok"));
+        }
+        catch (Exception ex) { Aria2Engine.Log("[BiliBatchPage] 诊断异常：" + ex.Message); }
         base.OnNavigatedTo(e);
         Cfg.Load();
         HeaderHost.Children.Add(UiKit.PageHeader("B 站批量下载", "主页 / 合集 / 系列 / 收藏夹", "\uE8EF"));
@@ -244,11 +256,22 @@ public sealed partial class BiliBatchPage : Page
 
                 try
                 {
-                    var works = await ExpandTargetAsync(api, listApi, raw, limit, ct);
-                    if (works.Count == 0)
+                    List<BiliListItem> works;
+                    try
+                    {
+                        works = await ExpandTargetAsync(api, listApi, raw, limit, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        Aria2Engine.Log("[BiliBatch] 展开「" + raw + "」异常：" + ex.GetType().Name + " " + ex.Message);
+                        works = new List<BiliListItem>();
+                    }
+
+                    Aria2Engine.Log("[BiliBatch] 目标「" + raw + "」展开中…");                    if (works.Count == 0)
                     {
                         failTargets++;
                         failures.Add(raw + "：没解析出任何稿件");
+                        Aria2Engine.Log("[BiliBatch] 目标「" + raw + "」解析为空");
                         continue;
                     }
 
@@ -326,10 +349,12 @@ public sealed partial class BiliBatchPage : Page
             try
             {
                 var hits = await listApi.SearchUserAsync(target, 5, ct);
+                Aria2Engine.Log("[BiliBatch] 搜索名字「" + target + "」…");
                 var best = hits.FirstOrDefault();
                 if (best is not null && best.Mid > 0)
                 {
                     refInfo = new BiliRef { Mid = best.Mid };
+                    Aria2Engine.Log("[BiliBatch] 名字「" + target + "」→ mid=" + best.Mid);
                     SetHint("按名字「" + target + "」找到 UP 主：" + best.Name
                             + "（mid=" + best.Mid + "，粉丝 " + best.Fans + "）");
                 }
@@ -357,9 +382,19 @@ public sealed partial class BiliBatchPage : Page
         }
         if (refInfo.Mid is long mid3)
         {
+            // **优先走页内 fetch**（2026-10-29）：
+            // B 站对 arc/search 是按请求轮换风控的（连续三次实测 200/412/200），
+            // 裸 HttpClient 很容易撞上 412 / -352。
+            // 页内 fetch 由浏览器自己带全套 Cookie 与指纹，跟原项目同一条路，最稳。
+            var pageList = await TryFetchSpaceViaPageAsync(mid3, pageSize, ct);
+            if (pageList is not null && pageList.Count > 0)
+                return Trim(pageList, limit);
+
+            Aria2Engine.Log("[BiliBatch] 页内 fetch 未拿到，回落接口 mid=" + mid3);
             var p = await listApi.GetSpaceVideosAsync(mid3, 1, pageSize, ct);
             return Trim(p.Items, limit);
         }
+
         if (refInfo.IsVideo)
         {
             // 单条稿件：当作只有这一条
@@ -479,5 +514,172 @@ public sealed partial class BiliBatchPage : Page
             if (FindName("HintText") is TextBlock tb) tb.Text = text;
         }
         catch { }
+    }
+
+    /// <summary>
+    /// 无人值守测试入口：环境变量 PARSE_DL_BATCH_TARGETS 里放目标（换行分隔），
+    /// PARSE_DL_BATCH_LIMIT 放每个目标取几条。进页面自动填进输入框并开跑。
+    ///
+    /// 为什么要有它：本页 WebView2 覆盖内容区，UIA 读不到 TargetsBox，
+    /// 外部脚本没法输入。走环境变量是唯一稳定的自动化路径。
+    /// **不设环境变量时完全不触发**，正常使用不受影响。
+    /// </summary>
+    private void TryAutoRunForTest()
+    {
+        try
+        {
+            var raw = Environment.GetEnvironmentVariable("PARSE_DL_BATCH_TARGETS");
+            if (string.IsNullOrWhiteSpace(raw)) return;
+
+            var limitStr = Environment.GetEnvironmentVariable("PARSE_DL_BATCH_LIMIT");
+            if (int.TryParse(limitStr, out var lim) && lim > 0)
+            {
+                // 选对应的「每个目标取几条」
+                for (var k = 0; k < Limits.Length; k++)
+                {
+                    if (Limits[k].Value == lim) { LimitBox.SelectedIndex = k; break; }
+                }
+            }
+
+            TargetsBox.Text = raw.Replace("\\n", Environment.NewLine);
+            // **必须手动重算 _targetCount**：TextChanged 是异步派发的，            // 这里紧接着读 _targetCount 会还是 0，于是 StartBatchAsync 直接 return            // （第一版就踩了这个：日志显示「已跑完」但 1 秒结束、什么都没下）。            UpdateTargetCount();
+            Aria2Engine.Log("[BiliBatchPage] 自动测试：已注入 " + TargetsBox.Text.Length + " 字符目标");
+
+            // 等一帧让 TextChanged 先跑完，再开跑
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                // **等 WebView 真正就绪**（2026-10-29）：
+                // 页内 fetch 要浏览器已停在 B 站域名下，否则回 -403 访问权限不足。
+                // 首次进页面时 Web 还在加载首页，800ms 根本不够。
+                for (var wait = 0; wait < 30; wait++)
+                {
+                    await Task.Delay(1000);
+                    try
+                    {
+                        if (_webReady && Web.CoreWebView2 is not null)
+                        {
+                            var cur = Web.CoreWebView2.Source ?? "";
+                            if (cur.Contains("bilibili.com") && !cur.EndsWith("bilibili.com/"))
+                                break;
+                        }
+                    }
+                    catch { }
+                }
+                Aria2Engine.Log("[BiliBatchPage] WebView 就绪检查完成");
+                try
+                {
+                    await StartBatchAsync();
+                    Aria2Engine.Log("[BiliBatchPage] 自动测试：批量已跑完");
+                }
+                catch (Exception ex)
+                {
+                    Aria2Engine.Log("[BiliBatchPage] 自动测试异常：" + ex.Message);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            Aria2Engine.Log("[BiliBatchPage] 自动测试入口异常：" + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// **用页内 fetch 取 UP 主投稿**（对齐原项目 BiliInPage 那条路）。
+    ///
+    /// 为什么不用裸 HttpClient：B 站对 arc/search 是按请求轮换风控的 ——
+    /// 连续三次实测「200 / 412 / 200」，裸请求很容易撞上 412 或 -352。
+    /// 页内 fetch 由浏览器自己带全套 Cookie、指纹与 Referer，最接近真人。
+    ///
+    /// 返回 null 表示「这条路走不通」（WebView 没就绪 / 解析失败），
+    /// 调用方据此回落到接口路径。
+    /// </summary>
+    private async Task<List<BiliListItem>?> TryFetchSpaceViaPageAsync(
+        long mid, int pageSize, CancellationToken ct)
+    {
+        if (!_webReady || Web.CoreWebView2 is null) return null;
+
+        try
+        {
+            // **先导航到该 UP 的空间页**（2026-10-29）：
+            // 直接在首页上下文里 fetch api.bilibili.com 会回 -403 访问权限不足 ——
+            // 因为 Referer/Origin 是 www.bilibili.com，而该接口要求来自 space 域。
+            // 先跳过去，等加载完再在同源上下文里 fetch。
+            var spaceUrl = "https://space.bilibili.com/" + mid + "/video";
+            try
+            {
+                var nav = new TaskCompletionSource<bool>();
+                void OnNav(object? s, Microsoft.Web.WebView2.Core.CoreWebView2NavigationCompletedEventArgs e)
+                {
+                    try { Web.CoreWebView2.NavigationCompleted -= OnNav; } catch { }
+                    nav.TrySetResult(true);
+                }
+                Web.CoreWebView2.NavigationCompleted += OnNav;
+                Web.CoreWebView2.Navigate(spaceUrl);
+                await Task.WhenAny(nav.Task, Task.Delay(15000, ct));
+                await Task.Delay(2500, ct);   // 让页面把 cookie / 指纹都建立起来
+            }
+            catch (Exception ex)
+            {
+                Aria2Engine.Log("[BiliBatch] 导航到空间页失败：" + ex.Message);
+            }
+
+            var url = "https://api.bilibili.com/x/space/wbi/arc/search"
+                      + "?mid=" + mid + "&ps=" + pageSize + "&pn=1&order=pubdate";
+            var body = await BiliInPage.FetchAsync(Web.CoreWebView2, url, 20000, ct);
+            if (string.IsNullOrWhiteSpace(body) || body.TrimStart().StartsWith("<"))
+            {
+                Aria2Engine.Log("[BiliBatch] 页内 fetch 返回非 JSON（长度 " + (body?.Length ?? 0) + "）");
+                return null;
+            }
+
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("code", out var code) || code.GetInt32() != 0)
+            {
+                var msg = root.TryGetProperty("message", out var m) ? m.GetString() : "";
+                Aria2Engine.Log("[BiliBatch] 页内 fetch 业务错误 code="
+                                + (root.TryGetProperty("code", out var c2) ? c2.GetInt32() : 0) + " " + msg);
+                return null;
+            }
+            if (!root.TryGetProperty("data", out var data)) return null;
+
+            var list = new List<BiliListItem>();
+            if (data.TryGetProperty("list", out var lst) &&
+                lst.TryGetProperty("vlist", out var vlist) &&
+                vlist.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var v in vlist.EnumerateArray())
+                {
+                    list.Add(new BiliListItem
+                    {
+                        Bvid = v.TryGetProperty("bvid", out var b) ? b.GetString() ?? "" : "",
+                        Aid = v.TryGetProperty("aid", out var a) ? a.GetInt64() : 0,
+                        Title = v.TryGetProperty("title", out var tt) ? tt.GetString() ?? "" : "",
+                        Cover = v.TryGetProperty("pic", out var cc)
+                                ? (cc.GetString() ?? "").Replace("http://", "https://") : "",
+                        DurationSec = ParseDurationStr(v),
+                        PubDateUnix = v.TryGetProperty("created", out var cr) ? cr.GetInt64() : 0,
+                    });
+                }
+            }
+            Aria2Engine.Log("[BiliBatch] 页内 fetch 成功 mid=" + mid + " 拿到 " + list.Count + " 条");
+            return list;
+        }
+        catch (Exception ex)
+        {
+            Aria2Engine.Log("[BiliBatch] 页内 fetch 异常：" + ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>列表接口的时长是 "12:34" 字符串，转秒。</summary>
+    private static int ParseDurationStr(System.Text.Json.JsonElement e)
+    {
+        if (!e.TryGetProperty("length", out var len)) return 0;
+        var s = len.GetString() ?? "";
+        var total = 0;
+        foreach (var part in s.Split((char)58))
+            if (int.TryParse(part, out var v)) total = total * 60 + v;
+        return total;
     }
 }
