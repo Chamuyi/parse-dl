@@ -1,3 +1,4 @@
+using ParseDl.Services.X;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -33,6 +34,9 @@ public sealed partial class DownloadsPage : Page
 
     /// <summary>上一次渲染历史台账的内容签名（一样就跳过重建，避免闪烁）。</summary>
     private string _historySignature = "";
+
+    /// <summary>上一次渲染「任务创建中」区块的内容签名。</summary>
+    private string _creationSignature = "";
 
     private DownloadFeed _feed = DownloadFeed.X;
     private DownloadTabSpec _tab = DownloadFeed.DefaultTabs[0];
@@ -190,6 +194,7 @@ public sealed partial class DownloadsPage : Page
         UpdateTabCounts();
         RenderTasks();
         RenderHistory();
+        RenderCreation();
         RenderToolbarState();
     }
 
@@ -680,5 +685,162 @@ public sealed partial class DownloadsPage : Page
             ClearAllButton.IsEnabled = true;
             try { await ShowInfoAsync("清空失败：" + ex.Message); } catch { }
         }
+    }
+
+    // ── 「任务创建中」区块（对齐原项目 CreationTasks）─────────────────
+
+    /// <summary>
+    /// 渲染顶部「共 N 个任务创建中」区块。
+    ///
+    /// 只有 X 侧会显示（原项目注释：那是 X 的翻页抓取概念），
+    /// 抖音/B 站走的是另一套入队路径，没有这个区块。
+    /// 内容签名没变就不重建，避免闪。
+    /// </summary>
+    private void RenderCreation()
+    {
+        var tasks = CreationTaskStore.Instance.Tasks;
+
+        // 只有 X 模块显示
+        if (!_feed.ModuleKeys.Contains("X 媒体") || tasks.Count == 0)
+        {
+            if (CreationCard.Visibility == Visibility.Visible)
+                CreationCard.Visibility = Visibility.Collapsed;
+            _creationSignature = "";
+            return;
+        }
+
+        var sig = tasks.Count + "|" + string.Join((char)44,
+            tasks.Select(x => x.Id + ":" + x.CompleteCount + ":" + x.SkipCount + ":" + (x.Error ?? "")));
+        if (sig == _creationSignature) return;
+        _creationSignature = sig;
+
+        CreationCard.Visibility = Visibility.Visible;
+        var active = CreationTaskStore.Instance.ActiveTask;
+        CreationTitle.Text = active is not null
+            ? "共 " + tasks.Count + " 个任务创建中"
+            : "共 " + tasks.Count + " 个任务排队中";
+
+        CreationList.Children.Clear();
+        foreach (var task in tasks)
+        {
+            var g = new Grid { ColumnSpacing = 8 };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var name = new TextBlock
+            {
+                Text = task.DisplayName + (string.IsNullOrEmpty(task.ScreenName) ? "" : "  @" + task.ScreenName),
+                FontSize = 12.5,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            g.Children.Add(name);
+
+            var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+            right.Children.Add(new TextBlock
+            {
+                Text = task.Error is not null ? ("失败：" + task.Error) : task.ProgressText,
+                FontSize = 11.5,
+                Opacity = task.Error is not null ? 0.9 : 0.6,
+                Foreground = task.Error is not null
+                    ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"]
+                    : null,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+
+            var cancel = new Button { Content = "取消", MinWidth = 52, Padding = new Thickness(8, 2, 8, 2) };
+            var id = task.Id;
+            cancel.Click += (_, _) => CreationTaskStore.Instance.Cancel(id);
+            right.Children.Add(cancel);
+
+            Grid.SetColumn(right, 1);
+            g.Children.Add(right);
+
+            CreationList.Children.Add(g);
+        }
+    }
+
+    private void OnCancelCreationClick(object sender, RoutedEventArgs e)
+    {
+        var active = CreationTaskStore.Instance.ActiveTask;
+        if (active is not null) CreationTaskStore.Instance.Cancel(active.Id);
+        RenderCreation();
+    }
+
+    // ── 缩略图加载（用户 2026-10-28 要求「加预览图」）────────────────
+
+    private static readonly System.Net.Http.HttpClient _thumbHttp = CreateThumbHttp();
+
+    private static System.Net.Http.HttpClient CreateThumbHttp()
+    {
+        var h = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        // X 的图床需要 UA，否则 403。
+        h.DefaultRequestHeaders.UserAgent.ParseAdd(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36");
+        return h;
+    }
+
+    /// <summary>缩略图缓存（URL → BitmapImage），避免滚动时重复下载。</summary>
+    private static readonly Dictionary<string, Microsoft.UI.Xaml.Media.Imaging.BitmapImage> _thumbCache = new();
+
+    /// <summary>
+    /// 给一行的预览图控件塞图片。
+    ///
+    /// 列表是虚拟化的，容器会复用，所以每次生成容器时都要**重新按当前 DataContext 取图**。
+    /// 图片下载失败静默忽略（占位灰底还在，不能因为一张图挂掉整个列表）。
+    /// </summary>
+    private static async void LoadThumb(Image image, string url)
+    {
+        if (string.IsNullOrEmpty(url)) return;
+
+        if (_thumbCache.TryGetValue(url, out var cached))
+        {
+            image.Source = cached;
+            return;
+        }
+
+        try
+        {
+            var bytes = await _thumbHttp.GetByteArrayAsync(url);
+            if (bytes.Length == 0) return;
+
+            var bmp = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
+            using var ms = new MemoryStream(bytes);
+            var ras = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+            using (var w = new Windows.Storage.Streams.DataWriter(ras.GetOutputStreamAt(0)))
+            {
+                w.WriteBytes(bytes);
+                await w.StoreAsync();
+                await w.FlushAsync();
+                w.DetachStream();
+            }
+            ras.Seek(0);
+            await bmp.SetSourceAsync(ras);
+
+            _thumbCache[url] = bmp;
+            image.Source = bmp;
+        }
+        catch { }
+    }
+
+    /// <summary>列表容器生成/复用时，按当前 DataContext 重新加载预览图。</summary>
+    private void OnTaskContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        if (args.Item is not DownloadItem item) return;
+        var thumb = FindThumb(args.ItemContainer.ContentTemplateRoot as DependencyObject);
+        if (thumb is not null) LoadThumb(thumb, item.ThumbUrl);
+    }
+
+    private static Image? FindThumb(DependencyObject? root)
+    {
+        if (root is null) return null;
+        if (root is Image img) return img;
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var found = FindThumb(VisualTreeHelper.GetChild(root, i));
+            if (found is not null) return found;
+        }
+        return null;
     }
 }

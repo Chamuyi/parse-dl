@@ -16,31 +16,62 @@
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="6" Padding="12,10">
-                <Grid ColumnSpacing="8">
+                <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0" Spacing="4">
+                    <!-- ① 预览图：视频显示首帧，图片显示自身。占位灰底，加载失败不崩。 -->
+                    <Border Grid.Column="0" Width="96" Height="64" CornerRadius="4"
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                        <Grid>
+                            <Image x:Name="Thumb" Stretch="UniformToFill" />
+                        </Grid>
+                    </Border>
+
+                    <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                        <!-- 文件名 -->
                         <TextBlock Text="{x:Bind FileName}" FontSize="13"
                                    TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                        <TextBlock Text="{x:Bind StatusLine}" FontSize="11.5" Opacity="0.62"
-                                   TextWrapping="Wrap" />
+
+                        <!-- 保存位置（用户要求） -->
+                        <TextBlock Text="{x:Bind DirText}" FontSize="11" Opacity="0.55"
+                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+
+                        <!-- 进度条 -->
+                        <ProgressBar Value="{x:Bind Percent}" Maximum="100" Height="4"
+                                     Margin="0,2,0,2" />
+
+                        <!-- 状态 + 错误 -->
+                        <TextBlock Text="{x:Bind StatusLine}" FontSize="11" Opacity="0.62"
+                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                     </StackPanel>
 
-                    <Button Grid.Column="1" Content="{x:Bind PauseLabel}" MinWidth="60"
-                            Click="OnRowPauseClick" />
-                    <Button Grid.Column="2" Content="重试" MinWidth="60"
-                            Visibility="{x:Bind RetryVisibility}"
-                            Click="OnRowRetryClick" />
-                    <Button Grid.Column="3" Content="打开文件夹" MinWidth="90"
-                            Click="OnRowOpenFolderClick" />
-                    <Button Grid.Column="4" Content="移除" MinWidth="60"
-                            Click="OnRowRemoveClick" />
+                    <!-- ② 大小 / 速度（用户要求加速度） -->
+                    <StackPanel Grid.Column="2" Spacing="2" MinWidth="120"
+                                VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <TextBlock Text="{x:Bind SizeText}" FontSize="12"
+                                   HorizontalAlignment="Right" />
+                        <TextBlock Text="{x:Bind SpeedText}" FontSize="11" Opacity="0.6"
+                                   HorizontalAlignment="Right" />
+                    </StackPanel>
+
+                    <!-- ③ 按钮组 -->
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6"
+                                VerticalAlignment="Center">
+                        <Button Content="{x:Bind PauseLabel}" MinWidth="60"
+                                Click="OnRowPauseClick" />
+                        <Button Content="重试" MinWidth="60"
+                                Visibility="{x:Bind RetryVisibility}"
+                                Click="OnRowRetryClick" />
+                        <Button Content="打开文件夹" MinWidth="90"
+                                Click="OnRowOpenFolderClick" />
+                        <Button Content="移除" MinWidth="60"
+                                Click="OnRowRemoveClick" />
+                    </StackPanel>
                 </Grid>
             </Border>
         </DataTemplate>
@@ -114,6 +145,7 @@
             <Grid RowSpacing="10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
@@ -125,13 +157,45 @@
                 </Border>
 
                 <!--
+                    「任务创建中」区块（对齐原项目 CreationTasks 组件）：
+                    主页点「开始下载」后**立刻**在这里出现，边翻页边入队，
+                    用户能实时看到「已发送 / 已跳过」在涨。只有 X 侧会显示。
+                -->
+                <Border x:Name="CreationCard" Grid.Row="1" Visibility="Collapsed"
+                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                        CornerRadius="6" Padding="12,10">
+                    <StackPanel Spacing="6">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ProgressRing IsActive="True" Width="16" Height="16"
+                                          VerticalAlignment="Center"
+                                          Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                <TextBlock x:Name="CreationTitle" FontSize="13" FontWeight="SemiBold"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="正在读取该用户的媒体并加入下载队列" FontSize="11.5"
+                                           Opacity="0.55" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <Button Grid.Column="2" Content="取消" MinWidth="56" Padding="8,2"
+                                    Click="OnCancelCreationClick" />
+                        </Grid>
+                        <StackPanel x:Name="CreationList" Spacing="4" />
+                    </StackPanel>
+                </Border>
+
+                <!--
                     **必须用 ListView 而不是 StackPanel**（2026-10-28 修卡死）：
                     StackPanel 会把每一行都真实构建出来。378 个任务 × 每 0.8 秒清空重建一次
                     = 每次上万次控件创建，界面直接「未响应」。
                     原项目 Flutter 版用的是 ListView.separated（本身虚拟化、只构建可见项），
                     WinUI 的对应物就是 ListView —— 它自带 ItemsStackPanel 虚拟化。
                 -->
-                <ListView x:Name="TaskList" Grid.Row="1"
+                <ListView x:Name="TaskList" Grid.Row="2"
+                          ContainerContentChanging="OnTaskContainerContentChanging"
                           SelectionMode="None" IsItemClickEnabled="False"
                           Padding="0" BorderThickness="0"
                           Background="Transparent"
@@ -153,7 +217,7 @@
                     DownloadItem → 抛 InvalidCastException → 整个程序闪退。
                     空态就老老实实用一个 TextBlock 叠在列表位置。
                 -->
-                <StackPanel x:Name="EmptyHint" Grid.Row="1" Spacing="6"
+                <StackPanel x:Name="EmptyHint" Grid.Row="2" Spacing="6"
                             Visibility="Collapsed"
                             VerticalAlignment="Top" Margin="0,24,0,24">
                     <TextBlock x:Name="EmptyTitle" FontSize="15" FontWeight="SemiBold"

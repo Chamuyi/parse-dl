@@ -43,6 +43,45 @@ public sealed class DownloadItem
 
     // ── XAML 绑定用（x:Bind 只认属性，不认方法）──────────────────
 
+    /// <summary>保存位置（目录 + 文件名），列表里给用户看清存到哪了。</summary>
+    public string DirText
+    {
+        get
+        {
+            var d = string.IsNullOrEmpty(Dir) ? "（默认目录）" : Dir;
+            return d;
+        }
+    }
+
+    /// <summary>进度百分比（0~100），给 ProgressBar 用。</summary>
+    public double Percent => TotalBytes <= 0 ? 0 : Math.Min(100.0, CompletedBytes * 100.0 / TotalBytes);
+
+    /// <summary>大小文本：已完成/总量。</summary>
+    public string SizeText
+    {
+        get
+        {
+            if (TotalBytes > 0) return FormatSize(CompletedBytes) + " / " + FormatSize(TotalBytes);
+            if (CompletedBytes > 0) return FormatSize(CompletedBytes);
+            return "";
+        }
+    }
+
+
+    /// <summary>预览图 URL（图片用自身；视频用缩略图；没有则空）。</summary>
+    public string ThumbUrl
+    {
+        get
+        {
+            // 图片直链本身就是预览图；视频用 aria2 拿不到首帧，留空走占位。
+            if (string.IsNullOrEmpty(Url)) return "";
+            var u = Url.ToLowerInvariant();
+            if (u.Contains(".jpg") || u.Contains(".jpeg") || u.Contains(".png") || u.Contains(".webp"))
+                return Url;
+            return "";
+        }
+    }
+
     /// <summary>状态 + 错误 + 进度合成一行（列表第二行）。</summary>
     public string StatusLine
     {

@@ -812,24 +812,45 @@ public sealed partial class XHomePage : Page
 
     // ── 入队下载 ──────────────────────────────────────────────
 
-    private async Task StartDownloadAsync()
+        private Task StartDownloadAsync()
     {
-        if (_busy) return;
-        if (_store.User is null) return;
+        if (_busy) return Task.CompletedTask;
+        if (_store.User is null) return Task.CompletedTask;
 
-        // **未勾选 = 下载全部，先把所有页拉完再下**（用户 2026-10-28：
-        // 「下载是要全部下载，不是下载已经加载出来的几个」）。
+        // **对齐原项目：点「开始下载」只登记一个「创建中」任务就立刻返回**，
+        // 真正的翻页 + 逐条入队在后台串行执行（CreationTaskStore）。
         //
-        // 之前只下「当前已加载」的那几页：实测 @veth_bel 实际有 68 个媒体，
-        // 但界面只加载了 27 个（用户滚到哪就加载到哪），于是只下 27 个。
-        // X 的时间线是游标分页的，把「滚到哪」当成「一共多少作品」是错的。
+        // 之前的做法是「当场把所有页拉完再入队」—— 用户要的 189 个媒体要翻 10 页、
+        // 每页等 1~2 秒，界面看起来就像卡死了。原版不是这么做的：
+        // 它立刻返回，下载管理页顶部出现「共 N 个任务创建中」，
+        // 边翻边推，用户能实时看到「已发送 / 已跳过」在涨。
         //
-        // 勾选了作品时**不拉全量** —— 用户明确只想下勾中的那几个。
-        if (_store.SelectedCount == 0 && _store.HasMore)
+        // **例外**：用户勾选了具体作品时，只下勾中的那几个 —— 那些已经在本地列表里，
+        // 不需要翻页，直接走原来的即时入队路径。
+        if (_store.SelectedCount == 0)
         {
-            await LoadAllPagesAsync();
+            var u = _store.User;
+            if (string.IsNullOrEmpty(u.Id))
+            {
+                SetStatus("接口没返回用户 ID，无法创建下载任务");
+                return Task.CompletedTask;
+            }
+
+            CreationTaskStore.Instance.Create(
+                u.Id, u.ScreenName ?? "", u.DisplayName ?? "", u.Avatar ?? "");
+
+            SetStatus("已提交到下载管理，正在后台抓取「" + (u.DisplayName ?? u.ScreenName)
+                      + "」的全部媒体（进度见下载管理页顶部）");
+            return Task.CompletedTask;
         }
 
+        // ── 勾选了作品：只下勾中的，直接即时入队 ──────────────────────
+        return EnqueueSelectedAsync();
+    }
+
+    /// <summary>只入队「勾选中的」作品（不翻页，用户明确只要这几个）。</summary>
+    private async Task EnqueueSelectedAsync()
+    {
         var posts = _store.PostsForDownload();
         if (posts.Count == 0)
         {
@@ -838,32 +859,15 @@ public sealed partial class XHomePage : Page
         }
 
         var settings = AppSettings.Instance.ForModule("x");
-        var dir = string.IsNullOrWhiteSpace(settings.SaveDir) ? null : settings.SaveDir;
         var skip = settings.SkipDownloaded;
-        var downloaded = skip ? BuildDownloadedSet() : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // 下载配置与自动执行页共用同一份（X 下载设置里的媒体类型 / 时间范围）：
-        // 原项目两页读的是同一个 HomepageStore.filter，这里读同一份模块设置。
         var types = (settings.MediaTypeFilter ?? "")
             .Split((char)44, StringSplitOptions.RemoveEmptyEntries)
             .Select(x => x.Trim().ToLowerInvariant())
             .ToHashSet();
-        DateTime? dateFrom = null, dateTo = null;
-        if (settings.TimeRangeEnabled)
-        {
-            if (DateTime.TryParse(settings.DateFrom, out var df)) dateFrom = df.Date;
-            if (DateTime.TryParse(settings.DateTo, out var dt)) dateTo = dt.Date.AddDays(1).AddSeconds(-1);
-        }
-        var filtered = 0;
 
         _busy = true;
         UpdateDownloadCard();
-
-        var totalMedia = posts.Sum(p => p.Media.Count);
-        var seen = 0;
-        var queued = 0;
-        var skipped = 0;
-        var failed = 0;
+        var queued = 0; var skipped = 0; var failed = 0;
 
         try
         {
@@ -872,65 +876,31 @@ public sealed partial class XHomePage : Page
                 for (var i = 0; i < post.Media.Count; i++)
                 {
                     var m = post.Media[i];
-                    seen++;
+                    if (types.Count > 0 && !types.Contains(m.Type)) continue;
 
-                    if (types.Count > 0 && !types.Contains(m.Type)) { filtered++; continue; }
-                    if (dateFrom is not null && post.CreatedAt is not null && post.CreatedAt.Value < dateFrom) { filtered++; continue; }
-                    if (dateTo is not null && post.CreatedAt is not null && post.CreatedAt.Value > dateTo) { filtered++; continue; }
+                    var name = XNaming.NameFor(post, i);
+                    var dir = XNaming.DirFor(post, i);
+                    name = FileNameTemplate.ClampForFullPath(dir ?? "", name);
 
-                    if (skip && downloaded.Contains(m.Url))
-                    {
-                        skipped++;
-                        continue;
-                    }
-
-                    SetStatus("正在入队 " + seen + " / " + totalMedia + " …");
-                    var name = XNameFor(post, i);
-                    // **每条媒体单独算目录**（2026-10-28）：文件夹模板里的变量是逐作品的，
-                    // 不同作品要落到不同子文件夹，不能在循环外算一次。
-                    var mediaDir = XDirFor(post, i);
-
-                    // 全路径 260 保护（对齐原项目 clampNameForFullPath）：
-                    // 模板能拼出很长的中文名，配上多级目录就越过 Windows MAX_PATH，
-                    // 表现不是报错而是「文件建不出来 / 删不掉」。
-                    name = FileNameTemplate.ClampForFullPath(mediaDir ?? "", name);
-
-                    // 同名跳过（对齐原项目 sameFileSkip）：目标文件已存在就不重复入队。
-                    if (skip && !string.IsNullOrEmpty(mediaDir))
+                    if (skip && !string.IsNullOrEmpty(dir))
                     {
                         try
                         {
-                            if (System.IO.File.Exists(System.IO.Path.Combine(mediaDir, name)))
-                            {
-                                skipped++;
-                                continue;
-                            }
+                            if (System.IO.File.Exists(System.IO.Path.Combine(dir, name)))
+                            { skipped++; continue; }
                         }
                         catch { }
                     }
 
-                    // 对齐原版：AddAsync 只加任务不刷新，状态交给轮询。
-                    var (ok, msg) = await DownloadStore.Instance.AddAsync(m.Url, ModuleName, mediaDir, name);
-                    if (ok)
-                    {
-                        queued++;
-                        downloaded.Add(m.Url);
-                    }
-                    else
-                    {
-                        failed++;
-                        if (failed <= 3) SetStatus("入队失败：" + msg);
-                    }
+                    var (ok, _) = await DownloadStore.Instance.AddAsync(m.Url, ModuleName, dir, name);
+                    if (ok) queued++; else failed++;
                 }
             }
-
-            DownloadStore.Instance.Flush();   // 批量收尾：立即落盘（不等防抖）
+            DownloadStore.Instance.Flush();
 
             var parts = new List<string> { "已入队 " + queued + " 个" };
-            if (skipped > 0) parts.Add("跳过 " + skipped + " 个已下载");
-            if (filtered > 0) parts.Add("过滤 " + filtered + " 个（按下载配置）");
+            if (skipped > 0) parts.Add("跳过 " + skipped + " 个已存在");
             if (failed > 0) parts.Add(failed + " 个失败");
-            parts.Add("可到「下载管理」查看进度");
             SetStatus(string.Join("，", parts));
         }
         catch (Exception ex)
@@ -942,9 +912,7 @@ public sealed partial class XHomePage : Page
             _busy = false;
             UpdateDownloadCard();
         }
-    }
-
-    /// <summary>
+    }    /// <summary>
     /// 已下载集合：下载台账里「已完成」的 URL + 当前队列里所有 URL。
     /// 台账是唯一能跨重启记住「下过什么」的地方（aria2 会话重启就空）。
     /// </summary>
@@ -967,82 +935,6 @@ public sealed partial class XHomePage : Page
     }
 
     /// <summary>按「X 下载设置 → 文件名模板」生成文件名（默认模板已含 %EXT%）。</summary>
-    /// <summary>
-    /// 按「X 下载设置 → 文件夹模板」算出这条媒体的目标目录。
-    ///
-    /// **2026-10-28 修**：用户问「x下载设置不是有文件夹吗，怎么我点击下载没有自动创建文件夹」。
-    /// 原来 StartDownloadAsync 里只写了 dir = settings.SaveDir ——
-    /// **完全没用 DirTemplate**，所以模板里写什么都不建子文件夹，全平铺在保存目录下。
-    /// 现在与文件名共用同一个 TemplateContext 与模板引擎，产出不会漂移。
-    /// 目录模板为空时退回保存目录（不建子文件夹）。
-    /// </summary>
-    private static string? XDirFor(XPost p, int mediaIndex)
-    {
-        var settings = AppSettings.Instance.ForModule("x");
-        var baseDir = string.IsNullOrWhiteSpace(settings.SaveDir) ? null : settings.SaveDir;
-
-        var tpl = settings.DirTemplate ?? "";
-        if (string.IsNullOrWhiteSpace(tpl)) return baseDir;
-
-        var sub = FileNameTemplate.Resolve(tpl, BuildContext(p, mediaIndex)).Trim();
-        if (sub.Length == 0) return baseDir;
-
-        // 模板里的斜杠表示多级目录（如 %USER_SCREEN_NAME%/%POST_TIME,d=1%）
-        var parts = sub.Split(new[] { (char)47, (char)92 }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(s => FileNameTemplate.UnicodeFilenamify(s).Trim())
-            .Where(s => s.Length > 0)
-            .ToArray();
-        if (parts.Length == 0) return baseDir;
-
-        var root = baseDir ?? Aria2Engine.DefaultDir();
-        var full = System.IO.Path.Combine(new[] { root }.Concat(parts).ToArray());
-        try { System.IO.Directory.CreateDirectory(full); } catch { return baseDir; }
-        return full;
-    }
-
-    /// <summary>模板上下文（文件名与目录共用，保证两处变量取值完全一致）。</summary>
-    private static TemplateContext BuildContext(XPost p, int mediaIndex)
-    {
-        var m = p.Media[mediaIndex];
-        var ext = m.Type is "video" or "gif" ? "mp4" : "jpg";
-        return new TemplateContext
-        {
-            PostId = p.Id,
-            PostTime = p.CreatedAt,
-            UserId = p.UserId,
-            UserName = p.UserName,
-            UserScreenName = p.UserScreenName,
-            MediaId = m.Id,
-            MediaIndex = mediaIndex + 1,
-            MediaCount = p.Media.Count,
-            MediaWidth = m.Width,
-            MediaHeight = m.Height,
-            MediaType = m.Type,
-            Extension = ext,
-            Content = p.Text,
-        };
-    }
-
-    private static string XNameFor(XPost p, int mediaIndex)
-    {
-        var m = p.Media[mediaIndex];
-        var settings = AppSettings.Instance.ForModule("x");
-        var tpl = string.IsNullOrWhiteSpace(settings.FileNameTemplate)
-            ? "%POST_TIME% %USER_SCREEN_NAME% %POST_ID%-%MEDIA_INDEX%%EXT%"
-            : settings.FileNameTemplate;
-
-        var ext = m.Type is "video" or "gif" ? "mp4" : "jpg";
-        var ctx = BuildContext(p, mediaIndex);
-
-        var name = FileNameTemplate.UnicodeFilenamify(FileNameTemplate.Resolve(tpl, ctx));
-        if (string.IsNullOrWhiteSpace(name)) name = p.Id + "_" + (mediaIndex + 1);
-
-        // 模板里带 %EXT% 时名字已含扩展名，别再加一遍（会变成 x.jpg.jpg）
-        var dotExt = "." + ext;
-        if (!name.EndsWith(dotExt, StringComparison.OrdinalIgnoreCase)) name += dotExt;
-        return name;
-    }
-
     // ── 自测 ─────────────────────────────────────────────────
 
     private async Task RunSelfTestAsync()
