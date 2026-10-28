@@ -28,6 +28,9 @@ namespace ParseDl.Pages;
 /// </summary>
 public sealed partial class DownloadsPage : Page
 {
+    /// <summary>本进程是否已尝试恢复过队列（避免反复进出页面重复提交任务）。</summary>
+    private static bool _queueRestored;
+
     private DownloadFeed _feed = DownloadFeed.X;
     private DownloadTabSpec _tab = DownloadFeed.DefaultTabs[0];
 
@@ -67,9 +70,24 @@ public sealed partial class DownloadsPage : Page
     private async System.Threading.Tasks.Task EnsureEngineThenRefreshAsync()
     {
         try { await DownloadStore.Instance.EnsureEngineAsync(); } catch { }
+
+        // **恢复上次没跑完的队列**（2026-10-28 用户要求：「任务队列重启不能清空」）。
+        // 只在进程内第一次进本页时恢复一次 —— 反复进出页面不该重复提交任务。
+        // 恢复的是 URL / 文件名 / 目录（**不含 GID**），aria2 靠 --continue 续传已有部分。
+        if (!_queueRestored)
+        {
+            _queueRestored = true;
+            try
+            {
+                var n = await DownloadStore.Instance.RestoreQueueAsync();
+                if (n > 0 && ToolbarHint is not null)
+                    ToolbarHint.Text = "已恢复上次未完成的 " + n + " 个任务";
+            }
+            catch { }
+        }
+
         await RefreshAsync();
     }
-
     /// <summary>每 0.8 秒刷一次（与 Flutter 版同频；下载中/速度要肉眼可见地在动）。</summary>
     private void StartTimer()
     {

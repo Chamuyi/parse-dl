@@ -106,7 +106,9 @@ public sealed class DownloadStore
 
         var item = new DownloadItem { Gid = gid, Url = url, Module = module };
         if (!string.IsNullOrEmpty(outName)) item.FileName = outName;
+        item.Dir = dir ?? Aria2Engine.DefaultDir();
         OnUi(() => Items.Insert(0, item));
+        SaveQueue();          // ← 入队即落盘，重启后可恢复
         await RefreshOnceAsync();
         return (true, "已加入队列");
     }
@@ -122,6 +124,7 @@ public sealed class DownloadStore
     {
         try { await _engine.RemoveAsync(item.Gid); } catch { }
         OnUi(() => Items.Remove(item));
+        SaveQueue();
     }
 
     public async Task ClearCompletedAsync()
@@ -211,5 +214,104 @@ public sealed class DownloadStore
     {
         if (_ui is null || _ui.HasThreadAccess) { action(); return; }
         _ui.TryEnqueue(() => action());
+    }
+
+    // ── 队列持久化（2026-10-28 加）────────────────────────────────
+    //
+    // **为什么必须做**：用户反馈「任务队列重启不能清空啊」。
+    // 之前队列只存在内存里，GID 是 aria2 运行时生成的，进程一重启全丢 ——
+    // 68 个任务下到一半重启，剩下的全部消失，只能重新加载重新下。
+    //
+    // **做法**：把「能重建任务所需的最小信息」落盘（URL / 文件名 / 目录 / 模块），
+    // 启动时重新提交给 aria2。**不能存 GID** —— 那是运行时句柄，重启必失效。
+    // aria2 启动参数带 --continue=true，所以已下完的部分会续传，不会从头再来。
+    //
+    // 只存「未完成」的任务：已完成的没必要占队列（历史另有 download_ledger 台账）。
+
+    private static string QueueFile =>
+        System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "download_queue.json");
+
+    /// <summary>把当前未完成任务写盘。失败不抛（落盘失败不该影响下载）。</summary>
+    private void SaveQueue()
+    {
+        try
+        {
+            var snapshot = Items
+                .Where(i => i.Status is not (AriaStatus.Complete or AriaStatus.Removed))
+                .Select(i => new QueueEntry
+                {
+                    Url = i.Url,
+                    FileName = i.FileName,
+                    Dir = i.Dir,
+                    Module = i.Module,
+                    CreatedAt = i.CreatedAt,
+                    CompletedBytes = i.CompletedBytes,
+                    TotalBytes = i.TotalBytes,
+                })
+                .ToList();
+            var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true });
+            System.IO.File.WriteAllText(QueueFile, json);
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 启动时恢复队列：把上次没跑完的任务重新提交给 aria2。
+    /// 返回恢复条数（0 表示没有待恢复任务）。
+    /// </summary>
+    public async Task<int> RestoreQueueAsync()
+    {
+        List<QueueEntry>? saved = null;
+        try
+        {
+            if (!System.IO.File.Exists(QueueFile)) return 0;
+            var json = System.IO.File.ReadAllText(QueueFile);
+            saved = JsonSerializer.Deserialize<List<QueueEntry>>(json);
+        }
+        catch { return 0; }
+        if (saved is null || saved.Count == 0) return 0;
+
+        if (!await EnsureEngineAsync()) return 0;
+
+        var restored = 0;
+        foreach (var e in saved)
+        {
+            if (string.IsNullOrWhiteSpace(e.Url)) continue;
+            try
+            {
+                var gid = await _engine.AddUriAsync(e.Url, e.Dir,
+                    string.IsNullOrWhiteSpace(e.FileName) ? null : e.FileName);
+                if (string.IsNullOrEmpty(gid)) continue;
+
+                var item = new DownloadItem
+                {
+                    Gid = gid,
+                    Url = e.Url,
+                    Module = e.Module,
+                    Dir = e.Dir ?? "",
+                    FileName = e.FileName ?? "",
+                    CreatedAt = e.CreatedAt,
+                };
+                OnUi(() => Items.Add(item));
+                restored++;
+            }
+            catch { }
+        }
+
+        await RefreshOnceAsync();
+        SaveQueue();   // 重写一遍，把提交失败的那些剔掉
+        return restored;
+    }
+
+    /// <summary>落盘用的最小字段集（**不含 GID** —— 运行时句柄重启即失效）。</summary>
+    private sealed class QueueEntry
+    {
+        public string Url { get; set; } = "";
+        public string? FileName { get; set; }
+        public string? Dir { get; set; }
+        public string Module { get; set; } = "";
+        public DateTime CreatedAt { get; set; }
+        public long CompletedBytes { get; set; }
+        public long TotalBytes { get; set; }
     }
 }
