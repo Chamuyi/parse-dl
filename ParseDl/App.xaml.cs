@@ -1,3 +1,4 @@
+using ParseDl.Services.Bili;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
@@ -156,7 +157,7 @@ public partial class App : Application
                     + ParseDl.Services.Douyin.DouyinRoster.SelfTest()
                     + Environment.NewLine + "===== 抖音模块自测（含实况图）=====" + Environment.NewLine
                     + ParseDl.Services.Douyin.DouyinModuleSelfTest.Run()
-                    + ParseDl.Services.Bili.BiliDanmakuAss.SelfTest()
+                    + ParseDl.Services.Bili.BiliDanmakuAss.SelfTest() + BiliDanmakuService.ProtoSelfTest()
                     + ParseDl.Services.Bili.BiliSubtitleService.SelfTest()
                     + Environment.NewLine + "===== 动态照片合成自测 =====" + Environment.NewLine
                     + ParseDl.Services.Douyin.MotionPhoto.SelfTest()

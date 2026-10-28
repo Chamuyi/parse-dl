@@ -202,4 +202,73 @@ public static class BiliDanmakuService
 
     private static string Escape(string s)
         => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+
+    /// <summary>
+    /// **protobuf 解码器自测**（2026-10-29 补）。
+    ///
+    /// 这个解码器之前没有任何自测 —— 而它是手写的（为了不引 protobuf 运行时），
+    /// 字段号、varint、wire type 全靠人肉对照 B 站定义，错一个就静默解出空列表。
+    /// 这里手工拼一段**结构合法的 DmSegMobileReply 字节**，验证解出来的字段值。
+    /// </summary>
+    public static string ProtoSelfTest()
+    {
+        var sb = new StringBuilder();
+        var pass = 0; var fail = 0;
+        void Check(string name, bool ok, string detail = "")
+        {
+            if (ok) { pass++; sb.AppendLine("  PASS  " + name); }
+            else { fail++; sb.AppendLine("  FAIL  " + name + "  " + detail); }
+        }
+
+        // ── 造一个 DanmakuElem ──────────────────────────────
+        // 字段号按 B 站 DanmakuElem 的真实定义（和 ParseElem 里的判断必须一致）：
+        //   2=progressMs(varint)  3=mode(varint)  4=fontSize(varint)
+        //   5=color(varint)       7=content(string)   ← content 是 7，不是 8
+        static void Varint(List<byte> buf, ulong v)
+        {
+            while (v >= 0x80) { buf.Add((byte)((v & 0x7F) | 0x80)); v >>= 7; }
+            buf.Add((byte)v);
+        }
+        static void Tag(List<byte> buf, int field, int wire) => Varint(buf, (ulong)((field << 3) | wire));
+
+        var elem = new List<byte>();
+        Tag(elem, 2, 0); Varint(elem, 12345);           // progressMs = 12345
+        Tag(elem, 3, 0); Varint(elem, 1);               // mode = 1（滚动）
+        Tag(elem, 4, 0); Varint(elem, 25);              // fontSize = 25
+        Tag(elem, 5, 0); Varint(elem, 16777215);        // color = 0xFFFFFF（field 5）
+        var text = Encoding.UTF8.GetBytes("测试弹幕");
+        Tag(elem, 7, 2); Varint(elem, (ulong)text.Length);   // content（field 7）
+        elem.AddRange(text);
+
+        // ── 包成 DmSegMobileReply：repeated DanmakuElem elems = 1 ──
+        var msg = new List<byte>();
+        Tag(msg, 1, 2); Varint(msg, (ulong)elem.Count);
+        msg.AddRange(elem);
+
+        var list = ParseSegment(msg.ToArray());
+        Check("解出 1 条弹幕", list.Count == 1, "实际 " + list.Count);
+        if (list.Count == 1)
+        {
+            var d = list[0];
+            Check("TimeSec 正确（12345ms → 12.345s）", Math.Abs(d.TimeSec - 12.345) < 0.01, d.TimeSec.ToString());
+            Check("mode 正确", d.Mode == 1, d.Mode.ToString());
+            Check("fontSize 正确", d.FontSize == 25, d.FontSize.ToString());
+            Check("color 正确", d.Color == 16777215, d.Color.ToString());
+            Check("content 正确（UTF-8 中文）", d.Text == "测试弹幕", d.Text);
+        }
+
+        // ── 负控制：空数据不能崩，也不能瞎返回 ──
+        Check("空数组返回空列表", ParseSegment(Array.Empty<byte>()).Count == 0);
+        Check("截断数据不崩", ParseSegment(new byte[] { 0x0A, 0x7F }).Count == 0);
+        Check("垃圾数据不崩", ParseSegment(new byte[] { 0xFF, 0xFF, 0xFF }).Count == 0);
+
+        // ── 多条目 ──
+        var two = new List<byte>();
+        Tag(two, 1, 2); Varint(two, (ulong)elem.Count); two.AddRange(elem);
+        Tag(two, 1, 2); Varint(two, (ulong)elem.Count); two.AddRange(elem);
+        Check("两条能都解出来", ParseSegment(two.ToArray()).Count == 2);
+
+        sb.AppendLine("  合计: 通过 " + pass + ", 失败 " + fail);
+        return sb.ToString();
+    }
 }
