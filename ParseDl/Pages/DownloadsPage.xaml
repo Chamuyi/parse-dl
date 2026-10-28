@@ -3,7 +3,48 @@
     x:Class="ParseDl.Pages.DownloadsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:services="using:ParseDl.Services"
     Background="Transparent">
+
+    <Page.Resources>
+        <!--
+            任务行模板。**必须有模板**：直接塞对象进 ListView 而不给 ItemTemplate，
+            界面会把 ToString() 打出来（实测显示成 "ParseDl.Services.DownloadItem"）。
+            行内按钮的点击在 code-behind 里按 DataContext 取回 DownloadItem。
+        -->
+        <DataTemplate x:Key="TaskRowTemplate" x:DataType="services:DownloadItem">
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="6" Padding="12,10">
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Spacing="4">
+                        <TextBlock Text="{x:Bind FileName}" FontSize="13"
+                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                        <TextBlock Text="{x:Bind StatusLine}" FontSize="11.5" Opacity="0.62"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <Button Grid.Column="1" Content="{x:Bind PauseLabel}" MinWidth="60"
+                            Click="OnRowPauseClick" />
+                    <Button Grid.Column="2" Content="重试" MinWidth="60"
+                            Visibility="{x:Bind RetryVisibility}"
+                            Click="OnRowRetryClick" />
+                    <Button Grid.Column="3" Content="打开文件夹" MinWidth="90"
+                            Click="OnRowOpenFolderClick" />
+                    <Button Grid.Column="4" Content="移除" MinWidth="60"
+                            Click="OnRowRemoveClick" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </Page.Resources>
 
     <!--
         下载管理（X / 抖音 / B 站 三模式共用本页，形态由 DownloadFeed 决定）。
@@ -80,9 +121,27 @@
                                Text="aria2 未启动，请稍候或重启应用" />
                 </Border>
 
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                    <StackPanel x:Name="TaskPanel" Spacing="8" />
-                </ScrollViewer>
+                <!--
+                    **必须用 ListView 而不是 StackPanel**（2026-10-28 修卡死）：
+                    StackPanel 会把每一行都真实构建出来。378 个任务 × 每 0.8 秒清空重建一次
+                    = 每次上万次控件创建，界面直接「未响应」。
+                    原项目 Flutter 版用的是 ListView.separated（本身虚拟化、只构建可见项），
+                    WinUI 的对应物就是 ListView —— 它自带 ItemsStackPanel 虚拟化。
+                -->
+                <ListView x:Name="TaskList" Grid.Row="1"
+                          SelectionMode="None" IsItemClickEnabled="False"
+                          Padding="0" BorderThickness="0"
+                          Background="Transparent"
+                          ItemTemplate="{StaticResource TaskRowTemplate}">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Margin" Value="0,0,0,8" />
+                            <Setter Property="MinHeight" Value="0" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                </ListView>
             </Grid>
         </Border>
 

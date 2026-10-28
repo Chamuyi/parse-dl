@@ -889,6 +889,7 @@ public sealed partial class XHomePage : Page
                     // **每条媒体单独算目录**（2026-10-28）：文件夹模板里的变量是逐作品的，
                     // 不同作品要落到不同子文件夹，不能在循环外算一次。
                     var mediaDir = XDirFor(post, i);
+                    // 对齐原版：AddAsync 只加任务不刷新，状态交给轮询。
                     var (ok, msg) = await DownloadStore.Instance.AddAsync(m.Url, ModuleName, mediaDir, name);
                     if (ok)
                     {
@@ -902,6 +903,8 @@ public sealed partial class XHomePage : Page
                     }
                 }
             }
+
+            DownloadStore.Instance.Flush();   // 批量收尾：立即落盘（不等防抖）
 
             var parts = new List<string> { "已入队 " + queued + " 个" };
             if (skipped > 0) parts.Add("跳过 " + skipped + " 个已下载");

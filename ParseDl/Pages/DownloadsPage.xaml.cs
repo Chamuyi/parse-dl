@@ -192,41 +192,77 @@ public sealed partial class DownloadsPage : Page
 
     private void RenderTasks()
     {
-        TaskPanel.Children.Clear();
-
+        // **用 ItemsSource 而不是逐个 Add 控件**（2026-10-28 修卡死）：
+        // ListView 只会为「可见的那几行」生成容器（虚拟化），
+        // 378 个任务也只构建十几个。原来往 StackPanel 里逐个 Add，
+        // 再配合每 0.8 秒一次的清空重建，界面直接「未响应」。
         var items = _feed.ItemsFor(_tab);
         if (items.Count == 0)
         {
-            TaskPanel.Children.Add(new StackPanel
+            TaskList.ItemsSource = new object[]
             {
-                Margin = new Thickness(0, 24, 0, 24),
-                Spacing = 6,
-                Children =
+                new StackPanel
                 {
-                    new TextBlock
+                    Margin = new Thickness(0, 24, 0, 24),
+                    Spacing = 6,
+                    Children =
                     {
-                        Text = $"「{_tab.Title}」里还没有任务",
-                        FontSize = 15,
-                        FontWeight = FontWeights.SemiBold,
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                    },
-                    new TextBlock
-                    {
-                        Text = _feed.EmptyHint,
-                        FontSize = 13,
-                        Opacity = 0.6,
-                        TextWrapping = TextWrapping.Wrap,
-                        TextAlignment = TextAlignment.Center,
-                        HorizontalAlignment = HorizontalAlignment.Center,
+                        new TextBlock
+                        {
+                            Text = $"「{_tab.Title}」里还没有任务",
+                            FontSize = 15,
+                            FontWeight = FontWeights.SemiBold,
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                        },
+                        new TextBlock
+                        {
+                            Text = _feed.EmptyHint,
+                            FontSize = 13,
+                            Opacity = 0.6,
+                            TextWrapping = TextWrapping.Wrap,
+                            TextAlignment = TextAlignment.Center,
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                        },
                     },
                 },
-            });
+            };
             return;
         }
 
-        foreach (var it in items) TaskPanel.Children.Add(BuildRow(it));
+        // 内容没变就不重设 ItemsSource —— 重设会让 ListView 整表重建，
+        // 每 0.8 秒一次仍然很浪费。行内文字由 UpdateRowTexts 就地更新。
+        if (!ReferenceEquals(_renderedSource, items))
+        {
+            _renderedSource = items;
+            TaskList.ItemsSource = items;
+        }
+        else
+        {
+            UpdateRowTexts();
+        }
     }
 
+    /// <summary>上一次塞进 ListView 的集合引用（用于判断要不要整表重设）。</summary>
+    private object? _renderedSource;
+
+    /// <summary>就地更新已生成行的文字（不重建控件）。</summary>
+    private void UpdateRowTexts()
+    {
+        // ListView 的容器是按需生成的，已生成的才需要刷新；
+        // 未生成的会在滚动进来时用最新数据构建。
+        for (var i = 0; i < TaskList.Items.Count; i++)
+        {
+            if (TaskList.ContainerFromIndex(i) is not ListViewItem lvi) continue;
+            if (lvi.Content is not Grid g || g.Children.Count == 0) continue;
+            if (g.Children[0] is not StackPanel sp || sp.Children.Count < 2) continue;
+            if (TaskList.Items[i] is not DownloadItem it) continue;
+
+            if (sp.Children[0] is TextBlock nameTb) nameTb.Text = it.FileName;
+            if (sp.Children[1] is TextBlock statusTb)
+                statusTb.Text = it.StatusText + (string.IsNullOrEmpty(it.Error) ? "" : " — " + it.Error)
+                                + (string.IsNullOrEmpty(it.ProgressText) ? "" : "　" + it.ProgressText);
+        }
+    }
     /// <summary>工具栏可用性 + 提示语。计数与操作都只覆盖本模块（不能把别家的队列停掉）。</summary>
     private void RenderToolbarState()
     {
@@ -309,26 +345,41 @@ public sealed partial class DownloadsPage : Page
 
     private async void OnPauseAllClick(object sender, RoutedEventArgs e)
     {
-        var targets = _feed.AllItems().Where(i => i.Status is AriaStatus.Active or AriaStatus.Waiting).ToList();
-        var failed = 0;
-        foreach (var it in targets)
-        {
-            try { await DownloadStore.Instance.PauseAsync(it); }
-            catch { failed++; }
-        }
-        // 批量操作必须给回执，不能静默 —— 全失败时界面看着跟「按了没生效」一样。
-        if (failed > 0) await ShowInfoAsync($"{failed} 个任务暂停失败");
+        var targets = _feed.AllItems()
+            .Where(i => i.Status is AriaStatus.Active or AriaStatus.Waiting).ToList();
+        if (targets.Count == 0) { await ShowInfoAsync("没有正在进行的任务"); return; }
+
+        // **先给回执再动手**（2026-10-28）：几百个任务逐个 RPC 要几秒到十几秒，
+        // 原来期间界面毫无反应，用户只会觉得「按了没用」。
+        ToolbarHint.Text = $"正在暂停 {targets.Count} 个任务…";
+        PauseAllButton.IsEnabled = false;
+
+        // **一次 RPC 批量暂停**（2026-10-28）：原来逐条调，几百个任务时
+        // aria2 串行处理要排队几分钟，界面看着就像「按了没用」。
+        var ok = DownloadStore.Instance.PauseManyAsync(targets, toPaused: true);
+
         await RefreshAsync();
+        PauseAllButton.IsEnabled = true;
+
+        await ShowInfoAsync($"已暂停 {ok.Result} 个任务（后台正在通知下载器）");
+
+
     }
 
     private async void OnResumeAllClick(object sender, RoutedEventArgs e)
     {
         var targets = _feed.AllItems().Where(i => i.Status == AriaStatus.Paused).ToList();
-        foreach (var it in targets)
-        {
-            try { await DownloadStore.Instance.PauseAsync(it); } catch { }
-        }
+        if (targets.Count == 0) { await ShowInfoAsync("没有已暂停的任务"); return; }
+
+        ToolbarHint.Text = $"正在继续 {targets.Count} 个任务…";
+        ResumeAllButton.IsEnabled = false;
+
+        // 与暂停同一条路：本地先翻状态，RPC 后台跑（不阻塞界面）。
+        var n = DownloadStore.Instance.PauseManyAsync(targets, toPaused: false).Result;
+
         await RefreshAsync();
+        ResumeAllButton.IsEnabled = true;
+        await ShowInfoAsync($"已继续 {n} 个任务（后台正在通知下载器）");
     }
 
     private async void OnClearCompletedClick(object sender, RoutedEventArgs e)
@@ -349,14 +400,23 @@ public sealed partial class DownloadsPage : Page
     {
         // 「错误」Tab 里没有可重试的东西时按钮是禁用的，这里只防一手。
         var failed = _feed.AllItems().Where(i => i.Status == AriaStatus.Error).ToList();
+        if (failed.Count == 0) { await ShowInfoAsync("没有可重试的任务"); return; }
+
+        ToolbarHint.Text = $"正在重试 {failed.Count} 个任务…";
+        RetryAllButton.IsEnabled = false;
         var ok = 0;
         foreach (var it in failed)
         {
             if (await RetryAsync(it)) ok++;
         }
-        // 结局只汇总成一条提示：几十条失败各弹一个对话框等于没有提示。
-        await ShowInfoAsync($"已重新排队 {ok} / {failed.Count} 个任务");
+
         await RefreshAsync();
+        RetryAllButton.IsEnabled = true;
+
+        // 结局汇总成一条提示：几十条失败各弹一个对话框等于没有提示。
+        await ShowInfoAsync(ok == failed.Count
+            ? $"已重新排队 {ok} 个任务"
+            : $"已重新排队 {ok} / {failed.Count} 个任务（其余仍失败，可能是源已失效）");
     }
 
     /// <summary>
@@ -533,5 +593,38 @@ public sealed partial class DownloadsPage : Page
             Padding = new Thickness(12, 10, 12, 10),
             Child = grid,
         };
+    }
+
+    // ── 行内按钮（DataTemplate 里的，靠 DataContext 找回 DownloadItem）──────
+
+    private static DownloadItem? ItemOf(object sender)
+        => (sender as Microsoft.UI.Xaml.FrameworkElement)?.DataContext as DownloadItem;
+
+    private async void OnRowPauseClick(object sender, RoutedEventArgs e)
+    {
+        if (ItemOf(sender) is not { } it) return;
+        try { await DownloadStore.Instance.PauseAsync(it); } catch { }
+        await RefreshAsync();
+    }
+
+    private async void OnRowRetryClick(object sender, RoutedEventArgs e)
+    {
+        if (ItemOf(sender) is not { } it) return;
+        var ok = await RetryAsync(it);
+        if (!ok) await ShowInfoAsync("重试失败：源可能已失效");
+        await RefreshAsync();
+    }
+
+    private void OnRowOpenFolderClick(object sender, RoutedEventArgs e)
+    {
+        if (ItemOf(sender) is not { } it) return;
+        OpenFolder(string.IsNullOrEmpty(it.Dir) ? Aria2Engine.DefaultDir() : it.Dir);
+    }
+
+    private async void OnRowRemoveClick(object sender, RoutedEventArgs e)
+    {
+        if (ItemOf(sender) is not { } it) return;
+        await DownloadStore.Instance.RemoveAsync(it);
+        await RefreshAsync();
     }
 }

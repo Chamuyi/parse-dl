@@ -116,6 +116,19 @@ public sealed class Aria2Engine : IDisposable
             // 的典型表现（握手阶段被掐断），不是文件本身的问题 —— 重试基本都能过。
             // aria2 默认 max-tries=5 且没有连接/读取超时，走不稳定代理时不够用。
             "--max-tries=10",
+
+            // ── 连接数限制（2026-10-28 实测定位）────────────────────
+            // 用户一次入队 189 个任务后，代理端口 7897 上出现了 **198 个并发连接**，
+            // 代理被压垮 → aria2 的 RPC 线程也跟着卡住（`aria2.tellActive` 要 25 秒
+            // 且超时），于是暂停/重试/刷新全部像「按了没反应」。
+            //
+            // aria2 默认 `--max-connection-per-server=1` 是每个服务器 1 条，
+            // 但 X 的图片全在 pbs.twimg.com **同一个域名**下 —— 默认值理论上够；
+            // 真正的问题是 `--max-concurrent-downloads=5` 之外，
+            // 每个下载还会额外建 DNS/TLS 辅助连接。这里显式收紧：
+            "--max-connection-per-server=1",
+            "--split=1",
+            "--min-split-size=1M",
             "--retry-wait=3",
             "--always-resume=true",
             "--max-resume-failure-tries=0",
@@ -377,18 +390,37 @@ public sealed class Aria2Engine : IDisposable
     }
 
     /// <summary>列出全部任务（活动 + 等待 + 已停止）。</summary>
+    /// <summary>
+    /// 拉全部任务状态。
+    ///
+    /// ### ⚠ 只用于「进页面时的一次性对账」，**不要放进轮询**（2026-10-28 实测）
+    /// 任务多时（实测 372 条）这个调用会**卡十几秒甚至超时**：
+    /// aria2 要把每条任务的 `files` 数组都序列化一遍，数据量随任务数线性膨胀。
+    /// 之前 DownloadStore 每 0.8 秒调一次它，于是暂停、重试、刷新全部
+    /// 像「按了没反应」——其实都在等这个 RPC 返回。
+    ///
+    /// 轮询请用 <see cref="TellActiveAsync"/>：只问正在下的那几条。
+    /// 这也是原项目 Flutter 版的做法（`_pollActive` 只拉 `store.activeGids()`）。
+    /// </summary>
     public async Task<List<AriaTask>> TellAllAsync()
     {
-        var keys = new[] { "gid", "status", "completedLength", "totalLength", "files", "dir", "errorMessage", "downloadSpeed" };
+        // **去掉 `files`**（2026-10-28 实测）：aria2 的 RPC 是**单线程串行处理**的，
+        // 拉 `files` 要把每条任务的文件列表都序列化一遍，几百条任务时单次 RPC
+        // 就要几十秒 —— 这期间**所有其他 RPC（含 pause/unpause/remove）全部排队**，
+        // 用户看到的就是「按了暂停没反应、重试没反应、界面卡死」。
+        // 文件名入队时就已经知道（存在 DownloadItem.FileName），不必反复问引擎。
+        var keys = new[] { "gid", "status", "completedLength", "totalLength", "downloadSpeed", "errorMessage" };
         var list = new List<AriaTask>();
         foreach (var method in new[] { "aria2.tellActive", "aria2.tellWaiting", "aria2.tellStopped" })
         {
             JsonElement? r;
             try
             {
+                // tellActive **不接受 keys**（传了 400），tellWaiting/tellStopped 则可以。
+                // 条数上限压到 100：只是对账用，不必一次拉完整个队列。
                 r = method == "aria2.tellActive"
-                    ? await CallAsync(method, new object[] { keys })
-                    : await CallAsync(method, new object[] { 0, 1000, keys });
+                    ? await CallAsync(method, Array.Empty<object>())
+                    : await CallAsync(method, new object[] { 0, 100, keys });
             }
             catch { continue; }
 
@@ -402,7 +434,66 @@ public sealed class Aria2Engine : IDisposable
         return list;
     }
 
+    /// <summary>
+    /// **轮询专用**：只拉「正在下载」的那几条（对应原项目 `_pollActive`）。
+    ///
+    /// 不碰 waiting / stopped —— 那些状态变化由入队、暂停、完成事件自己维护，
+    /// 不需要每 0.8 秒重拉一遍。任务再多，这个调用的开销也只与**并发数**有关。
+    /// </summary>
+    public async Task<List<AriaTask>> TellActiveAsync()
+    {
+        // **不能传 keys 参数**（2026-10-28 实测铁证）：aria2 的 `aria2.tellActive`
+        // 只接受「无参」或「token」形式，多传一个 keys 数组直接 **400 Bad Request**。
+        // 之前一直传 keys，于是这个调用**每次都失败** →
+        //   · 「下载中」状态永远不更新（界面卡在入队时的样子）
+        //   · 暂停/重试看不到效果（它们依赖状态刷新后才显示变化）
+        //   · 轮询每秒白跑三次
+        // 不传 keys 时 aria2 会返回全部 12 个字段，本来也不需要挑。
+        var list = new List<AriaTask>();
+        try
+        {
+            var r = await CallAsync("aria2.tellActive", Array.Empty<object>());
+            if (r is null || r.Value.ValueKind != JsonValueKind.Array) return list;
+            foreach (var item in r.Value.EnumerateArray())
+            {
+                var t = ParseTask(item);
+                if (t is not null) list.Add(t);
+            }
+        }
+        catch { }
+        return list;
+    }
+
     public Task PauseAsync(string gid) => CallAsync("aria2.pause", new object[] { gid });
+
+    /// <summary>
+    /// **批量暂停**（逐条，但不再拖垮界面）。
+    ///
+    /// ### 为什么不是「一次 RPC 传多个 GID」
+    /// 实测（2026-10-28）：`aria2.pause` **只接受一个 GID**，
+    /// 一次传 120 个直接 **400 Bad Request**。所以只能逐条。
+    ///
+    /// 但逐条本身不是问题：单次 pause 只要 ~20ms，189 条约 4 秒。
+    /// 之前「按了没反应」的真凶是**轮询在拉全量重字段**（tellWaiting + files，
+    /// 单次几十秒），把 aria2 的**单线程 RPC 队列**堵死了，pause 排在后面永远轮不上。
+    /// 轮询改轻量后，逐条 pause 就能正常走完。
+    /// </summary>
+    public async Task PauseManyAsync(IReadOnlyList<string> gids)
+    {
+        foreach (var g in gids)
+        {
+            try { await CallAsync("aria2.pause", new object[] { g }); } catch { }
+        }
+    }
+
+    /// <summary>批量继续（同样逐条，aria2.unpause 也只接受一个 GID）。</summary>
+    public async Task UnpauseManyAsync(IReadOnlyList<string> gids)
+    {
+        foreach (var g in gids)
+        {
+            try { await CallAsync("aria2.unpause", new object[] { g }); } catch { }
+        }
+    }
     public Task UnpauseAsync(string gid) => CallAsync("aria2.unpause", new object[] { gid });
     public Task RemoveAsync(string gid) => CallAsync("aria2.remove", new object[] { gid });
     public Task PurgeAsync() => CallAsync("aria2.purgeDownloadResult", Array.Empty<object>());

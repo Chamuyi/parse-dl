@@ -182,10 +182,14 @@ public sealed partial class BrowsePage : Page
                     foreach (var m in a.Media)
                     {
                         var name = DouyinNameFor(a, m);
-                        var (ok, _) = await DownloadStore.Instance.AddAsync(m.Url, "抖音", null, name);
+                        // refresh: false —— 批量入队不做全量刷新，收尾统一 FlushAsync。
+                        // 否则每加一条就 TellAllAsync 拉全部任务，作品一多就把超时撑爆。
+                        var (ok, _) = await DownloadStore.Instance.AddAsync(
+                            m.Url, "抖音", null, name);
                         if (ok) added++;
                     }
                 }
+                DownloadStore.Instance.Flush();
                 StatusText.Text = "解析出 " + list.Count + " 个作品，媒体入队 " + added + " 条。";
             }
             else
@@ -226,6 +230,8 @@ public sealed partial class BrowsePage : Page
                         // 单个响应解析失败不影响其他
                     }
                 }
+
+                DownloadStore.Instance.Flush();
 
                 if (totalMedia == 0)
                 {
