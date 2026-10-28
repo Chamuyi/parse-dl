@@ -13,6 +13,18 @@ namespace ParseDl.Services.X;
 /// </summary>
 public sealed class XHomeStore
 {
+    /// <summary>
+    /// **进程级单例**（2026-10-28 改）：
+    /// 原来每个 XHomePage 实例都 new 一个自己的 store，切到别的页面再回来，
+    /// 页面被重新构造 → store 也是新的 → **已加载的作品、勾选状态全没了**，
+    /// 用户得重新输入用户名重新加载。用户明确要求「从主页点到其他页面返回，
+    /// 这页就被重置了，不能这样」。
+    ///
+    /// 改成单例后，状态在进程存活期间一直保留，与「自动执行」页的 AutoTaskStore 一致，
+    /// 也符合原项目 Flutter 版的行为（HomepageStore 是全局单例）。
+    /// </summary>
+    public static XHomeStore Instance { get; } = new();
+
     /// <summary>连续几页解析不出媒体就认定到底（X 末尾之后每页只回一个还在变的游标）。</summary>
     public const int EmptyPageStopAfter = 2;
 

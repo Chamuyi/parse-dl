@@ -54,7 +54,14 @@ public sealed class Aria2Engine : IDisposable
     private Process? _child;
     private string _secret = "";
     private int _port;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(8) };
+    // **超时不能设太短**（2026-10-28 修）：原来是 8 秒，批量入队时 aria2 要一个个
+    // 建连接、写 .aria2 控制文件，几十上百个任务连着提很容易超过 8 秒，
+    // 于是用户看到「入队异常：The request was canceled due to the configured
+    // HttpClient.Timeout of 8 seconds elapsing」。
+    //
+    // 这里只管**与本机 aria2 的 RPC 通信**（127.0.0.1），不是下载本身，
+    // 所以放宽到 60 秒没有副作用 —— 下载慢是 aria2 那边的事，与本超时无关。
+    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(60) };
     private bool _disposed;
 
     public bool IsRunning => _child is { HasExited: false };

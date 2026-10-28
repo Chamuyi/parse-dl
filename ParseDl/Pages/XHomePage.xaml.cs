@@ -27,7 +27,9 @@ public sealed partial class XHomePage : Page
     private const int AutoFillMaxPages = 12;
     private const string ModuleName = "X 媒体";
 
-    private readonly XHomeStore _store = new();
+    // **用进程级单例**（2026-10-28）：原来 `new()` 是页面实例字段，
+    // 切页返回后页面重建 → 已加载作品与勾选全丢，用户要重新输入用户名重新加载。
+    private readonly XHomeStore _store = XHomeStore.Instance;
     private readonly List<TileRef> _tiles = new();
 
     private MainWindow? _host;
@@ -90,6 +92,33 @@ public sealed partial class XHomePage : Page
 
         PageScroll.ViewChanged += (_, _) => LoadMoreIfNearBottom();
         RebuildApi();
+
+        // **把 store 里已有的状态回填到重建后的界面**（2026-10-28）。
+        // store 现在是进程级单例，切走再回来数据还在，但 Build() 会重建控件 ——
+        // 不回填的话界面一片空白，用户以为被重置了（正是反馈的现象：
+        // 「从主页点到其他页面返回，这页就被重置了」）。
+        RestoreFromStore();
+    }
+
+    /// <summary>
+    /// 用单例 store 里已有的状态把界面填回去（切页返回时调用）。
+    /// 只在确实加载过东西时才动界面，避免首次进入时把占位文案冲掉。
+    /// </summary>
+    private void RestoreFromStore()
+    {
+        if (_input is not null && _store.User is not null)
+        {
+            _input.Text = string.IsNullOrEmpty(_store.User.ScreenName)
+                ? (_store.User.Name ?? "")
+                : _store.User.ScreenName;
+        }
+
+        if (_store.Posts.Count == 0) return;
+
+        RenderResults();
+        SetStatus("已加载 " + _store.Posts.Count + " 条作品 · " + _store.TotalMedia + " 个媒体"
+                  + (_store.HasMore ? "（可继续加载）" : "（已到底）"));
+        UpdateDownloadCard();
     }
 
     private UIElement BuildHero()
@@ -857,7 +886,10 @@ public sealed partial class XHomePage : Page
 
                     SetStatus("正在入队 " + seen + " / " + totalMedia + " …");
                     var name = XNameFor(post, i);
-                    var (ok, msg) = await DownloadStore.Instance.AddAsync(m.Url, ModuleName, dir, name);
+                    // **每条媒体单独算目录**（2026-10-28）：文件夹模板里的变量是逐作品的，
+                    // 不同作品要落到不同子文件夹，不能在循环外算一次。
+                    var mediaDir = XDirFor(post, i);
+                    var (ok, msg) = await DownloadStore.Instance.AddAsync(m.Url, ModuleName, mediaDir, name);
                     if (ok)
                     {
                         queued++;
@@ -912,16 +944,45 @@ public sealed partial class XHomePage : Page
     }
 
     /// <summary>按「X 下载设置 → 文件名模板」生成文件名（默认模板已含 %EXT%）。</summary>
-    private static string XNameFor(XPost p, int mediaIndex)
+    /// <summary>
+    /// 按「X 下载设置 → 文件夹模板」算出这条媒体的目标目录。
+    ///
+    /// **2026-10-28 修**：用户问「x下载设置不是有文件夹吗，怎么我点击下载没有自动创建文件夹」。
+    /// 原来 StartDownloadAsync 里只写了 dir = settings.SaveDir ——
+    /// **完全没用 DirTemplate**，所以模板里写什么都不建子文件夹，全平铺在保存目录下。
+    /// 现在与文件名共用同一个 TemplateContext 与模板引擎，产出不会漂移。
+    /// 目录模板为空时退回保存目录（不建子文件夹）。
+    /// </summary>
+    private static string? XDirFor(XPost p, int mediaIndex)
+    {
+        var settings = AppSettings.Instance.ForModule("x");
+        var baseDir = string.IsNullOrWhiteSpace(settings.SaveDir) ? null : settings.SaveDir;
+
+        var tpl = settings.DirTemplate ?? "";
+        if (string.IsNullOrWhiteSpace(tpl)) return baseDir;
+
+        var sub = FileNameTemplate.Resolve(tpl, BuildContext(p, mediaIndex)).Trim();
+        if (sub.Length == 0) return baseDir;
+
+        // 模板里的斜杠表示多级目录（如 %USER_SCREEN_NAME%/%POST_TIME,d=1%）
+        var parts = sub.Split(new[] { (char)47, (char)92 }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => FileNameTemplate.UnicodeFilenamify(s).Trim())
+            .Where(s => s.Length > 0)
+            .ToArray();
+        if (parts.Length == 0) return baseDir;
+
+        var root = baseDir ?? Aria2Engine.DefaultDir();
+        var full = System.IO.Path.Combine(new[] { root }.Concat(parts).ToArray());
+        try { System.IO.Directory.CreateDirectory(full); } catch { return baseDir; }
+        return full;
+    }
+
+    /// <summary>模板上下文（文件名与目录共用，保证两处变量取值完全一致）。</summary>
+    private static TemplateContext BuildContext(XPost p, int mediaIndex)
     {
         var m = p.Media[mediaIndex];
-        var settings = AppSettings.Instance.ForModule("x");
-        var tpl = string.IsNullOrWhiteSpace(settings.FileNameTemplate)
-            ? "%POST_TIME% %USER_SCREEN_NAME% %POST_ID%-%MEDIA_INDEX%%EXT%"
-            : settings.FileNameTemplate;
-
         var ext = m.Type is "video" or "gif" ? "mp4" : "jpg";
-        var ctx = new TemplateContext
+        return new TemplateContext
         {
             PostId = p.Id,
             PostTime = p.CreatedAt,
@@ -937,6 +998,18 @@ public sealed partial class XHomePage : Page
             Extension = ext,
             Content = p.Text,
         };
+    }
+
+    private static string XNameFor(XPost p, int mediaIndex)
+    {
+        var m = p.Media[mediaIndex];
+        var settings = AppSettings.Instance.ForModule("x");
+        var tpl = string.IsNullOrWhiteSpace(settings.FileNameTemplate)
+            ? "%POST_TIME% %USER_SCREEN_NAME% %POST_ID%-%MEDIA_INDEX%%EXT%"
+            : settings.FileNameTemplate;
+
+        var ext = m.Type is "video" or "gif" ? "mp4" : "jpg";
+        var ctx = BuildContext(p, mediaIndex);
 
         var name = FileNameTemplate.UnicodeFilenamify(FileNameTemplate.Resolve(tpl, ctx));
         if (string.IsNullOrWhiteSpace(name)) name = p.Id + "_" + (mediaIndex + 1);
