@@ -324,6 +324,17 @@ public sealed class BiliApi
     /// 实测同一条 arc/search 请求，不带 cookie 返回 200，带 buvid3 返回 412。
     /// 这类接口就该裸着问。
     /// </summary>
+    /// <summary>取 nav 的原始 JSON 文本（拿昵称用；失败返回空串，不抛）。</summary>
+    public async Task<string> GetNavRawAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var root = await GetRawAsync("https://" + Host + "/x/web-interface/nav", ct);
+            return root.GetRawText();
+        }
+        catch { return ""; }
+    }
+
     public async Task<JsonElement> GetDataAnonymousAsync(string path, CancellationToken ct = default)
     {
         var url = path.StartsWith("http") ? path : "https://" + Host + path;
