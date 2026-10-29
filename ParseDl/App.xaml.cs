@@ -145,6 +145,24 @@ public partial class App : Application
             });
             return;
         }
+        // 探针入口：--probe-arc —— 用签名+dm_img 试 arc/search，把结果写文件后退出。
+        if (Array.IndexOf(Environment.GetCommandLineArgs(), "--probe-arc") >= 0
+            || Environment.GetEnvironmentVariable("PARSE_DL_PROBE_ARC") == "1")
+        {
+            _ = ParseDl.Services.Bili.BiliProbeArc.RunAsync().ContinueWith(t =>
+            {
+                try
+                {
+                    var txt = t.Result ?? "(null)";
+                    System.IO.File.WriteAllText(
+                        System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "probe_arc.txt"), txt);
+                }
+                catch { }
+                try { Environment.Exit(0); } catch { }
+            });
+            return;
+        }
+
         // 自测入口：带 --selftest 启动时只跑离线自测、把结果写文件后退出。
         // 这样能不经界面验证纯逻辑（文件名模板等），也不会弹窗干扰用户。
         // 双通道触发：命令行参数 + 环境变量。

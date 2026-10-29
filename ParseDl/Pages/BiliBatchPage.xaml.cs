@@ -403,6 +403,25 @@ public sealed partial class BiliBatchPage : Page
                 Aria2Engine.Log("[BiliBatch] arc/search 被风控，改用视频搜索：" + ex.Message);
             }
 
+            // **第二级兜底：旧版 arc/search**（2026-10-29 实测发现）：
+            // 新版 /x/space/wbi/arc/search 被风控，但旧版 /x/space/arc/search
+            // 是**不同端点、不同风控策略**，实测返回过 code:0 且带完整 vlist。
+            // 它比「按名字搜视频」准确得多，所以排在搜索之前。
+            try
+            {
+                var legacy = await listApi.GetSpaceVideosLegacyAsync(mid3, 1, pageSize, ct);
+                if (legacy.Items.Count > 0)
+                {
+                    Aria2Engine.Log("[BiliBatch] 旧版接口兜底成功 mid=" + mid3
+                                    + " 拿到 " + legacy.Items.Count + " 条");
+                    return Trim(legacy.Items, limit);
+                }
+            }
+            catch (Exception ex)
+            {
+                Aria2Engine.Log("[BiliBatch] 旧版接口失败：" + ex.Message);
+            }
+
             // **最后兜底：按 UP 名搜他的视频**（2026-10-29）：
             // arc/search 被 B 站持续风控（实测连续 5 次 -352），
             // 但 search/type?search_type=video 仍可用，且每条都带 mid/bvid。
@@ -684,6 +703,7 @@ public sealed partial class BiliBatchPage : Page
             var url = "https://api.bilibili.com/x/space/wbi/arc/search"
                       + "?mid=" + mid + "&ps=" + pageSize + "&pn=1&order=pubdate";
             var body = await BiliInPage.FetchAsync(Web.CoreWebView2, url, 20000, ct);
+            ParseDl.Services.Bili.BiliProbeArc.InPageResult = "长度 " + (body?.Length ?? 0) + " 前80字: " + (body is null ? "(null)" : (body.Length > 80 ? body.Substring(0, 80) : body));
             if (string.IsNullOrWhiteSpace(body) || body.TrimStart().StartsWith("<"))
             {
                 Aria2Engine.Log("[BiliBatch] 页内 fetch 返回非 JSON（长度 " + (body?.Length ?? 0) + "）");

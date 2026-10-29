@@ -185,6 +185,62 @@ public sealed class BiliListApi
     }
 
     /// <summary>
+    /// **旧版 arc/search**（`/x/space/arc/search`，**不带 wbi**）。
+    ///
+    /// ### 为什么需要它（2026-10-29 实测发现）
+    /// 新版 `/x/space/wbi/arc/search` 被风控（返回 HTML 反爬页 / -352），
+    /// 但**旧版路径实测返回过 `code:0` 且带完整 vlist**。
+    /// 两者是不同端点，风控策略不同 —— 这是绕开风控最直接的一条路，
+    /// 而且它比「按名字搜视频」准确得多（搜索按相关度排，该 UP 只占少数）。
+    ///
+    /// 注意：这条也会限流（`-799` = 请求过于频繁）。所以调用方要控制频率，
+    /// 失败就往下兜底，不要在这里死磕。
+    /// </summary>
+    public async Task<BiliListPage> GetSpaceVideosLegacyAsync(
+        long mid, int pageNum = 1, int pageSize = 30, CancellationToken ct = default)
+    {
+        var path = "/x/space/arc/search?mid=" + mid + "&ps=" + pageSize
+                   + "&pn=" + pageNum + "&order=pubdate";
+        JsonElement data;
+        try { data = await _api.GetDataPublicAsync(path, ct); }
+        catch (Exception ex)
+        {
+            Aria2Engine.Log("[BiliListApi] 旧版 arc/search 失败 mid=" + mid + "：" + ex.Message);
+            return new BiliListPage();
+        }
+
+        var items = new List<BiliListItem>();
+        if (data.TryGetProperty("list", out var list) &&
+            list.TryGetProperty("vlist", out var vlist) && vlist.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var v in vlist.EnumerateArray())
+            {
+                var pic = v.TryGetProperty("pic", out var pc) ? pc.GetString() ?? "" : "";
+                if (pic.StartsWith("//")) pic = "https:" + pic;
+                else if (pic.StartsWith("http://")) pic = pic.Replace("http://", "https://");
+                items.Add(new BiliListItem
+                {
+                    Bvid = v.TryGetProperty("bvid", out var b) ? b.GetString() ?? "" : "",
+                    Aid = v.TryGetProperty("aid", out var a) ? a.GetInt64() : 0,
+                    Title = v.TryGetProperty("title", out var tt) ? tt.GetString() ?? "" : "",
+                    Cover = pic,
+                    DurationSec = ParseDuration(v),
+                    PubDateUnix = v.TryGetProperty("created", out var cr) ? cr.GetInt64() : 0,
+                });
+            }
+        }
+
+        var total = 0;
+        if (data.TryGetProperty("page", out var pg) && pg.TryGetProperty("count", out var cnt))
+            total = cnt.GetInt32();
+
+        if (items.Count > 0)
+            Aria2Engine.Log("[BiliListApi] 旧版 arc/search 成功 mid=" + mid + " 拿到 " + items.Count + " 条");
+
+        return new BiliListPage { Items = items, HasMore = items.Count >= pageSize, Total = total };
+    }
+
+    /// <summary>
     /// **按 UP 主名搜索他的视频**（`arc/search` 被风控时的备用路径）。
     ///
     /// ### 为什么需要
