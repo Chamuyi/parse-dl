@@ -384,6 +384,14 @@ public sealed partial class BiliBatchPage : Page
         }
         if (refInfo.Mid is long mid3)
         {
+            // **第 1 级：读空间页渲染后的 DOM**（2026-10-29 新增）。
+            // B站 风控拦得住我们的 HttpClient，但拦不住页面自己 ——
+            // 浏览器带真指纹/真 cookie/真 Referer，B站 认它。
+            // 所以不调接口，只读页面渲染出来的卡片。
+            var domList = await TryReadSpaceDomAsync(mid3, ct);
+            if (domList is not null && domList.Count > 0)
+                return Trim(domList, limit);
+
             // **优先走页内 fetch**（2026-10-29）：
             // B 站对 arc/search 是按请求轮换风控的（连续三次实测 200/412/200），
             // 裸 HttpClient 很容易撞上 412 / -352。
@@ -670,6 +678,79 @@ public sealed partial class BiliBatchPage : Page
     /// 返回 null 表示「这条路走不通」（WebView 没就绪 / 解析失败），
     /// 调用方据此回落到接口路径。
     /// </summary>
+    /// <summary>
+    /// **读空间页渲染后的 DOM 拿视频列表**（2026-10-29 新增，绕开接口风控）。
+    ///
+    /// 为什么这样做：B站 风控拦的是我们的 HttpClient（签名、dm_img、cookie 都试过了，
+    /// 全被 -352/412/-403 拦）。但**页面自己**请求 arc/search 是拦不住的 ——
+    /// 浏览器带真指纹、真 cookie、真 Referer，B站 认它。
+    /// 所以不调接口，只读页面渲染出来的结果。
+    /// </summary>
+    private async Task<List<BiliListItem>?> TryReadSpaceDomAsync(long mid, CancellationToken ct)
+    {
+        if (!_webReady || Web.CoreWebView2 is null) return null;
+        try
+        {
+            var spaceUrl = "https://space.bilibili.com/" + mid + "/video";
+            var nav = new TaskCompletionSource<bool>();
+            void OnNav(object? s, Microsoft.Web.WebView2.Core.CoreWebView2NavigationCompletedEventArgs e)
+            {
+                try { Web.CoreWebView2.NavigationCompleted -= OnNav; } catch { }
+                nav.TrySetResult(true);
+            }
+            Web.CoreWebView2.NavigationCompleted += OnNav;
+            Web.CoreWebView2.Navigate(spaceUrl);
+            await Task.WhenAny(nav.Task, Task.Delay(18000, ct));
+            await Task.Delay(4000, ct);   // 等 SPA 把卡片渲染出来
+
+            // 读 DOM：抓所有 BV 号 + 标题
+            var script = """
+                (function(){
+                  var out = [];
+                  var links = document.querySelectorAll('a[href*="/video/BV"]');
+                  for (var i = 0; i < links.length; i++) {
+                    var h = links[i].getAttribute("href") || "";
+                    var m = h.match(/BV[0-9A-Za-z]{10}/);
+                    if (!m) continue;
+                    var t = (links[i].getAttribute("title") || links[i].textContent || "").trim();
+                    out.push(m[0] + "\t" + t);
+                  }
+                  return JSON.stringify(out);
+                })()
+                """;
+            var raw = await Web.CoreWebView2.ExecuteScriptAsync(script);
+            var unq = System.Text.Json.JsonSerializer.Deserialize<string>(raw) ?? "";
+            var arr = System.Text.Json.JsonSerializer.Deserialize<string[]>(unq) ?? Array.Empty<string>();
+
+            var list = new List<BiliListItem>();
+            var seen = new HashSet<string>();
+            foreach (var row in arr)
+            {
+                var parts = row.Split((char)9);
+                var bvid = parts[0];
+                if (string.IsNullOrEmpty(bvid) || !seen.Add(bvid)) continue;
+                list.Add(new BiliListItem
+                {
+                    Bvid = bvid,
+                    Aid = 0,
+                    Title = parts.Length > 1 ? parts[1] : bvid,
+                    Cover = "",
+                    DurationSec = 0,
+                    PubDateUnix = 0,
+                });
+            }
+            ParseDl.Services.Bili.BiliProbeArc.DomResult = "DOM 抓到 " + list.Count + " 条 BV 号";
+            Aria2Engine.Log("[BiliBatch] DOM 读取 mid=" + mid + " 拿到 " + list.Count + " 条");
+            return list;
+        }
+        catch (Exception ex)
+        {
+            ParseDl.Services.Bili.BiliProbeArc.DomResult = "DOM 读取异常：" + ex.Message;
+            Aria2Engine.Log("[BiliBatch] DOM 读取异常：" + ex.Message);
+            return null;
+        }
+    }
+
     private async Task<List<BiliListItem>?> TryFetchSpaceViaPageAsync(
         long mid, int pageSize, CancellationToken ct)
     {
