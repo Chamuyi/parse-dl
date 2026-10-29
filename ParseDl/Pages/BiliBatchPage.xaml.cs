@@ -406,7 +406,27 @@ public sealed partial class BiliBatchPage : Page
             // **最后兜底：按 UP 名搜他的视频**（2026-10-29）：
             // arc/search 被 B 站持续风控（实测连续 5 次 -352），
             // 但 search/type?search_type=video 仍可用，且每条都带 mid/bvid。
-            var bySearch = await listApi.SearchVideosAsync(target, mid3, 1, pageSize, ct);
+            // **多翻几页聚合**（2026-10-29 改进）：
+            // B站 搜索按相关度排序，30 条里该 UP 主往往只占 1-2 条，
+            // 只取第 1 页永远只能拿到 1 条视频。这里连续翻页，
+            // 直到拿够 limit 条或翻到上限为止。
+            var collected = new List<BiliListItem>();
+            var seenBv = new HashSet<string>();
+            var maxPages = limit > 0 ? Math.Min(10, Math.Max(2, limit)) : 5;
+            for (var pg = 1; pg <= maxPages && collected.Count < Math.Max(limit, 1); pg++)
+            {
+                var onePage = await listApi.SearchVideosAsync(target, mid3, pg, 30, ct);
+                foreach (var it in onePage.Items)
+                {
+                    if (seenBv.Add(it.Bvid)) collected.Add(it);
+                    if (collected.Count >= Math.Max(limit, 1)) break;
+                }
+                if (onePage.Items.Count == 0) break;   // 没更多了
+                if (collected.Count >= Math.Max(limit, 1)) break;
+                await Task.Delay(Math.Max(150, Cfg.RequestIntervalMs), ct);
+            }
+            var bySearch = new BiliListPage { Items = collected, HasMore = false };
+            Aria2Engine.Log("[BiliBatch] 视频搜索翻 " + maxPages + " 页，聚合 " + collected.Count + " 条");
             if (bySearch.Items.Count > 0)
             {
                 Aria2Engine.Log("[BiliBatch] 视频搜索兜底成功 mid=" + mid3
