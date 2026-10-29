@@ -400,7 +400,12 @@ public sealed class AutoTaskStore
             if (filter.From is not null && oldest != DateTime.MinValue && oldest <= filter.From) break;
         }
 
-        var dir = string.IsNullOrWhiteSpace(settings.SaveDir) ? null : settings.SaveDir;
+        // **每个作品单独算目录**（2026-10-29 修）。
+        //
+        // 原来这里是：var dir = string.IsNullOrWhiteSpace(settings.SaveDir) ? null : settings.SaveDir;
+        // 也就是整批共用一个目录，DirTemplate 根本没被使用 ——
+        // 表现就是 X 下载不在 downloads 下建 @用户名 子目录，文件全平铺在根目录。
+        // 而 XNaming.DirFor 早就实现了（解析模板 + 建多级目录），只是这里没调用。
         var downloaded = settings.SkipDownloaded ? BuildDownloadedSet() : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         int queued = 0, skipped = 0, filtered = 0, failed = 0;
@@ -416,6 +421,7 @@ public sealed class AutoTaskStore
                 if (downloaded.Contains(m.Url)) { skipped++; continue; }
 
                 var name = NameFor(post, i);
+                var dir = ParseDl.Services.X.XNaming.DirFor(post, i);
                 var (ok, _) = await DownloadStore.Instance.AddAsync(m.Url, ModuleName, dir, name);
                 if (ok) { queued++; downloaded.Add(m.Url); }
                 else failed++;

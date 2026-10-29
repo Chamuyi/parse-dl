@@ -204,7 +204,17 @@ public sealed class DownloadStore
             catch { }
         }
 
-        var gid = await _engine.AddUriAsync(url, targetDir, outName);
+        // **Referer 按 URL 域名自动判定**（2026-10-29 回归修复）。
+        //
+        // 为什么不在调用点逐个传：13 个调用点，漏一个就是一条静默失败。
+        // 而这件事本来就有客观判据 —— 看域名就知道该带谁。
+        //
+        //   B 站 CDN（*.bilivideo.com / *.hdslb.com 等）→ 必须带 B 站 Referer，
+        //     否则 1080P 视频流 403 / errorCode=1
+        //   其他（video.twimg.com、抖音 CDN）→ **绝不能带**，
+        //     带了反而被 CDN 403（实测 X 队列全红就是上一版全局 referer 干的）
+        var referer = RefererFor(url);
+        var gid = await _engine.AddUriAsync(url, targetDir, outName, referer);
         if (string.IsNullOrEmpty(gid)) return (false, "aria2 拒绝该任务");
 
         var item = new DownloadItem { Gid = gid, Url = url, Module = module };
@@ -580,5 +590,30 @@ public sealed class DownloadStore
         });
 
         return Task.FromResult(items.Count);
+    }
+
+    /// <summary>
+    /// 按 URL 域名决定要不要带 Referer，以及带谁。
+    ///
+    /// 判据是 CDN 的实际行为，不是猜：
+    /// * B 站 1080P 视频流的 CDN **校验 Referer**，不带就 403（errorCode=1）
+    /// * X 的 video.twimg.com **带 B 站 Referer 反而 403**（实测 code=403 size=0）
+    /// * 抖音 CDN 不需要 Referer
+    ///
+    /// 所以只有 B 站系域名带，其余一律不带。
+    /// </summary>
+    public static string? RefererFor(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return null;
+        try
+        {
+            var host = new Uri(url).Host.ToLowerInvariant();
+            // B 站系：视频/音频流走 *.bilivideo.com，封面/弹幕走 *.hdslb.com
+            if (host.EndsWith(".bilivideo.com") || host.EndsWith(".bilivideo.cn")
+                || host.EndsWith(".hdslb.com") || host.EndsWith(".bilibili.com"))
+                return "https://www.bilibili.com/";
+            return null;
+        }
+        catch { return null; }
     }
 }
