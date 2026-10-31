@@ -298,6 +298,16 @@ public static class DouyinModuleSelfTest
         Check("目标目录按作者建子目录", targetDir.EndsWith("@小明"), targetDir);
         Check("目标文件名非空且无非法字符", targetName.Length > 0 && !targetName.Contains(":") && !targetName.Contains("\\"), targetName);
 
+        // ── 「按文件名建文件夹」那层目录名（2026-10-31 补）──────────────
+        // 这层的名字取自导入的名单文件名；名单文件同样可能带尾点/非法字符，
+        // 而 Windows 会静默改写尾点 → aria2 按原串拼路径报 errorCode=16。
+        Check("名单文件名去扩展名且去尾部点",
+            DouyinAutoStore.SanitizeFolderName("示例标签..md") == "示例标签",
+            DouyinAutoStore.SanitizeFolderName("示例标签..md"));
+        Check("名单文件名非法字符换下划线",
+            DouyinAutoStore.SanitizeFolderName("a:b*c.md").IndexOf('_') >= 0,
+            DouyinAutoStore.SanitizeFolderName("a:b*c.md"));
+
         // ── ⑥ 目标解析 ───────────────────────────────────────
         var targets = DouyinAutoStore.ParseTargets(
             "https://www.douyin.com/user/MS4wLjABAAAAa\n" +

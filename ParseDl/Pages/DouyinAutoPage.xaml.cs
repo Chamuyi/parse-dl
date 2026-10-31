@@ -260,6 +260,8 @@ public sealed partial class DouyinAutoPage : Page
 
         DispatcherQueue.TryEnqueue(() =>
         {
+            // 导入名单后「按文件名建文件夹」开关的可用性会变 —— 只在键变了时重建。
+            RebuildOptionCardIfNeeded();
             BuildTaskCard();
             RefreshToolbar();
         });
@@ -267,6 +269,17 @@ public sealed partial class DouyinAutoPage : Page
 
     /// <summary>上一次重建任务队列的时间戳（Environment.TickCount64）。</summary>
     private long _lastAutoUiRebuild;
+
+    /// <summary>
+    /// 上一次建「下载选项」卡时，影响开关可用性的两个量。
+    ///
+    /// **为什么要记**（2026-10-31 用户报「我明明导入名单了，按文件名建文件夹开关还是黑的」）：
+    /// 那个开关的 IsEnabled 依赖 `ImportFolderName.Length > 0`（导入名单才有名字）。
+    /// 而 OnAutoChanged 有意只重建任务队列、不重建选项卡（防跑批时开关跟着闪），
+    /// 于是「导入名单」之后选项卡从未重建 —— 开关停在**导入前**算出来的禁用态，
+    /// 看起来就是「灰的/黑的、点不动」。只有这两个量变了才需要重算。
+    /// </summary>
+    private string _optionKey = "\u0001";
     // ── 界面 ───────────────────────────────────────────────────
 
     private void BuildAll()
@@ -386,6 +399,8 @@ public sealed partial class DouyinAutoPage : Page
 
     private void BuildOptionCard()
     {
+        // 记下「这次是按什么状态建的」，供 OnAutoChanged 判断要不要重建（见 _optionKey 注释）。
+        _optionKey = OptionKey();
         OptionCardHost.Children.Clear();
 
         var panel = new StackPanel { Spacing = 10 };
@@ -616,6 +631,25 @@ public sealed partial class DouyinAutoPage : Page
         OptionCardHost.Children.Add(UiKit.SectionCard("下载选项", panel));
     }
 
+    /// <summary>
+    /// 「下载选项」卡里那些**会影响启用状态**的量拼成的键。
+    /// 导入名单后 ImportFolderName 从空变成「示例标签」，键就变了 → 需要重建选项卡。
+    /// </summary>
+    private string OptionKey() =>
+        (_auto.ImportFolderName ?? "") + "|" + _auto.Running + "|"
+        + DouyinSettings.Current.AutoCreateFolder + "|" + DouyinSettings.Current.IncludeLivePhoto;
+
+    /// <summary>
+    /// 必要时重建「下载选项」卡（导入名单后那一层开关才会从禁用变可用）。
+    /// 只在键真的变了时重建 —— 跑批期间 _auto.Refresh() 每秒多次调用会走空返回，
+    /// 不会重复销毁重建开关（那正是 2026-10-30 修过的「开关跟着闪」）。
+    /// </summary>
+    private void RebuildOptionCardIfNeeded()
+    {
+        if (OptionKey() == _optionKey) return;
+        BuildOptionCard();
+    }
+
     private void BuildTaskCard()
     {
         TaskCardHost.Children.Clear();
@@ -740,6 +774,11 @@ public sealed partial class DouyinAutoPage : Page
             // 整张 Markdown 表格堆进去又乱又难看，且下次手贴链接还要先删一大段。
             // 目标已经进 _auto._parsed，清空输入框不影响跑批（它只是展示用）。
             BuildTargetCard();   // 重建目标卡：输入框留空，导入信息显示在按钮下方小栏
+            // **导入后立刻重建选项卡**（2026-10-31 用户报「开关还是黑的」）：
+            // 「按文件名建文件夹」的 IsEnabled 取决于 ImportFolderName 是否非空，
+            // 而选项卡以前只在进页面时建过一次 —— 导入后开关停在导入前的禁用态。
+            // 这里直接重建一次，不等 Changed 那条 400ms 节流路径。
+            BuildOptionCard();
             AppendLog("已从 " + fileName + " 导入名单（" + _auto.Total + " 个目标）"
                       + (_auto.ImportFolderName.Length > 0
                           ? "，将存入同名文件夹「" + _auto.ImportFolderName + "」" : ""));
