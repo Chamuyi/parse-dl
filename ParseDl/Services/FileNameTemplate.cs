@@ -116,16 +116,81 @@ public static class FileNameTemplate
     public static string ResolveDouyin(string template, TemplateContext ctx)
         => DouyinFilenamify(Resolve(template, ctx, perVar: s => s).Trim(), ctx.MediaId);
 
-    /// <summary>把文件夹模板拆成路径段（丢弃 .. 防止跳出保存目录）。</summary>
+    /// <summary>
+    /// 把文件夹模板拆成路径段（丢弃 .. 防止跳出保存目录），每段都过 <see cref="SanitizeDirSegment"/>。
+    ///
+    /// **为什么每段都要净化**（2026-10-31 修「大批 Download aborted」）：
+    /// 抖音昵称可以以点结尾（实例：某作者昵称实际带两个尾点）。
+    /// Windows 建目录时会把尾部点**静默吃掉**，磁盘上落成没有尾点的名字；
+    /// 但 aria2 仍按原串拼路径去开文件，于是报
+    /// errorCode=16 Failed to open the file ... The system cannot find the path specified。
+    /// 实测对照：同一条链接、同一个文件，目标目录用带尾点的名字 → rc=16 失败；
+    /// 用去掉尾点的名字 → rc=0、11MiB/s 下完。
+    /// 所以目录段必须在**入队前**就变成 Windows 真正会用的名字。
+    /// </summary>
     public static List<string> ParseDirSegments(string dirName)
     {
         var outList = new List<string>();
         foreach (var s in Regex.Split(dirName ?? "", "[\\\\/]+"))
         {
-            var t = s.Trim();
-            if (t.Length > 0 && t != "." && t != "..") outList.Add(t);
+            var t = SanitizeDirSegment(s);
+            if (t.Length > 0) outList.Add(t);
         }
         return outList;
+    }
+
+    /// <summary>
+    /// 把单个路径段变成 Windows 实际会创建的名字：
+    /// 换掉非法字符、去掉**尾部空格与点**、避开 CON/PRN 等保留名。
+    /// 净化为空返回空串（调用方丢弃该段）。
+    /// </summary>
+    public static string SanitizeDirSegment(string segment)
+    {
+        if (string.IsNullOrEmpty(segment)) return "";
+        var t = segment.Trim();
+        if (t == "." || t == "..") return "";
+
+        t = FilenameReserved.Replace(t, "_");
+        // 尾部空格与点必须去掉（Windows 会静默吞掉它们，导致路径与实际不符）
+        t = t.TrimEnd((char)32, (char)46);
+        if (t.Length == 0) return "";
+        // 保留名不能当目录名（CON / PRN / AUX / NUL / COM1 / LPT1）
+        if (WindowsReservedName.IsMatch(t)) t += "_";
+        return t;
+    }
+
+    /// <summary>
+    /// 净化一整条绝对路径的每一段（盘符段原样保留）。
+    ///
+    /// 用途：**队列里已经存下来的旧目录**（含尾点这种历史脏数据）在入队/恢复时纠回来。
+    /// 例如 D:\\下载目录\@作者.. 会被纠正成去掉尾点的同名路径。
+    /// </summary>
+    public static string CleanDirPath(string? fullPath)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath)) return fullPath ?? "";
+        var raw = fullPath!.Replace((char)47, (char)92);
+        var parts = raw.Split((char)92);
+        var outParts = new List<string>();
+        var first = "";
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var seg = parts[i];
+            if (seg.Length == 0) continue;
+            // 盘符段（形如 G:）原样保留
+            if (i == 0 && seg.Length == 2 && seg[1] == (char)58) { first = seg; continue; }
+            var clean = SanitizeDirSegment(seg);
+            if (clean.Length == 0) continue;
+            outParts.Add(clean);
+        }
+        var sb = new StringBuilder();
+        if (first.Length > 0) sb.Append(first).Append((char)92);
+        for (var i = 0; i < outParts.Count; i++)
+        {
+            sb.Append(outParts[i]);
+            if (i < outParts.Count - 1) sb.Append((char)92);
+        }
+        var result = sb.ToString();
+        return result.Length == 0 ? (fullPath ?? "") : result;
     }
 
     private static string? Lookup(string name, TemplateContext c, Dictionary<string, string> p)

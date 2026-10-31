@@ -62,6 +62,9 @@ public static class XAuthorDir
     /// <param name="parentDir">该目录的父目录；为空则只更新记录、不动磁盘。</param>
     public static string Resolve(string? stableId, string fallbackName, string? parentDir)
     {
+        // 与抖音同一套净化：X 显示名同样可能以点/空格结尾，Windows 会悄悄改写目录名，
+        // 之后 aria2 按原串拼路径就报 errorCode=16（2026-10-31 统一收口）。
+        fallbackName = FileNameTemplate.SanitizeDirSegment(fallbackName ?? "");
         if (string.IsNullOrWhiteSpace(stableId)) return fallbackName;
 
         string? oldName = null;

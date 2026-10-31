@@ -82,6 +82,28 @@ public static class FileNameTemplateSelfTest
             string.Join("|", FileNameTemplate.ParseDirSegments("a/../b/c")),
             "a|b|c");
 
+        // ── 目录段 Windows 净化（2026-10-31 修大批 Download aborted）────
+        // 抖音昵称可以以点结尾：Windows 建目录时悄悄吃掉尾点，
+        // aria2 仍按原串拼路径 → errorCode=16 / The system cannot find the path specified。
+        Check("目录段去掉尾部点",
+            FileNameTemplate.SanitizeDirSegment("@示例作者.."),
+            "@示例作者");
+        Check("目录段去掉尾部空格",
+            FileNameTemplate.SanitizeDirSegment("@abc  "),
+            "@abc");
+        Check("目录段非法字符换下划线",
+            FileNameTemplate.SanitizeDirSegment("a:b*c?d"),
+            "a_b_c_d");
+        Check("目录段保留名补下划线",
+            FileNameTemplate.SanitizeDirSegment("CON"),
+            "CON_");
+        Check("模板拆段同时净化尾点",
+            string.Join("|", FileNameTemplate.ParseDirSegments("@示例作者../sub")),
+            "@示例作者|sub");
+        Check("整条路径逐段净化（盘符保留）",
+            FileNameTemplate.CleanDirPath(@"D:\\下载\\测试\\示例标签\@示例作者.."),
+            @"D:\\下载\\测试\\示例标签\@示例作者");
+
         // ── %TAGS%（2026-10-31 补，X 侧变量）──────────────────────
         var tagCtx = new TemplateContext
         {

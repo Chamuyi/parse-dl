@@ -120,16 +120,15 @@ public sealed class Aria2Engine : IDisposable
             "--file-allocation=none",
             "--summary-interval=0",
             "--console-log-level=warn",
-            // 并发上限与默认目录都从设置读（改设置后重启引擎生效）
-            // **串行下载：并发固定为 1**（2026-10-29 用户要求「按顺序下载」）。
+            // 并发上限与默认目录都从设置读（改设置后重启引擎生效）。
+            // **2026-10-31 改回读设置**：用户明确要求并发 5 ——「按顺序下载」的语义
+            // 改由「入队顺序 + aria2 的 FIFO waiting 队列」保证，并发只决定同时在跑几个。
+            // 原来为了「绝对串行」写死成 1，用户改设置里的并发数完全不生效。
             //
-            // 用户要的语义是：先识别到 a、后识别到 b，就 a 下完再下 b，依次往下。
-            // 用 aria2 自己的队列 + 并发 1 实现 —— aria2 对 waiting 状态的任务是
-            // **FIFO**（按 addUri 的先后），加一条下一跳，正是「按推送顺序逐个下」。
-            //
-            // 原来这里读 AppSettings.MaxConcurrent（默认 5，可到 16），
-            // 多任务并行会让「顺序」失去意义，也更容易触发 CDN 限速。
-            "--max-concurrent-downloads=1",
+            // 为什么并发可以调而顺序不乱：aria2 对 waiting 状态的任务是 **FIFO**
+            // （按 addUri 的先后派人），所以并发 N 只是「同时在下 N 个」，
+            // 先后次序仍由入队顺序决定。
+            "--max-concurrent-downloads=" + Math.Clamp(AppSettings.Instance.MaxConcurrent, 1, 16),
             $"--dir={DefaultDir()}",
 
             // ── 重试与超时（2026-10-28 加）────────────────────────────

@@ -294,7 +294,19 @@ public sealed class DownloadStore
         if (!await EnsureEngineAsync())
             return (false, "下载引擎未就绪：" + EngineMessage);
 
-        var targetDir = dir ?? Aria2Engine.DefaultDir();
+        // **目录路径每一段都要过 Windows 净化**（2026-10-31 修「大批 Download aborted」）。
+        //
+        // 抖音昵称可以以点结尾（实测某作者昵称是「@示例作者」+两个尾点）。Windows 建目录时
+        // 会把尾部点**静默吃掉**，磁盘上落成「@示例作者」；而 aria2 仍按原串「@示例作者..」拼路径
+        // 去开文件 → errorCode=16 / "The system cannot find the path specified" /
+        // 界面显示「Download aborted」。实测同链接同文件：带尾点目录 rc=16，去尾点 rc=0 下完。
+        // 这里兜底再净化一次：调用点传入的 dir 可能来自队列存档或手输，不能只依赖模板那一刻。
+        var cleanedDir = FileNameTemplate.CleanDirPath(dir);
+        var targetDir = string.IsNullOrEmpty(cleanedDir) ? Aria2Engine.DefaultDir() : cleanedDir;
+        // **aria2 不会自己建目录**：目录不存在时它同样报 errorCode=16。
+        // 净化后的路径可能与磁盘上已有的目录并非同一串（历史上被 Windows 改写过），
+        // 这里先建好，保证「要写哪个目录」与「实际存在的目录」一致。
+        try { System.IO.Directory.CreateDirectory(targetDir); } catch { }
 
         // **提交前先处理「同名文件存在但控制文件缺失」**（2026-10-29 找到的真凶之三）。
         //
@@ -337,7 +349,7 @@ public sealed class DownloadStore
             AwemeId = awemeId, MediaIndex = mediaIndex,
         };
         if (!string.IsNullOrEmpty(outName)) item.FileName = outName;
-        item.Dir = dir ?? Aria2Engine.DefaultDir();
+        item.Dir = targetDir;
         // **加到末尾，保持推送顺序**（2026-10-29 用户要求「按顺序下载」）。
         // 原来是 Insert(0, item) 插到顶部 —— 先识别到 a、后识别到 b，
         // b 就显示在 a 上面，跟实际下载顺序正好相反。
@@ -766,14 +778,19 @@ public sealed class DownloadStore
                 // 于是重启后恢复队列时，那些「文件已存在但无控制文件」的任务
                 // 仍然全部 errorCode=13 失败 —— 界面看着就是「下载卡住」。
                 var fileName = string.IsNullOrWhiteSpace(e.FileName) ? null : e.FileName;
+                // **旧队列里可能存着 Windows 会改写的脏目录**（如作者昵称带尾点，
+                // 实测 G:\...\@示例作者.. 磁盘上落成 @示例作者）。恢复时先纠成真实路径，
+                // 否则「文件是否已存在」判断和 aria2 的目标目录都会指向不存在的路径，
+                // 结果就是整批 errorCode=16 / Download aborted（2026-10-31 修）。
+                var restoreDir = FileNameTemplate.CleanDirPath(e.Dir);
 
                 // 文件已存在且非空 → 认为已经下完，不再重复提交
                 // （否则 aria2 会报 errorCode=13「文件存在但无控制文件」直接失败）
-                if (!string.IsNullOrEmpty(fileName) && !string.IsNullOrEmpty(e.Dir))
+                if (!string.IsNullOrEmpty(fileName) && !string.IsNullOrEmpty(restoreDir))
                 {
                     try
                     {
-                        var full = System.IO.Path.Combine(e.Dir, fileName);
+                        var full = System.IO.Path.Combine(restoreDir, fileName);
                         if (System.IO.File.Exists(full) && new System.IO.FileInfo(full).Length > 0)
                             continue;
                     }
@@ -788,6 +805,10 @@ public sealed class DownloadStore
                 //
                 // 现在的做法：队列里存了作品 ID（AwemeId），过期就用它回页面
                 // 现取一份新鲜地址；取不到才跳过并计数。
+                // 净化后的目录也先建好（aria2 不建目录）
+                if (!string.IsNullOrEmpty(restoreDir))
+                { try { System.IO.Directory.CreateDirectory(restoreDir); } catch { } }
+
                 var url = e.Url;
                 if (SignedUrl.IsExpired(url))
                 {
@@ -805,7 +826,7 @@ public sealed class DownloadStore
                     }
                 }
 
-                var gid = await _engine.AddUriAsync(url, e.Dir, fileName);
+                var gid = await _engine.AddUriAsync(url, restoreDir, fileName);
                 if (string.IsNullOrEmpty(gid)) continue;
 
                 var item = new DownloadItem
@@ -813,7 +834,7 @@ public sealed class DownloadStore
                     Gid = gid,
                     Url = e.Url,
                     Module = e.Module,
-                    Dir = e.Dir ?? "",
+                    Dir = restoreDir ?? "",
                     FileName = e.FileName ?? "",
                     CreatedAt = e.CreatedAt,
                     PreviewUrl = e.PreviewUrl ?? "",

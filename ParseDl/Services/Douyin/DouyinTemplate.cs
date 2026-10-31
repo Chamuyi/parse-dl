@@ -420,15 +420,12 @@ public static class DouyinTemplate
         return DouyinAuthorDir.Resolve(stableId, segs[0], parentDir);
     }
 
-    /// <summary>把文件夹模板拆成路径段（丢弃 .. 防止跳出保存目录）。</summary>
+    /// <summary>
+    /// 把文件夹模板拆成路径段（丢弃 .. 防止跳出保存目录）——**委托给统一实现**，
+    /// 由 <see cref="FileNameTemplate.ParseDirSegments"/> 负责每一段的 Windows 净化
+    /// （尾部空格/点、非法字符、保留名）。2026-10-31：抖音昵称带尾点时目录会在磁盘上
+    /// 被 Windows 悄悄改名，aria2 按原串拼路径就报 errorCode=16 —— 必须在这里统一收口。
+    /// </summary>
     public static List<string> ParseDirSegments(string dirName)
-    {
-        var outList = new List<string>();
-        foreach (var s in Regex.Split(dirName ?? "", "[\\\\/]+"))
-        {
-            var t = s.Trim();
-            if (t.Length > 0 && t != "." && t != "..") outList.Add(t);
-        }
-        return outList;
-    }
+        => FileNameTemplate.ParseDirSegments(dirName);
 }

@@ -88,6 +88,12 @@ public static class DouyinAuthorDir
     /// </summary>
     public static string Resolve(string? stableId, string fallbackName, string? parentDir)
     {
+        // **作者昵称必须净化成 Windows 真正会用的目录名**（2026-10-31 修大批 Download aborted）。
+        // 抖音昵称可以是「@示例作者..」这种以点结尾的；Windows 建目录时把尾部点吃掉，
+        // 但 aria2 仍按原串拼路径 → errorCode=16 / Download aborted。
+        // 记忆表里存的也必须是净化后的名字，否则下次还会算出同样的死路径。
+        // **净化必须在「没有稳定 ID 也照样返回」之前**，否则那条退回路径仍会带尾点。
+        fallbackName = FileNameTemplate.SanitizeDirSegment(fallbackName ?? "");
         if (string.IsNullOrWhiteSpace(stableId)) return fallbackName;
 
         string? oldName = null;

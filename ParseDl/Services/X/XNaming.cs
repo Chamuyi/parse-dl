@@ -26,7 +26,7 @@ public static class XNaming
     
             // 模板里的斜杠表示多级目录（如 %USER_SCREEN_NAME%/%POST_TIME,d=1%）
             var parts = sub.Split(new[] { (char)47, (char)92 }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(s => FileNameTemplate.UnicodeFilenamify(s).Trim())
+                .Select(s => FileNameTemplate.SanitizeDirSegment(FileNameTemplate.UnicodeFilenamify(s)))
                 .Where(s => s.Length > 0)
                 .ToArray();
             if (parts.Length == 0) return baseDir;
