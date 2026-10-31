@@ -252,9 +252,34 @@ public sealed partial class DashboardPage : Page
             RunningCount.Text = running.ToString();
             DoneCount.Text = doneNow.ToString();
 
-            var (total, bytes) = DownloadLedger.Instance.Stats();
+            // **全部已下载 = 三模块台账合计**（2026-10-31）。
+            // 三份台账格式不同，必须各自读：
+            //   · 抖音 douyin_downloaded.json（按作品）
+            //   · B 站 bili_downloaded.json（按分 P）
+            //   · X    x_downloaded.json（专用计数器，因为 download_ledger 上限 2000 会把它挤没）
+            var (_, ledgerBytes) = DownloadLedger.Instance.Stats();
+            var total = 0;
+            try
+            {
+                var dy = ParseDl.Services.Douyin.DouyinStore.Instance.Ledger;
+                dy.Load();
+                total += dy.DoneCount;
+            }
+            catch { }
+            try
+            {
+                var bili = ParseDl.Services.Bili.BiliLedger.Instance;
+                bili.Load();
+                total += bili.DoneCount;
+            }
+            catch { }
+            try { total += ParseDl.Services.X.XLedger.Count; } catch { }
             LedgerCount.Text = total.ToString();
-            DiskUsage.Text = DownloadItem.FormatSize(bytes);
+
+            // **磁盘占用 = 累加器，不扫盘**（2026-10-31）
+            var diskBytes = DiskUsageLedger.TotalBytes;
+            if (diskBytes <= 0) diskBytes = ledgerBytes;   // 没累加过就退回台账里的字节数
+            DiskUsage.Text = DownloadItem.FormatSize(diskBytes);
 
             RefreshRecentActivity();
 

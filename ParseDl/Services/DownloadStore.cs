@@ -545,6 +545,34 @@ public sealed class DownloadStore
                         it.Status = t.Status;
                         DownloadLedger.Instance.Record(it);
 
+                        // **磁盘占用：下完一条累加一次**（2026-10-31）。
+                        // 不扫盘的理由：扫一遍 847GB/3万文件要几十秒，
+                        // 而且文件被移走后数字会变小 —— 用户要看的是「累计下过多少」。
+                        if (t.Status == AriaStatus.Complete)
+                        {
+                            long realBytes = 0;
+                            try
+                            {
+                                if (!string.IsNullOrEmpty(it.FileName))
+                                {
+                                    var fp = System.IO.Path.Combine(it.Dir, it.FileName);
+                                    if (System.IO.File.Exists(fp)) realBytes = new System.IO.FileInfo(fp).Length;
+                                }
+                            }
+                            catch { }
+                            if (realBytes <= 0) realBytes = it.TotalBytes;
+
+                            var mod = string.IsNullOrEmpty(it.Module) ? "other" : it.Module;
+                            DiskUsageLedger.Add(mod, realBytes);
+
+                            // X 专用计数器：download_ledger 上限 2000 会把 X 挤没
+                            if (it.Module == "X 媒体")
+                            {
+                                ParseDl.Services.X.XLedger.MarkDone(
+                                    it.Gid, it.Url, it.FileName, it.Dir, realBytes);
+                            }
+                        }
+
                         // **失败自动重试**（2026-10-29 加）。
                         //
                         // 之前的缺口：aria2 自己的 --max-tries=10 只在单次任务内部重试，
