@@ -40,15 +40,24 @@ public sealed class DouyinAutoTask
     {
         Input = input;
         Url = url;
-        Label = DouyinUrl.TargetLabel(url);
     }
 
     /// <summary>用户写的原始那一行（可能夹着分享口令、表情、前后缀）。</summary>
     public string Input { get; }
     /// <summary>归一化后的地址（真正拿去打开的）。</summary>
     public string Url { get; }
-    /// <summary>列表里显示的短标签。</summary>
-    public string Label { get; }
+    /// <summary>
+    /// 列表里显示的短标签。
+    ///
+    /// **优先用作者名**（2026-10-31）。原来是构造时算好的只读属性，
+    /// 而 TargetLabel 只能从 URL 路径抠段 → 用户看到的是「作者 · MS4wLjABAAAA…」（抖音用户 ID），
+    /// 完全认不出是谁。而名单导入时其实已经读到了作者名（Author）。
+    ///
+    /// 必须是**计算属性**：Author 是构造之后才赋值的，写在构造器里会拿到空串。
+    /// </summary>
+    public string Label => string.IsNullOrWhiteSpace(Author)
+        ? DouyinUrl.TargetLabel(Url)
+        : "作者 · " + Author;
 
     /// <summary>
     /// 作者名（从「插眼导出器」的 Markdown 名单里读出来的）。
