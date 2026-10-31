@@ -58,33 +58,65 @@ public sealed partial class DouyinParsePage : Page
     /// <summary>点勾选圈后的短暂抑制窗口 —— 免得同一次点击又弹出预览。</summary>
     private DateTime _suppressTileClickUntil;
 
+    /// <summary>
+    /// 界面是否已经建过一次。
+    ///
+    /// **本页是常驻缓存的**（NavigationCacheMode=Required，见构造函数），所以
+    /// OnNavigatedTo 会**反复**触发：切到「下载管理」看一眼再切回来，都会再进一次。
+    /// 之前这里每次都无条件 AddHeader + BuildActionBar + InitWebAsync：
+    ///   · 页头越加越多；
+    ///   · WebView 被重新 Navigate → **抓取进度、滚动位置全丢**（用户报的「切页就刷新」）。
+    /// 现在只在首次建界面、首次初始化 WebView，之后回来只重挂事件。
+    /// </summary>
+    private bool _built;
+
     public DouyinParsePage()
     {
         InitializeComponent();
+
+        // **页面常驻缓存**（2026-11-01 用户要求「切去下载管理看一眼再回来，不要刷新，继续用」）。
+        // 与「抖音自动下载」页同一套做法：实例永不回收，WebView2 与已抓到的结果都留着。
+        NavigationCacheMode = Microsoft.UI.Xaml.Navigation.NavigationCacheMode.Required;
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
 
-        HeaderHost.Children.Add(UiKit.PageHeader("抖音解析下载",
-            "打开抖音页面 → 抓取作品 → 筛选勾选 → 批量下载（需先登录）", "\uE768"));
+        // **首次进页面才建界面 / 才初始化 WebView**（2026-11-01 修「切页就刷新」）。
+        // 本页 NavigationCacheMode=Required，切去「下载管理」再回来时 OnNavigatedTo 会再触发；
+        // 若这里无条件重建，WebView 会被 Navigate 回起始页，抓取进度与滚动位置全丢。
+        if (!_built)
+        {
+            _built = true;
+            HeaderHost.Children.Add(UiKit.PageHeader("抖音解析下载",
+                "打开抖音页面 → 抓取作品 → 筛选勾选 → 批量下载（需先登录）", "\uE768"));
+            UrlBox.Text = string.IsNullOrEmpty(_store.LastUrl) ? DouyinUrl.HomeUrl : _store.LastUrl;
+            BuildActionBar();
+            BuildOptionBar();
+            _ = InitWebAsync();
+        }
 
-        _store.Changed += OnStoreChanged;
+        // 台账每次进来都重读一次（别的页面可能刚下载完写了新记录）。
         _store.Ledger.Load();
-        UrlBox.Text = string.IsNullOrEmpty(_store.LastUrl) ? DouyinUrl.HomeUrl : _store.LastUrl;
-        BuildActionBar();
-        BuildOptionBar();
+
+        // 事件**先撤再挂**：切页多次回来不叠加 handler（会重复刷新 → 看起来像「闪」）。
+        _store.Changed -= OnStoreChanged;
+        _store.Changed += OnStoreChanged;
+
         ApplyLayout(BodyGrid.ActualWidth);
         RefreshList();
-        _ = InitWebAsync();
     }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
         base.OnNavigatedFrom(e);
+        // **离开页面不再停自动滚动**（2026-11-01 用户要求「切去下载管理看一眼再回来，
+        // 不要刷新，继续用」）。原来这里调 StopAutoScroll()，切页就把正在跑的滚动抓取掐断，
+        // 回来还得重开。页面本身已常驻缓存（NavigationCacheMode=Required），
+        // 后台继续滚是安全的；用户要停可以自己点「停止」。
+        // 只摘事件订阅 —— 留在订阅里会在不可见时白刷界面。
         _store.Changed -= OnStoreChanged;
-        StopAutoScroll();
     }
 
     // ── 自适应布局 ──────────────────────────────────────────────

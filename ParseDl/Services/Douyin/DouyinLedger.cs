@@ -351,7 +351,7 @@ public sealed class DouyinLedger
                     // **gid 查不到时的兜底**（2026-10-30）：aria2 会话没持久化，重启后上一进程的
                     // gid 就永远查不到了 —— 光凭 Unknown 只能一直挂着。改成看落盘目录：
                     // 目录里确实有文件，就认定它下完了。没文件则保持原状（不猜、也不撤）。
-                    if (!string.IsNullOrEmpty(r.Dir) && Directory.Exists(r.Dir) && Directory.EnumerateFiles(r.Dir).Any())
+                    if (HasAnyFile(r.Dir))
                     {
                         _records[id] = new DouyinDownloadRecord
                         {
@@ -368,7 +368,31 @@ public sealed class DouyinLedger
 
                 if (known.Any(s => s == DouyinTaskState.Failed))
                 {
-                    _records.Remove(id);
+                    // **不能整条删**（2026-11-01 修「我明明下载了，台账却显示没下载」）。
+                    //
+                    // 原来这里 `_records.Remove(id)`：只要这个作品有一条任务失败（BGM 音轨、
+                    // 实况配对视频、重复提交的旧 gid 都很容易失败），整条记录就从台账里消失。
+                    // 而同一作品的其它任务可能**早就下好了** —— 于是文件在盘上、台账没记录，
+                    // 下次抓取又整条重下。
+                    //
+                    // 现在改成：先看这个作品的目录里有没有落下东西。
+                    //   · 有文件 → 认定已下载，转成 Done（宁可多认，不要重复下几千个）；
+                    //   · 没文件 → 才删记录，允许下次重试。
+                    if (HasAnyFile(r.Dir))
+                    {
+                        _records[id] = new DouyinDownloadRecord
+                        {
+                            AwemeId = id,
+                            At = NextStamp(),
+                            Title = r.Title,
+                            Dir = r.Dir,
+                            Author = r.Author,
+                        };
+                    }
+                    else
+                    {
+                        _records.Remove(id);
+                    }
                     changed = true;
                     continue;
                 }
@@ -389,6 +413,22 @@ public sealed class DouyinLedger
             Save();
             return true;
         }
+    }
+
+    /// <summary>
+    /// 这个作品的落地目录里是否已经有文件。
+    ///
+    /// 用途：aria2 的 gid 查不到（重启后会话没持久化）或某条任务失败时，
+    /// **用磁盘事实兜底**，避免「文件在盘上、台账没记录」→ 下次重复下载。
+    /// </summary>
+    private static bool HasAnyFile(string? dir)
+    {
+        try
+        {
+            return !string.IsNullOrEmpty(dir) && Directory.Exists(dir)
+                && Directory.EnumerateFiles(dir).Any();
+        }
+        catch { return false; }
     }
 
     public void Remove(string awemeId)
