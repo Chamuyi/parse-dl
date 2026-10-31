@@ -377,9 +377,21 @@ public static class DouyinTemplate
         var dir = baseDir;
         if (useFolder && !string.IsNullOrWhiteSpace(dirTemplate))
         {
-            var sub = Expand(dirTemplate, item);
-            var segs = ParseDirSegments(sub);
-            foreach (var s in segs) dir = System.IO.Path.Combine(dir, s);
+            // **作者级目录名要「改名也不变」**（2026-10-31 用户要求）。
+            // 模板里出现 %AUTHOR% 时，展开出的 @昵称 会随改名变；
+            // 这里拿「作者稳定 ID → 首次用过的目录名」的映射把它钉死，
+            // 发现改名时连磁盘上的旧目录一起改名。
+            var authorSeg = TryBuildAuthorSegment(dirTemplate, item, dir);
+            if (authorSeg is not null)
+            {
+                dir = System.IO.Path.Combine(dir, authorSeg);
+            }
+            else
+            {
+                var sub = Expand(dirTemplate, item);
+                var segs = ParseDirSegments(sub);
+                foreach (var s in segs) dir = System.IO.Path.Combine(dir, s);
+            }
         }
 
         var tpl = string.IsNullOrWhiteSpace(nameTemplate)
@@ -388,6 +400,24 @@ public static class DouyinTemplate
         var expanded = FileNameTemplate.DouyinFilenamify(Expand(tpl, item).Trim(), item.Id);
         if (string.IsNullOrWhiteSpace(expanded)) expanded = item.Id;
         return (dir, expanded);
+    }
+
+    /// <summary>
+    /// 模板「只有作者一级」时，用记忆表把目录名钉死；否则返回 null 走原逻辑。
+    /// </summary>
+    private static string? TryBuildAuthorSegment(string dirTemplate, DouyinItem item, string parentDir)
+    {
+        var tpl = (dirTemplate ?? "").Trim();
+        if (!string.Equals(tpl, "%AUTHOR%", StringComparison.OrdinalIgnoreCase)) return null;
+
+        var stableId = !string.IsNullOrEmpty(item.UserId) ? item.UserId : item.AuthorUniqueId;
+        if (string.IsNullOrEmpty(stableId)) return null;
+
+        var name = Expand("%AUTHOR%", item).Trim();
+        var segs = ParseDirSegments(name);
+        if (segs.Count != 1) return null;
+
+        return DouyinAuthorDir.Resolve(stableId, segs[0], parentDir);
     }
 
     /// <summary>把文件夹模板拆成路径段（丢弃 .. 防止跳出保存目录）。</summary>
