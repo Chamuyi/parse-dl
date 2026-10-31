@@ -313,14 +313,19 @@ public sealed partial class DouyinAutoPage : Page
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             Height = 140,
-            PlaceholderText = "一行一个目标：\n" +
-                "https://www.douyin.com/user/MS4wLjABAAAA...（作者主页）\n" +
-                "https://www.douyin.com/video/7412345678901234567（作品）\n" +
-                "https://v.douyin.com/xxxx/（短链）\n" +
-                "7412345678901234567（纯作品 ID）\n" +
-                "分享口令整段粘进来也能认\n" +
-                "也可以直接粘「视频插眼导出器」导出的 Markdown 名单表格",
-            Text = _auto.RawText,
+            // **已导入名单时输入框不再显示整张表格**（2026-10-31 用户要求）：
+            // 内容在 _auto._parsed 里照常参与跑批，只是不再堆在框里看得眼花。
+            // 一旦用户手动改框内容，TextChanged 会正常走 SetRawText。
+            Text = _auto.ImportFolderName.Length > 0 ? "" : _auto.RawText,
+            PlaceholderText = _auto.ImportFolderName.Length > 0
+                ? "已导入名单（见下方）。如需手动帖链接，直接写在这里即可。"
+                : "一行一个目标：\n" +
+                  "https://www.douyin.com/user/MS4wLjABAAAA...（作者主页）\n" +
+                  "https://www.douyin.com/video/7412345678901234567（作品）\n" +
+                  "https://v.douyin.com/xxxx/（短链）\n" +
+                  "7412345678901234567（纯作品 ID）\n" +
+                  "分享口令整段粘进来也能认\n" +
+                  "也可以直接粘「视频插眼导出器」导出的 Markdown 名单表格",
             IsEnabled = !_auto.Running,
         };
         box.TextChanged += (_, _) => _auto.SetRawText(box.Text ?? "");
@@ -350,6 +355,29 @@ public sealed partial class DouyinAutoPage : Page
         var importBtn = new Button { Content = "导入名单（.md / .txt）", MinWidth = 150, IsEnabled = !_auto.Running };
         importBtn.Click += async (_, _) => await ImportFileAsync();
         row.Children.Add(importBtn);
+
+        // **导入后不再把名单内容写进上面的大输入框**（2026-10-31 用户要求）：
+        // 整张 Markdown 表格堆在框里又乱又难看。现在导入只在**导入按钮下方贴一小栏**显示文件名与条数，
+        // 大输入框留给「手贴链接」用途（不再被导入内容占满）。
+        if (_auto.ImportFolderName.Length > 0)
+        {
+            var importedBar = new Border
+            {
+                Background = UiKit.SubtleFill,
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(10, 7, 10, 7),
+                Child = new TextBlock
+                {
+                    Text = "已导入：" + _auto.ImportFolderName + "（" + _auto.Total + " 个目标）",
+                    FontSize = 12,
+                    Opacity = 0.85,
+                    TextWrapping = TextWrapping.Wrap,
+                    IsTextSelectionEnabled = true,
+                },
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(importedBar, "imported-file-bar");
+            row.Children.Add(importedBar);
+        }
         panel.Children.Add(row);
 
         TargetCardHost.Children.Add(UiKit.SectionCard("目标名单", panel,
@@ -708,6 +736,10 @@ public sealed partial class DouyinAutoPage : Page
             // **记下导入的文件名**，用作下载的顶层文件夹（用户 2026-10-29 要求）：
             // downloads\<名单文件名>\<文件夹模板>\<文件名模板>
             _auto.SetImportFolderName(fileName);
+            // **导入后清空大输入框**（2026-10-31 用户要求）：
+            // 整张 Markdown 表格堆进去又乱又难看，且下次手贴链接还要先删一大段。
+            // 目标已经进 _auto._parsed，清空输入框不影响跑批（它只是展示用）。
+            BuildTargetCard();   // 重建目标卡：输入框留空，导入信息显示在按钮下方小栏
             AppendLog("已从 " + fileName + " 导入名单（" + _auto.Total + " 个目标）"
                       + (_auto.ImportFolderName.Length > 0
                           ? "，将存入同名文件夹「" + _auto.ImportFolderName + "」" : ""));

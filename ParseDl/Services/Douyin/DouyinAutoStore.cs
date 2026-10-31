@@ -279,7 +279,6 @@ public sealed class DouyinAutoStore
         catch { }
     }
 
-    /// <summary>设置「导入文件名」顶层文件夹（空串 = 不建这层）。</summary>
     /// <summary>开关「按文件名建文件夹」。</summary>
     public void SetFolderByName(bool v, bool persist = true)
     {

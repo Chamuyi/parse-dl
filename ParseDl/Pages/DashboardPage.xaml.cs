@@ -35,6 +35,8 @@ public sealed partial class DashboardPage : Page
         ("bili-batch", "\uE8EF", "B 站批量", "主页 / 合集 / 收藏夹"),
     };
 
+    private DispatcherTimer? _diskTimer;
+
     public DashboardPage()
     {
         InitializeComponent();
@@ -44,7 +46,46 @@ public sealed partial class DashboardPage : Page
             Refresh();
             ApplyResponsive();
             RootScroll.SizeChanged += (_, _) => ApplyResponsive();
+            StartDiskTicker();
         };
+        Unloaded += (_, _) => StopDiskTicker();
+    }
+
+    /// <summary>
+    /// **磁盘占用实时刷新**（2026-10-31 用户要求）。
+    ///
+    /// 为什么需要：DiskUsageLedger 只在下载完成时累加并写盘，
+    /// **不会通知界面**。而总览页只有 Loaded 一次 Refresh，
+    /// 于是停在总览页看着数字不动（必须切走再切回才变）。
+    /// 这里每 2 秒读一次累加值，数字会随下载往上涨。
+    /// </summary>
+    private void StartDiskTicker()
+    {
+        if (_diskTimer is not null) return;
+        _diskTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _diskTimer.Tick += (_, _) =>
+        {
+            try
+            {
+                var b = DiskUsageLedger.TotalBytes;
+                if (b > 0) DiskUsage.Text = DownloadItem.FormatSize(b);
+
+                // 「累计下载」也一并跟着走：抖音作品数在下载过程中也会增。
+                var total = 0;
+                try { var dy = ParseDl.Services.Douyin.DouyinStore.Instance.Ledger; dy.Load(); total += dy.DoneCount; } catch { }
+                try { var bl = ParseDl.Services.Bili.BiliLedger.Instance; bl.Load(); total += bl.DoneCount; } catch { }
+                try { total += ParseDl.Services.X.XLedger.Count; } catch { }
+                LedgerCount.Text = total.ToString();
+            }
+            catch { }
+        };
+        _diskTimer.Start();
+    }
+
+    private void StopDiskTicker()
+    {
+        _diskTimer?.Stop();
+        _diskTimer = null;
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
