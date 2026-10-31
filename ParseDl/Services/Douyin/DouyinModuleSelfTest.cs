@@ -447,6 +447,19 @@ public static class DouyinModuleSelfTest
         Check("status_code 非 0 判失败且提示含状态码",
             !limited.Ok && limited.Message.Contains("2154"), limited.Message);
 
+        // ── 作者目录记忆 + 任务队列作者名（2026-10-31 加）──
+        var aid = "uid_selftest_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var n1 = DouyinAuthorDir.Resolve(aid, "@改名前");
+        var n2 = DouyinAuthorDir.Resolve(aid, "@改名后");
+        Check("作者改名后目录名不变", n2 == n1, n1 + " vs " + n2);
+
+        var urlUser = "https://www.douyin.com/user/MS4wLjABAAAAxyz";
+        var t1 = new DouyinAutoTask(urlUser, urlUser);
+        t1.Author = "茶沐依";
+        Check("任务队列显示作者名", t1.Label.Contains("茶沐依"), t1.Label);
+        var t2 = new DouyinAutoTask(urlUser, urlUser);
+        Check("无作者名时退回 URL 标签", t2.Label.Contains("MS4wLjABAAAA"), t2.Label);
+
         sb.AppendLine("抖音模块 合计: 通过 " + pass + ", 失败 " + fail);
         return sb.ToString();
     }
