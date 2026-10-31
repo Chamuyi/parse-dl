@@ -63,9 +63,11 @@ public static class DouyinEnqueuer
                 // 队列恢复时要靠这两个字段回页面现取新地址。
                 // PostId 是所属作品；为空时退回 Id（单条媒体页的情况）。
                 var awemeId = string.IsNullOrEmpty(m.PostId) ? m.Id : m.PostId;
+                // **把作者名也带进队列**（2026-11-01 用户要求）：链接取不回来时
+                // 要能告诉用户「作者是谁 + 作品 ID + 链接」，让他手动去找。
                 var (ok, _) = await DownloadStore.Instance.AddAsync(
                     m.Url, Module, dir, fileName, m.PreviewUrl,
-                    awemeId: awemeId, mediaIndex: m.MediaIndex);
+                    awemeId: awemeId, mediaIndex: m.MediaIndex, author: m.UserName);
                 if (!ok)
                 {
                     result.Failed++;

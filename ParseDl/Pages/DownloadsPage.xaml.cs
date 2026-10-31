@@ -468,22 +468,38 @@ public sealed partial class DownloadsPage : Page
     {
         try
         {
-            // **过期的签名链接直接拒掉**（2026-10-31）。
+            // **过期链接不再直接拒掉，改成现取新地址**（2026-11-01）。
             //
-            // 抖音 CDN 直链带时效签名，过期后一律 403。原样重试只是再投一次
-            // 同一个死链接 —— 用户看到的就是「点了重试，还是错误」反复循环。
-            // 这里提前判出来，让上层给出「需重新抓取」的明确说法。
-            if (SignedUrl.IsExpired(item.Url))
+            // 原来这里是「过期 → return false」，只给用户一句「需重新抓取」，
+            // 等于把活推回给人。现在按作品 ID 现取一份新鲜直链再提交：
+            // 页面自己带签名请求，拦截器抄响应，签名怎么变都不用跟着改。
+            // 取不到才把「作者 + 作品 ID + 链接」写进错误信息，让用户手动处理。
+            var url = item.Url;
+            if (SignedUrl.IsExpired(url))
             {
                 LastRetryExpired = true;
-                return false;
+                var fresh = await ParseDl.Services.Douyin.DouyinAddressResolver
+                    .ResolveAnyAsync(item.AwemeId ?? "", item.MediaIndex);
+                if (!fresh.Ok)
+                {
+                    item.Error = "重试失败（链接已过期且取址失败：" + fresh.Message + "）"
+                                 + "｜作者：" + (string.IsNullOrEmpty(item.Author) ? "未知" : item.Author)
+                                 + "｜作品：" + (string.IsNullOrEmpty(item.AwemeId)
+                                     ? "（无 ID）"
+                                     : "https://www.douyin.com/video/" + item.AwemeId);
+                    return false;
+                }
+                url = fresh.Url;
             }
+
             await DownloadStore.Instance.RemoveAsync(item);
             var (ok, _) = await DownloadStore.Instance.AddAsync(
-                item.Url,
+                url,
                 item.Module,
                 string.IsNullOrEmpty(item.Dir) ? null : item.Dir,
-                string.IsNullOrEmpty(item.FileName) ? null : item.FileName);
+                string.IsNullOrEmpty(item.FileName) ? null : item.FileName,
+                awemeId: item.AwemeId,
+                mediaIndex: item.MediaIndex);
             return ok;
         }
         catch

@@ -67,7 +67,26 @@
             <NavigationView.Resources>
                 <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
             </NavigationView.Resources>
-            <Frame x:Name="NavFrame" CacheSize="10" />
+            <!--
+              NavigationView 的内容只能有一个直接子元素，所以 Frame 与
+              「隐藏取址浏览器宿主」一起放进同一个 Grid。
+            -->
+            <Grid>
+                <Frame x:Name="NavFrame" CacheSize="10" />
+
+                <!--
+                  **隐藏取址浏览器宿主**（2026-11-01）。
+                  过期直链要按作品 ID 现取新地址，做法是「导航到作品页、让页面自己发请求、
+                  拦截器抄响应」。不能借用解析页那个 WebView —— 用户可能正在上面滚动抓取，
+                  导航走会把页面顶掉。这里给一个 1x1、全透明、不接受点击的容器：
+                  肉眼看不见、也不抢焦点，但 WebView2 能正常加载与执行脚本。
+                  IsHitTestVisible=False 保证它不吃鼠标；Opacity=0 不留渲染痕迹。
+                -->
+                <Grid x:Name="RefetchHost"
+                      Width="1" Height="1"
+                      HorizontalAlignment="Left" VerticalAlignment="Top"
+                      Opacity="0" IsHitTestVisible="False" />
+            </Grid>
         </NavigationView>
     </Grid>
 </Window>

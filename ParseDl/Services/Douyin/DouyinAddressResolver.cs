@@ -28,6 +28,28 @@ public static class DouyinAddressResolver
     public sealed record Resolved(bool Ok, string Url, string Message);
 
     /// <summary>
+    /// 作品 ID → 作品页链接。
+    ///
+    /// **单一出处**：<see cref="DouyinRefetchHost"/> 的导航与给用户看的
+    /// 「手动去下」链接都必须用这个，避免两处各拼一遍导致不一致。
+    /// </summary>
+    public static string PageUrlFor(string awemeId)
+        => "https://www.douyin.com/video/" + (awemeId ?? "");
+
+    /// <summary>
+    /// 把「媒体序号」夹到列表下标。
+    ///
+    /// 约定：<paramref name="mediaIndex"/> 从 **1** 开始（与 %MEDIA_INDEX% 一致），
+    /// 0 表示未记录 → 取第一条；越界也回落到第一条（宁可供错不可供空）。
+    /// </summary>
+    public static int ClampIndex(int mediaIndex, int count)
+    {
+        if (count <= 0) return 0;
+        var idx = mediaIndex <= 0 ? 0 : mediaIndex - 1;
+        return idx >= count ? 0 : idx;
+    }
+
+    /// <summary>
     /// 页面内 fetch 的脚本。返回 JSON.stringify 后的结果。
     /// 失败时返回 {"ok":false,"msg":"..."}，不抛异常（ExecuteScriptAsync 里抛了外面看不到）。
     /// </summary>
@@ -85,9 +107,7 @@ public static class DouyinAddressResolver
             if (aweme is null || aweme.Media.Count == 0)
                 return new Resolved(false, "", "该作品没有可下载的媒体");
 
-            // mediaIndex 从 1 开始（与 %MEDIA_INDEX% 一致）；0 表示未记录，取第一条
-            var idx = mediaIndex <= 0 ? 0 : mediaIndex - 1;
-            if (idx >= aweme.Media.Count) idx = 0;
+            var idx = ClampIndex(mediaIndex, aweme.Media.Count);
 
             var url = aweme.Media[idx].Url;
             if (string.IsNullOrEmpty(url))
@@ -103,10 +123,44 @@ public static class DouyinAddressResolver
     /// <summary>
     /// 让调用方注入「执行页面脚本」的实现（页面持有 WebView2，服务层拿不到）。
     /// 返回脚本的原始返回值；页面未就绪时返回 null。
+    ///
+    /// **2026-11-01 起这条路径不再是主路**：脚本里只有 aweme_id 与静态参数、
+    /// 没有 a_bogus 签名，实测裸调该接口 403。真正生效的是下面的
+    /// <see cref="ResolveViaPageAsync"/>（打开作品页、让页面自己发请求）。
+    /// 保留它是因为解析页/自动下载页本来就跑着抖音页面，走它更省事；
+    /// 但它失败时调用方应回落到页面导航那条路。
     /// </summary>
     public static Func<string, Task<string?>>? Executor { get; set; }
 
-    /// <summary>按作品 ID 现取一条新鲜地址。失败返回 Ok=false + 原因。</summary>
+    /// <summary>
+    /// **统一取址入口**（2026-11-01）—— 按作品 ID 现取一条新鲜直链。
+    ///
+    /// 顺序：
+    ///   ① 若调用方注入过 <see cref="Executor"/>（解析页/自动下载页正跑着抖音页面），
+    ///      先试「页面内 fetch 接口」那条 —— 省一次导航；
+    ///   ② 失败或没注入，回落到 <see cref="DouyinRefetchHost.RefetchAsync"/>：
+    ///      用隐藏 WebView 打开作品页，让页面自己带签名请求，拦截器抄响应。
+    ///
+    /// 为什么要回落：① 那条脚本**没有 a_bogus 签名**，实测裸调 403，
+    /// 历史上从未成功过（日志里一条「已按作品 ID 现取新地址」都没有）；
+    /// ② 那条路依赖某个页面实例活着，用户切页/没打开抖音页时就没有上下文。
+    /// </summary>
+    public static async Task<Resolved> ResolveAnyAsync(string awemeId, int mediaIndex)
+    {
+        if (string.IsNullOrWhiteSpace(awemeId))
+            return new Resolved(false, "", "没有作品 ID，无法重新取地址");
+
+        if (Executor is not null)
+        {
+            var viaApi = await ResolveAsync(awemeId, mediaIndex);
+            if (viaApi.Ok) return viaApi;
+            Aria2Engine.Log("[取址] 接口路径失败（" + viaApi.Message + "），改用打开作品页取址");
+        }
+
+        return await DouyinRefetchHost.RefetchAsync(awemeId, mediaIndex);
+    }
+
+    /// <summary>按作品 ID 现取一条新鲜地址（页面内 fetch 接口版）。失败返回 Ok=false + 原因。</summary>
     public static async Task<Resolved> ResolveAsync(string awemeId, int mediaIndex)
     {
         if (string.IsNullOrWhiteSpace(awemeId))

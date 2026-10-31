@@ -43,6 +43,15 @@ public sealed class DownloadItem : System.ComponentModel.INotifyPropertyChanged
     public string? AwemeId { get; init; }
     public int MediaIndex { get; init; }
 
+    /// <summary>
+    /// 作者名（抖音侧传入）。
+    ///
+    /// **为什么入队时就要存**（2026-11-01）：用户要求「链接取不回来时，
+    /// 得把作者是谁、作品 ID 都给我，让我能手动去找」。而任务失败时
+    /// 再去反查作者只能靠台账（可能已被清空），不如入队时就带上。
+    /// </summary>
+    public string? Author { get; init; }
+
     public DateTime CreatedAt { get; init; } = DateTime.Now;
 
     /// <summary>
@@ -72,7 +81,7 @@ public sealed class DownloadItem : System.ComponentModel.INotifyPropertyChanged
         {
             if (_status == value) return;
             _status = value;
-            RaiseAll(nameof(Status), nameof(StatusText), nameof(PauseLabel), nameof(RetryVisibility), nameof(ProgressText));
+            RaiseAll(nameof(Status), nameof(StatusText), nameof(PauseLabel), nameof(RetryVisibility), nameof(ProgressText), nameof(FailHint));
         }
     }
     private long _completed;
@@ -205,6 +214,27 @@ public sealed class DownloadItem : System.ComponentModel.INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// **出错时的可手动处理信息**（2026-11-01 用户要求）。
+    ///
+    /// 用户原话：「如果这样还是无法下载的话，记得给出作者是谁，作品 id，啥的都给我，
+    /// 让我能够手动找到尝试下载」。所以出错行除了原因，还要给：
+    ///   · 作者名；
+    ///   · 作品 ID 拼成的可点链接 https://www.douyin.com/video/&lt;id&gt;。
+    /// 只在「错误」状态显示 —— 正常下载时这行不占地方。
+    /// </summary>
+    public string FailHint
+    {
+        get
+        {
+            if (Status != AriaStatus.Error) return "";
+            var who = string.IsNullOrEmpty(Author) ? "作者未知" : Author;
+            if (string.IsNullOrEmpty(AwemeId))
+                return "作者：" + who + "　（无作品 ID，无法给出链接）";
+            return "作者：" + who + "　作品：https://www.douyin.com/video/" + AwemeId;
+        }
+    }
+
     /// <summary>暂停按钮的文字（暂停中显示「继续」）。</summary>
     public string PauseLabel => Status == AriaStatus.Paused ? "继续" : "暂停";
 
@@ -282,7 +312,7 @@ public sealed class DownloadStore
     /// </summary>
     public async Task<(bool Ok, string Message)> AddAsync(
         string url, string module, string? dir = null, string? outName = null, string? previewUrl = null,
-        string? awemeId = null, int mediaIndex = 0)
+        string? awemeId = null, int mediaIndex = 0, string? author = null)
     {
         if (string.IsNullOrWhiteSpace(url)) return (false, "地址为空");
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
@@ -339,6 +369,22 @@ public sealed class DownloadStore
         //     否则 1080P 视频流 403 / errorCode=1
         //   其他（video.twimg.com、抖音 CDN）→ **绝不能带**，
         //     带了反而被 CDN 403（实测 X 队列全红就是上一版全局 referer 干的）
+        // **入队前若链接已过期，先按作品 ID 现取新地址**（2026-11-01）。
+        //
+        // 原来只有「恢复队列」那条路会刷新过期链接，手动下载 / 自动下载的新任务
+        // 直接拿原 URL 提交 —— 若这个 URL 是几小时前抓的（或从队列里读出来的），
+        // 提交进去就是 403，白占一轮重试。这里补上。
+        if (SignedUrl.IsExpired(url) && !string.IsNullOrEmpty(awemeId))
+        {
+            var fresh = await ParseDl.Services.Douyin.DouyinAddressResolver
+                .ResolveAnyAsync(awemeId!, mediaIndex);
+            if (!fresh.Ok)
+                return (false, "链接已过期且取址失败：" + fresh.Message);
+            url = fresh.Url;
+            PurgeStaleControlFile(targetDir, outName);
+        }
+
+        // Referer 必须在**换过 URL 之后**再算 —— 新地址可能落在另一个域名上。
         var referer = RefererFor(url);
         var gid = await _engine.AddUriAsync(url, targetDir, outName, referer);
         if (string.IsNullOrEmpty(gid)) return (false, "aria2 拒绝该任务");
@@ -346,7 +392,7 @@ public sealed class DownloadStore
         var item = new DownloadItem
         {
             Gid = gid, Url = url, Module = module, PreviewUrl = previewUrl ?? "",
-            AwemeId = awemeId, MediaIndex = mediaIndex,
+            AwemeId = awemeId, MediaIndex = mediaIndex, Author = author,
         };
         if (!string.IsNullOrEmpty(outName)) item.FileName = outName;
         item.Dir = targetDir;
@@ -605,10 +651,30 @@ public sealed class DownloadStore
                                 try { await Task.Delay(delay); } catch { return; }
                                 try
                                 {
-                                    // 重新入队（同一个 URL / 目录 / 文件名）
+                                    // **过期链接必须先换新地址**（2026-11-01 修）。
+                                    //
+                                    // 原来这里直接用 snapshot.Url 重试：抖音直链几小时就过期，
+                                    // 过期后 CDN 一律 403 —— 6 次退避重试全打在同一个死链接上，
+                                    // 必然全部失败；而 .aria2 控制文件还在，续传也接不上。
+                                    // 现在按作品 ID 现取一份新地址再提交；取不到就明确记一条，
+                                    // 让界面能报「作者 + 作品 ID + 链接」给用户手动处理。
+                                    var retryUrl = snapshot.Url;
+                                    if (SignedUrl.IsExpired(retryUrl))
+                                    {
+                                        var fresh = await ParseDl.Services.Douyin.DouyinAddressResolver
+                                            .ResolveAnyAsync(snapshot.AwemeId ?? "", snapshot.MediaIndex);
+                                        if (!fresh.Ok)
+                                        {
+                                            RecordUnrecoverable(snapshot, fresh.Message);
+                                            return;
+                                        }
+                                        retryUrl = fresh.Url;
+                                        PurgeStaleControlFile(snapshot.Dir, snapshot.FileName);
+                                    }
+
                                     var gid = await _engine.AddUriAsync(
-                                        snapshot.Url, snapshot.Dir, snapshot.FileName,
-                                        RefererFor(snapshot.Url));
+                                        retryUrl, snapshot.Dir, snapshot.FileName,
+                                        RefererFor(retryUrl));
                                     if (!string.IsNullOrEmpty(gid))
                                     {
                                         OnUi(() =>
@@ -682,6 +748,88 @@ public sealed class DownloadStore
         TimeSpan.FromSeconds(60),
         TimeSpan.FromSeconds(90),
     };
+
+    // ── 过期链接无法自愈时的处理（2026-11-01）────────────────────
+
+    /// <summary>
+    /// **删掉旧链接留下的 .aria2 控制文件**。
+    ///
+    /// 换新地址后必须删：控制文件里记的是**旧 URL 的分片校验信息**，
+    /// 继续用它续传，aria2 会按旧的分片边界去写新响应，结果是文件损坏或永远卡住。
+    /// </summary>
+    private static void PurgeStaleControlFile(string? dir, string? fileName)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(fileName)) return;
+            var ctrl = System.IO.Path.Combine(dir, fileName) + ".aria2";
+            if (System.IO.File.Exists(ctrl)) System.IO.File.Delete(ctrl);
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 记录一条「**重试也救不回来**」的任务，并把足够用户手动处理的信息写进日志与台账。
+    ///
+    /// 用户 2026-11-01 明确要求：「如果这样还是无法下载的话，记得给出作者是谁，
+    /// 作品 id，啥的都给我，让我能够手动找到尝试下载」。
+    ///
+    /// 所以这里落的是**可操作的信息**，不是「失败了」三个字：
+    ///   · 作者名（从台账里该作品的记录取，拿不到就标未知）
+    ///   · 作品 ID → 拼出 https://www.douyin.com/video/<id> 让用户直接点开
+    ///   · 文件名 + 目标目录（便于去磁盘上确认是不是已经下过）
+    ///   · 失败原因
+    /// 同时写进 `download_ledger.json`，界面「错误」Tab 就能看到同一份信息。
+    /// </summary>
+    private static void RecordUnrecoverable(DownloadItem item, string reason)
+    {
+        try
+        {
+            var awemeId = item.AwemeId ?? "";
+            var author = "";
+            try
+            {
+                var rec = ParseDl.Services.Douyin.DouyinStore.Instance.Ledger
+                    .Records.FirstOrDefault(r => r.AwemeId == awemeId);
+                author = rec?.Author ?? "";
+            }
+            catch { }
+
+            var link = string.IsNullOrEmpty(awemeId)
+                ? "（无作品 ID）"
+                : "https://www.douyin.com/video/" + awemeId;
+            var who = string.IsNullOrEmpty(author) ? "（台账里没有作者信息）" : author;
+
+            var line = "[取址失败] 作者=" + who
+                       + " | 作品ID=" + (string.IsNullOrEmpty(awemeId) ? "?" : awemeId)
+                       + " | 链接=" + link
+                       + " | 文件=" + (item.FileName ?? "")
+                       + " | 目录=" + (item.Dir ?? "")
+                       + " | 原因=" + reason;
+            Aria2Engine.Log(line);
+
+            // 顺手落台账：界面「错误」Tab 显示的就是 Error 字段，用户能直接复制链接。
+            OnUiStatic(() =>
+            {
+                item.Status = AriaStatus.Error;
+                item.Error = "取址失败：" + reason
+                              + "｜作者：" + who
+                              + "｜作品：" + link;
+            });
+        }
+        catch { }
+    }
+
+    /// <summary>静态版 OnUi —— 供静态辅助方法往 UI 线程投递（拿不到实例时静默跳过）。</summary>
+    private static void OnUiStatic(Action action)
+    {
+        try
+        {
+            var ui = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+            if (ui is not null) { ui.TryEnqueue(() => action()); return; }
+        }
+        catch { }
+    }
 
     private void OnUi(Action action)
     {
@@ -813,7 +961,7 @@ public sealed class DownloadStore
                 if (SignedUrl.IsExpired(url))
                 {
                     var fresh = await ParseDl.Services.Douyin.DouyinAddressResolver
-                        .ResolveAsync(e.AwemeId ?? "", e.MediaIndex);
+                        .ResolveAnyAsync(e.AwemeId ?? "", e.MediaIndex);
                     if (fresh.Ok)
                     {
                         url = fresh.Url;

@@ -308,6 +308,25 @@ public static class DouyinModuleSelfTest
             DouyinAutoStore.SanitizeFolderName("a:b*c.md").IndexOf('_') >= 0,
             DouyinAutoStore.SanitizeFolderName("a:b*c.md"));
 
+        // ── 过期链接取新址（2026-11-01 补）──────────────────────────
+        // 取址脚本里**不能没有签名参数**「a_bogus」——抖音 web 接口强制要求它，
+        // 裸调返回 403（实测）。而主路已改为「打开作品页让页面自己发请求」，
+        // 所以这里主要守两件事：① 作品 ID → 链接能正确拼出来；
+        // ② 截断逻辑（mediaIndex 从 1 开始、越界回落到第一条）。
+        Check("作品 ID 能拼出作品页链接",
+            DouyinAddressResolver.PageUrlFor("7687206401224052645")
+                == "https://www.douyin.com/video/7687206401224052645",
+            DouyinAddressResolver.PageUrlFor("7687206401224052645"));
+        Check("媒体序号越界回落到第一条",
+            DouyinAddressResolver.ClampIndex(99, 3) == 0
+            && DouyinAddressResolver.ClampIndex(0, 3) == 0
+            && DouyinAddressResolver.ClampIndex(2, 3) == 1,
+            DouyinAddressResolver.ClampIndex(2, 3).ToString());
+        Check("过期链接判定：已过期",
+            SignedUrl.IsExpired(
+                "https://v26-web.douyinvod.com/66c9b4062cadc768bc5f1ab5901af196/6ae50d65/video/tos/cn/x.mp4"),
+            "True");
+
         // ── ⑥ 目标解析 ───────────────────────────────────────
         var targets = DouyinAutoStore.ParseTargets(
             "https://www.douyin.com/user/MS4wLjABAAAAa\n" +

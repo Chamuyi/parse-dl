@@ -53,6 +53,17 @@
                         <!-- 状态 + 错误 -->
                         <TextBlock Text="{x:Bind StatusLine, Mode=OneWay}" FontSize="11" Opacity="0.62"
                                    TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+
+                        <!--
+                          **出错时给出可手动处理的信息**（2026-11-01 用户要求：
+                          「给出作者是谁，作品 id，啥的都给我，让我能手动找到尝试下载」）。
+                          只在 Error 状态有文字，正常下载时这条自动隐藏。
+                          用 IsTextSelectionEnabled 让用户能直接复制作品 ID 与链接。
+                        -->
+                        <TextBlock Text="{x:Bind FailHint, Mode=OneWay}" FontSize="11"
+                                   Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                   IsTextSelectionEnabled="True"
+                                   TextWrapping="Wrap" />
                     </StackPanel>
 
                     <!-- ② 大小 / 速度（用户要求加速度） -->

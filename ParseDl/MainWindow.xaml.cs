@@ -90,6 +90,11 @@ public sealed partial class MainWindow : Window
         BuildNav();
         NavFrame.Navigate(typeof(DashboardPage), this);
 
+        // **挂上隐藏取址浏览器**（2026-11-01）：过期直链要按作品 ID 现取新地址。
+        // 挂在主窗口而不是各页面里 —— 取址是全局能力，任何页面的重试都可能用到，
+        // 而页面会被缓存/销毁，放页面里迟早出现「没有可用页面上下文」。
+        ParseDl.Services.Douyin.DouyinRefetchHost.Attach(RefetchHost);
+
         Activated += (_, e) =>
             _material.UpdateState(RootGrid.ActualTheme == ElementTheme.Dark,
                                   e.WindowActivationState != WindowActivationState.Deactivated);
