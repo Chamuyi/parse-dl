@@ -37,11 +37,49 @@ public static class XNaming
             return full;
         }
     
+        /// <summary>
+        /// 扩展名（不含点）—— **与 Flutter 版逐条对齐**（2026-10-31 修）。
+        ///
+        /// 旧实现是 `m.Type is "video" or "gif" ? "mp4" : "jpg"`，图片一律 jpg。
+        /// 但 Flutter 版的 `%EXT%` 是**先看下载链接的真实后缀**：
+        ///   `url.split('?').first.split('.').last` 若匹配 `^[A-Za-z0-9]{1,5}$` 就取它，
+        ///   否则退回 `Media.extension`。
+        /// X 的图片 URL 是 `https://pbs.twimg.com/media/<id>.png?name=orig`，
+        /// 于是 **png 图会落成 .png**（实测 D:\\下载目录 下有 851 个 .png 就是这么来的）。
+        /// 两版不一致会让同一张图一边叫 x.png、一边叫 x.jpg，文件名对不上。
+        /// </summary>
+        public static string ExtensionFor(XMedia m)
+        {
+            // ① 先看下载链接的真实后缀（与 Flutter EXT 的第一条分支完全一致）
+            var url = m.Url ?? "";
+            if (url.Length > 0)
+            {
+                var noQuery = url.Split((char)63)[0];          // 去掉 ?query
+                var dot = noQuery.LastIndexOf((char)46);
+                if (dot >= 0)
+                {
+                    var tail = noQuery[(dot + 1)..];
+                    // 注意：**不转小写**。Flutter 那边 `return '.$tail'` 是原样返回，
+                    // 转了小写会让 `ABC.PNG` 这种变成 .png，与旧版产出对不上。
+                    if (tail.Length is >= 1 and <= 5 && tail.All(char.IsAsciiLetterOrDigit))
+                        return tail;
+                }
+            }
+            // ② 退回按媒体类型（对齐 Media.extension）
+            return m.Type switch
+            {
+                "video" => "mp4",
+                "audio" => "mp3",
+                "gif" => "gif",
+                _ => "jpg",
+            };
+        }
+
         /// <summary>模板上下文（文件名与目录共用，保证两处变量取值完全一致）。</summary>
         public static TemplateContext BuildContext(XPost p, int mediaIndex)
         {
             var m = p.Media[mediaIndex];
-            var ext = m.Type is "video" or "gif" ? "mp4" : "jpg";
+            var ext = ExtensionFor(m);
             return new TemplateContext
             {
                 PostId = p.Id,
@@ -57,6 +95,7 @@ public static class XNaming
                 MediaType = m.Type,
                 Extension = ext,
                 Content = p.Text,
+                Tags = p.Tags,
             };
         }
     
@@ -68,7 +107,7 @@ public static class XNaming
                 ? "%POST_TIME% %USER_SCREEN_NAME% %POST_ID%-%MEDIA_INDEX%%EXT%"
                 : settings.FileNameTemplate;
     
-            var ext = m.Type is "video" or "gif" ? "mp4" : "jpg";
+            var ext = ExtensionFor(m);
             var ctx = BuildContext(p, mediaIndex);
     
             var name = FileNameTemplate.UnicodeFilenamify(FileNameTemplate.Resolve(tpl, ctx));

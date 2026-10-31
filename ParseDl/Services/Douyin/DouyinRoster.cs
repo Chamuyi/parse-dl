@@ -67,7 +67,7 @@ public static class DouyinRoster
                 if (bareUrl is null) continue;   // 标题、条数、导出时间等，忽略
 
                 if (!seen.Add(bareUrl)) continue;
-                if (tasks.Count >= maxTargets) { truncated++; continue; }
+            // **不再限制名单数量**（2026-10-30 用户要求「名单数量限制取消了，不要限制」）
                 tasks.Add(new DouyinAutoTask(line, bareUrl));
                 continue;
             }
@@ -111,7 +111,7 @@ public static class DouyinRoster
             }
 
             if (!seen.Add(url)) continue;
-            if (tasks.Count >= maxTargets) { truncated++; continue; }
+            // **不再限制名单数量**（2026-10-30 用户要求「名单数量限制取消了，不要限制」）
 
             // 把作者名带上，后面按模板建文件夹时要用
             var author = nameCol >= 0 && nameCol < cells.Count ? cells[nameCol] : "";

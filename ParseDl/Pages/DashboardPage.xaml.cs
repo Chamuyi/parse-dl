@@ -16,15 +16,23 @@ public sealed partial class DashboardPage : Page
 {
     private MainWindow? _host;
 
-    /// <summary>快捷开始 6 个入口（顺序与 Flutter 版 quickEntries 一致）。</summary>
+    /// <summary>
+    /// 快捷开始 6 个入口。**顺序按模块成对排列**（2026-10-30 修）——
+    /// 每列上下两个是同一个模块的入口，不再是按行铺导致跨模块错位。
+    ///
+    /// 列0 = X（主页 / 自动执行）、列1 = 抖音（解析 / 自动下载）、列2 = B站（解析 / 批量）。
+    /// </summary>
     private static readonly (string RouteId, string Glyph, string Title, string Sub)[] QuickEntries =
     {
+        // 列 0：X
         ("home", "\uE80F", "X 主页", "输入用户 ID 批量下载"),
-        ("douyin", "\uE768", "解析抖音作品", "左边浏览，右边抓取"),
-        ("bili", "\uE768", "解析 B 站稿件", "支持合集 / 系列 / 收藏夹"),
         ("auto-task", "\uE945", "自动执行", "按名单批量跑 X 用户"),
-        ("bili-batch", "\uE8EF", "B 站批量", "主页 / 合集 / 收藏夹"),
+        // 列 1：抖音
+        ("douyin", "\uE768", "解析抖音作品", "左边浏览，右边抓取"),
         ("douyin-auto", "\uE945", "抖音自动下载", "按目标批量滚动抓取"),
+        // 列 2：B站
+        ("bili", "\uE768", "解析 B 站稿件", "支持合集 / 系列 / 收藏夹"),
+        ("bili-batch", "\uE8EF", "B 站批量", "主页 / 合集 / 收藏夹"),
     };
 
     public DashboardPage()
@@ -115,8 +123,9 @@ public sealed partial class DashboardPage : Page
             var capturedRoute = routeId;
             btn.Click += (_, _) => _host?.Navigate(capturedRoute);
 
-            Grid.SetRow(btn, i / 3);
-            Grid.SetColumn(btn, i % 3);
+            // **按列填充**（2026-10-30 修）：每列上下是同一模块的两个入口。
+            Grid.SetColumn(btn, i / 2);
+            Grid.SetRow(btn, i % 2);
             QuickGrid.Children.Add(btn);
         }
     }
@@ -154,21 +163,100 @@ public sealed partial class DashboardPage : Page
         }
     }
 
+    /// <summary>
+    /// 填「最近活动」—— 取台账里最近的几条（2026-10-30 修）。
+    ///
+    /// 原来这块 XAML 里写死一行「还没有下载任务」，从来没接过数据，
+    /// 所以台账里已经有上百条记录、这里也永远显示空的。
+    /// 现在直接读 <see cref="DownloadLedger.Query"/>（最近在前），最多 6 条。
+    /// </summary>
+    private void RefreshRecentActivity()
+    {
+        if (RecentActivityHost is null) return;
+        RecentActivityHost.Children.Clear();
+
+        IReadOnlyList<DownloadLedger.LedgerEntry> recent;
+        try { recent = DownloadLedger.Instance.Query(null, 6); }
+        catch { recent = Array.Empty<DownloadLedger.LedgerEntry>(); }
+
+        if (recent.Count == 0)
+        {
+            RecentActivityHost.Children.Add(new TextBlock
+            {
+                Text = "还没有下载任务",
+                FontSize = 13,
+                Opacity = 0.6,
+                Margin = new Thickness(0, 8, 0, 8),
+            });
+            return;
+        }
+
+        foreach (var e in recent)
+        {
+            var row = new Grid { ColumnSpacing = 12 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var left = new StackPanel { Spacing = 2 };
+            left.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrEmpty(e.FileName) ? e.Url : e.FileName,
+                FontSize = 13,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextWrapping = TextWrapping.NoWrap,
+            });
+            left.Children.Add(new TextBlock
+            {
+                // 模块 · 状态 · 大小 · 时间
+                Text = (string.IsNullOrEmpty(e.Module) ? "下载" : e.Module)
+                     + " · " + e.Status
+                     + (e.TotalBytes > 0 ? " · " + DownloadItem.FormatSize(e.TotalBytes) : "")
+                     + (string.IsNullOrEmpty(e.FinishedAt) ? "" : " · " + e.FinishedAt),
+                FontSize = 11,
+                Opacity = 0.55,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextWrapping = TextWrapping.NoWrap,
+            });
+            row.Children.Add(left);
+
+            var ok = e.Status == "已完成";
+            var badge = new FontIcon
+            {
+                Glyph = ok ? "\uE73E" : "\uEA39",
+                FontSize = 14,
+                Opacity = 0.75,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(badge, 1);
+            row.Children.Add(badge);
+
+            RecentActivityHost.Children.Add(row);
+        }
+    }
+
     private void Refresh()
     {
         try
         {
-            DataDirText.Text = AppPaths.DataDir;
+            // **首次进总览页时按磁盘回填历史**（2026-10-30）：台账钩子长期失效，
+            // 历史下过的文件一条都没记上，「累计下载」永远 0。回填幂等，重复调用不重复记。
+            try { DownloadLedger.Instance.BackfillFromDisk(); } catch { }
 
-            // 统计卡接真实台账 —— 之前全是写死的 0，用户看不出下过什么。
-            var (count, bytes) = DownloadLedger.Instance.Stats();
-            DoneCount.Text = count.ToString();
-            LedgerCount.Text = count.ToString();
+            DataDirText.Text = AppPaths.DataDir;
+            // **「本次完成」和「累计下载」必须是两个不同的数**（2026-10-30 修）：
+            // 原来两张卡都赋台账的 done 数，永远显示同一个值，用户看成是重复卡。
+            //   本次完成 = 当前下载列表里已完成的数量（重启归零，反映这一趟跑了多少）
+            //   累计下载 = 台账里的历史累计（跨重启不清零，反映一共下过多少）
+            var running = DownloadStore.Instance.Items.Count(i => i.Status == AriaStatus.Active);
+            var doneNow = DownloadStore.Instance.Items.Count(i => i.Status == AriaStatus.Complete);
+            RunningCount.Text = running.ToString();
+            DoneCount.Text = doneNow.ToString();
+
+            var (total, bytes) = DownloadLedger.Instance.Stats();
+            LedgerCount.Text = total.ToString();
             DiskUsage.Text = DownloadItem.FormatSize(bytes);
 
-            // 进行中取当前队列里活动任务数
-            var running = DownloadStore.Instance.Items.Count(i => i.Status == AriaStatus.Active);
-            RunningCount.Text = running.ToString();
+            RefreshRecentActivity();
 
             DataDirText.Text = AppPaths.DataDir;
         }

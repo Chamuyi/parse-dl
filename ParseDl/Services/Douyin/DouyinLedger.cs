@@ -24,6 +24,13 @@ public sealed class DouyinDownloadRecord
     public DouyinLedgerState State { get; init; } = DouyinLedgerState.Done;
     /// <summary>这条作品提交过的任务 id（aria2 gid）。只用于推进 Pending → Done。</summary>
     public List<string> TaskIds { get; init; } = new();
+    /// <summary>
+    /// 这条作品的落盘目录（v3 可选字段，向后兼容）。
+    ///
+    /// 用途：aria2 的 gid 重启后可能查不到（会话没持久化），那时还能按
+    /// 「目录里有文件」判定它确实下完了 —— 比一直卡在 pending 强。
+    /// </summary>
+    public string? Dir { get; init; }
 
     public bool IsDone => State == DouyinLedgerState.Done;
     public DateTime? Time => At is null ? null : DateTimeOffset.FromUnixTimeMilliseconds(At.Value).LocalDateTime;
@@ -65,7 +72,36 @@ public sealed class DouyinLedger
         lock (_gate)
         {
             EnsureLoaded();
-            return !string.IsNullOrEmpty(awemeId) && _records.ContainsKey(awemeId);
+            // **只有「真的下完」才算下载过**（2026-10-30 用户要求）。
+            //
+            // 原来这里是 `_records.ContainsKey(awemeId)` —— 只要台账里有这条就返回 true，
+            // 不管状态是 pending 还是 done。结果：入队时 MarkQueued 记一笔 pending，
+            // 一旦下载失败（代理抖动、403 过期直链等），那条记录就**永远停在 pending**，
+            // 而「跳过已下载」把它当成已下过 —— 实测台账里 240 条全是 pending、
+            // 磁盘上一个文件都没有，用户填什么链接都被跳过。
+            //
+            // 用户的原话（也说过一次）：「下载先推送，下载结束再写入台账」。
+            // 所以 pending 的语义是「已推送、正在下，别重复提交」——
+            // 它该拦的是「同一批次里重复提交」，而不是「以后永远不再下」。
+            // 这里只认 done。
+            return !string.IsNullOrEmpty(awemeId)
+                && _records.TryGetValue(awemeId, out var rec)
+                && rec.IsDone;
+        }
+    }
+
+    /// <summary>
+    /// 是否**正在下载中**（pending）。用于「同一批次内别重复提交」，
+    /// 与「已下载过、以后跳过」是两件事，别混用。
+    /// </summary>
+    public bool IsPending(string awemeId)
+    {
+        lock (_gate)
+        {
+            EnsureLoaded();
+            return !string.IsNullOrEmpty(awemeId)
+                && _records.TryGetValue(awemeId, out var rec)
+                && !rec.IsDone;
         }
     }
 
@@ -145,6 +181,7 @@ public sealed class DouyinLedger
                         Author = Str(o["user"]),
                         // v2 没有 s，缺省按「已下载」
                         State = (o["s"]?.ToString() == "pending") ? DouyinLedgerState.Pending : DouyinLedgerState.Done,
+                        Dir = Str(o["d"]),
                         TaskIds = f is null ? new List<string>()
                             : f.Select(x => x?.ToString() ?? "").Where(x => x.Length > 0).ToList(),
                     };
@@ -187,7 +224,7 @@ public sealed class DouyinLedger
     /// 记为「已提交下载」（作品粒度，记成 Pending）。
     /// 入队成功 ≠ 拿到文件，之后由 <see cref="Advance"/> 按任务结局转成已下载或撤销。
     /// </summary>
-    public void MarkQueued(IReadOnlyDictionary<string, (List<string> TaskIds, string? Title, string? Author)> byAweme)
+    public void MarkQueued(IReadOnlyDictionary<string, (List<string> TaskIds, string? Title, string? Author, string? Dir)> byAweme)
     {
         if (byAweme.Count == 0) return;
         lock (_gate)
@@ -202,7 +239,7 @@ public sealed class DouyinLedger
                 var id = kv.Key;
                 if (string.IsNullOrEmpty(id)) continue;
                 _records.TryGetValue(id, out var old);
-                var (taskIds, title, author) = kv.Value;
+                var (taskIds, title, author, dir) = kv.Value;
 
                 if (old is null)
                 {
@@ -214,6 +251,7 @@ public sealed class DouyinLedger
                         Author = author,
                         State = DouyinLedgerState.Pending,
                         TaskIds = taskIds,
+                        Dir = dir ?? old?.Dir,
                     };
                     changed = true;
                 }
@@ -229,6 +267,7 @@ public sealed class DouyinLedger
                         Author = old.Author ?? author,
                         State = DouyinLedgerState.Pending,
                         TaskIds = taskIds,
+                        Dir = dir ?? old?.Dir,
                     };
                     changed = true;
                 }
@@ -269,6 +308,23 @@ public sealed class DouyinLedger
         }
     }
 
+    /// <summary>所有「还没下完」的记录里记着的任务 id —— 用来跨重启补查 aria2。</summary>
+    public List<string> PendingTaskIds()
+    {
+        lock (_gate)
+        {
+            EnsureLoaded();
+            var outList = new List<string>();
+            foreach (var r in _records.Values)
+            {
+                if (r.IsDone) continue;
+                foreach (var g in r.TaskIds)
+                    if (!string.IsNullOrEmpty(g) && !outList.Contains(g)) outList.Add(g);
+            }
+            return outList;
+        }
+    }
+
     /// <summary>
     /// 按任务的实际结局推进台账，返回是否变化。
     ///   · 任一任务 Failed → 撤掉这条记录（下次刷到同一作品能重试）；
@@ -290,7 +346,25 @@ public sealed class DouyinLedger
 
                 var known = r.TaskIds.Select(statusOf)
                     .Where(s => s != DouyinTaskState.Unknown).ToList();
-                if (known.Count == 0) continue;
+                if (known.Count == 0)
+                {
+                    // **gid 查不到时的兜底**（2026-10-30）：aria2 会话没持久化，重启后上一进程的
+                    // gid 就永远查不到了 —— 光凭 Unknown 只能一直挂着。改成看落盘目录：
+                    // 目录里确实有文件，就认定它下完了。没文件则保持原状（不猜、也不撤）。
+                    if (!string.IsNullOrEmpty(r.Dir) && Directory.Exists(r.Dir) && Directory.EnumerateFiles(r.Dir).Any())
+                    {
+                        _records[id] = new DouyinDownloadRecord
+                        {
+                            AwemeId = id,
+                            At = NextStamp(),
+                            Title = r.Title,
+                            Dir = r.Dir,
+                            Author = r.Author,
+                        };
+                        changed = true;
+                    }
+                    continue;
+                }
 
                 if (known.Any(s => s == DouyinTaskState.Failed))
                 {
@@ -305,6 +379,7 @@ public sealed class DouyinLedger
                         AwemeId = id,
                         At = NextStamp(),
                         Title = r.Title,
+                        Dir = r.Dir,
                         Author = r.Author,
                     };
                     changed = true;
@@ -369,6 +444,7 @@ public sealed class DouyinLedger
                 if (e.Author is not null) o["user"] = e.Author;
                 // Done 是缺省态，不写字段
                 if (!e.IsDone) o["s"] = "pending";
+                if (!string.IsNullOrEmpty(e.Dir)) o["d"] = e.Dir;
                 if (e.TaskIds.Count > 0)
                 {
                     var arr = new JsonArray();

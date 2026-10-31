@@ -112,10 +112,23 @@ public sealed class DownloadFeed
     public bool Accepts(DownloadItem item, DownloadTabSpec tab) =>
         Matches(item) && tab.AcceptsStatus(item.Status);
 
-    /// <summary>取本模块在给定 Tab 下的任务（保持队列原顺序：新的在前）。</summary>
+    /// <summary>
+    /// 取本模块在给定 Tab 下的任务，**按创建时间升序**（先推送的在上）。
+    ///
+    /// 2026-10-29 用户要求「按顺序下载」：先识别到 a、后识别到 b，
+    /// 列表就该 a 在上 b 在下，下载也按这个顺序走。
+    /// 用 CreatedAt 而不是集合插入位置 —— 队列重启恢复时插入顺序会变，
+    /// 时间戳才是稳定的「谁先来」判据。
+    /// </summary>
     public List<DownloadItem> ItemsFor(DownloadTabSpec tab) =>
-        DownloadStore.Instance.Items.Where(i => Accepts(i, tab)).ToList();
-
+        DownloadStore.Instance.Items
+            .Where(i => Accepts(i, tab))
+            // **先按入队时间，再按入队序号**（2026-10-30 修抖音/B站顺序乱）。
+            // CreatedAt 精度约 15ms，抖音/B站 紧凑循环入队会撞时间戳，
+            // 只按它排就退化成「看插入位置」。Seq 是进程级自增，绝对唯一。
+            .OrderBy(i => i.CreatedAt)
+            .ThenBy(i => i.Seq)
+            .ToList();
     /// <summary>取本模块的全部任务（不分状态）。</summary>
     public List<DownloadItem> AllItems() =>
         DownloadStore.Instance.Items.Where(Matches).ToList();

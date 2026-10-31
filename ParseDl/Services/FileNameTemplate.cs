@@ -21,6 +21,8 @@ public sealed class TemplateContext
     public int MediaIndex { get; init; } = 1;
     public int MediaCount { get; init; } = 1;
     public string? Content { get; init; }
+    /// <summary>话题标签（不含 #），%TAGS% 用逗号连接 —— 对齐 Flutter 的 m.tags.join(',')。</summary>
+    public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
     public string? PlayCount { get; init; }
     public string? LikeCount { get; init; }
     public string? BiliTitle { get; init; }
@@ -163,6 +165,8 @@ public static class FileNameTemplate
                 if (p.TryGetValue("t", out var ts) && int.TryParse(ts, out var parsed) && parsed >= 0)
                     trim = parsed;
                 return UnicodeSubstring(text, 0, trim);
+            // %TAGS% —— Flutter 是 m.tags.join(',')（不含 #）。X 的 hashtags 解析见 XApi.ParseTweet。
+            case "TAGS": return string.Join((char)44, c.Tags);
             case "PLAY_COUNT": return c.PlayCount ?? "";
             case "LIKE_COUNT": return c.LikeCount ?? "";
             case "BILI_TITLE": return c.BiliTitle ?? "";
@@ -269,7 +273,7 @@ public static class FileNameTemplate
 
     // ── 全路径 260 保护（对齐原项目 clampNameForFullPath）──────────────
 
-    /// <summary>Windows MAX_PATH 上限（含结尾   的那一格不算，这里用 259）。</summary>
+    /// <summary>Windows MAX_PATH 上限（含结尾 NUL 的那一格不算，这里用 259）。</summary>
     private const int WindowsMaxPath = 259;
 
     /// <summary>留一点余量给 aria2 生成的 .aria2 控制文件（它会在文件名后再加后缀）。</summary>

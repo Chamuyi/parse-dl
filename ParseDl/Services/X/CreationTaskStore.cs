@@ -32,6 +32,12 @@ public sealed class CreationTask
     public string ScreenName { get; init; } = "";
     public string DisplayName { get; init; } = "";
     public string UserId { get; init; } = "";
+
+    /// <summary>
+    /// 用哪一份设置（过滤条件 / 保存目录模板等）。
+    /// 空 = 主页那套 <c>ForModule("x")</c>；自动执行传 <c>x_auto</c> 用自己的那份。
+    /// </summary>
+    public string SettingsKey { get; init; } = "";
     public string Avatar { get; init; } = "";
 
     public CreationStatus Status { get; set; } = CreationStatus.Waiting;
@@ -45,6 +51,15 @@ public sealed class CreationTask
     public int Pages { get; set; }
     public string? Error { get; set; }
     public bool Cancelled { get; set; }
+
+    /// <summary>
+    /// 跑完信号（自动执行要等它）。
+    ///
+    /// 主页点「开始下载」不需要等 —— 它只负责登记完就返回。
+    /// 但自动执行是「一个账号跑完再跑下一个」，必须能等到这个账号真正结束，
+    /// 否则账号间隔会变成「刚登记完就跳到下一个」，翻页任务全堆在队列里。
+    /// </summary>
+    internal TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public DateTime CreatedAt { get; init; } = DateTime.Now;
 
     public bool IsActive => Status == CreationStatus.Active;
@@ -106,7 +121,8 @@ public sealed class CreationTaskStore
     /// 登记一个创建任务并**立即返回**（这就是「点一下就开始推送到下载管理」的关键）。
     /// 真正的翻页在后台 <see cref="PumpAsync"/> 里串行执行。
     /// </summary>
-    public CreationTask Create(string userId, string screenName, string displayName, string avatar)
+    public CreationTask Create(string userId, string screenName, string displayName, string avatar,
+        string settingsKey = "")
     {
         var t = new CreationTask
         {
@@ -115,6 +131,7 @@ public sealed class CreationTaskStore
             ScreenName = screenName,
             DisplayName = string.IsNullOrWhiteSpace(displayName) ? screenName : displayName,
             Avatar = avatar,
+            SettingsKey = settingsKey,
         };
         lock (_tasks) _tasks.Add(t);
         Notify();
@@ -147,6 +164,7 @@ public sealed class CreationTaskStore
     private void Remove(CreationTask t)
     {
         LastFinished = t;
+        try { t.Done.TrySetResult(); } catch { }   // 唤醒等着它的自动执行
         lock (_tasks) _tasks.Remove(t);
         Notify();
     }
@@ -196,7 +214,11 @@ public sealed class CreationTaskStore
     /// </summary>
     private async Task RunAsync(CreationTask t)
     {
-        var cfg = AppSettings.Instance.ForModule("x");
+        Aria2Engine.Log("[创建任务] 开始 RunAsync id=" + t.Id + " user=" + t.ScreenName + " userId=" + t.UserId);
+        // **按任务指定的设置槽取配置**（空 = 主页那套）。
+        var cfg = string.IsNullOrEmpty(t.SettingsKey)
+            ? AppSettings.Instance.ForModule("x")
+            : AppSettings.Instance.ForAutoTask();
         var api = new XHomeApi(cfg.EffectiveCookie);
         if (!api.HasLogin) { t.Error = "未登录，无法创建下载任务"; return; }
 
@@ -236,6 +258,9 @@ public sealed class CreationTaskStore
             t.Pages++;
             t.Status = CreationStatus.Active;
             Notify();     // 每页刷一次，界面能看到进度在动
+            Aria2Engine.Log("[创建任务] 第 " + t.Pages + " 页 拿到 " + posts.Count + " 条作品"
+                + " 已发送=" + t.CompleteCount + " 已跳过=" + t.SkipCount + " 失败=" + t.FailCount
+                + " nextCursor=" + (string.IsNullOrEmpty(next) ? "(空)" : "有"));
 
             foreach (var post in posts)
             {
@@ -258,17 +283,32 @@ public sealed class CreationTaskStore
                         try
                         {
                             var full = System.IO.Path.Combine(dir, name);
-                            if (System.IO.File.Exists(full)) { t.SkipCount++; continue; }
+                            if (System.IO.File.Exists(full))
+                            {
+                                t.SkipCount++;
+                                Aria2Engine.Log("[创建任务] 跳过（文件已存在）：" + name);
+                                if (t.SkipCount % 3 == 0) Notify();
+                                continue;
+                            }
                         }
                         catch { }
                     }
 
-                    var (ok, _) = await DownloadStore.Instance.AddAsync(m.Url, "X 媒体", dir, name);
+                    var (ok, msg) = await DownloadStore.Instance.AddAsync(m.Url, "X 媒体", dir, name, m.PreviewUrl);
                     if (ok) t.CompleteCount++;
-                    else t.FailCount++;
+                    else
+                    {
+                        t.FailCount++;
+                        Aria2Engine.Log("[创建任务] 入队失败：" + name + " → " + msg);
+                    }
+                    Aria2Engine.Log("[创建任务] 入队结果 ok=" + ok + " 已发送=" + t.CompleteCount
+                        + " 已跳过=" + t.SkipCount + " 失败=" + t.FailCount + " file=" + name);
 
                     // 每 10 条刷一次，避免过于频繁
-                    if ((t.CompleteCount + t.FailCount) % 10 == 0) Notify();
+                    // **每 3 条刷一次**（2026-10-29 修）。
+                    // 原来是每 10 条 —— 一个用户通常只有十几条媒体，
+                    // 于是界面上「已发送」长时间停在 0，看着像卡住了。
+                    if ((t.CompleteCount + t.FailCount + t.SkipCount) % 3 == 0) Notify();
                 }
             }
 
@@ -278,5 +318,8 @@ public sealed class CreationTaskStore
         }
 
         Notify();
+        Aria2Engine.Log("[创建任务] RunAsync 结束 id=" + t.Id + " 已发送=" + t.CompleteCount
+            + " 已跳过=" + t.SkipCount + " 失败=" + t.FailCount + " 页数=" + t.Pages
+            + " error=" + (t.Error ?? "(无)"));
     }
 }

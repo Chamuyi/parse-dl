@@ -66,12 +66,18 @@ public partial class App : Application
     {
         if (ex is null) return "(无异常对象)";
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine(ex.GetType().FullName + ": " + ex.Message);
+        // **HResult 必须打**（2026-10-31 加）：COMException 的 Message 常常是空串，
+        // 只有 HRESULT 才能定位（比如 0x80070578 = 窗口句柄无效、
+        // 0x80040154 = 类未注册、0x80070005 = 拒绝访问）。
+        // 用户报「抖音设置里点选择文件夹报错」时，日志只有一行空 Message，查不动。
+        sb.AppendLine(ex.GetType().FullName + ": " + ex.Message
+                      + (ex.HResult != 0 ? "  (HRESULT=0x" + ex.HResult.ToString("X8") + ")" : ""));
         var inner = ex.InnerException;
         var depth = 0;
         while (inner is not null && depth < 5)
         {
-            sb.AppendLine("  └─ " + inner.GetType().FullName + ": " + inner.Message);
+            sb.AppendLine("  └─ " + inner.GetType().FullName + ": " + inner.Message
+                          + (inner.HResult != 0 ? "  (HRESULT=0x" + inner.HResult.ToString("X8") + ")" : ""));
             inner = inner.InnerException;
             depth++;
         }

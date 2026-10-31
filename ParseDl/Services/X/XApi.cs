@@ -28,6 +28,8 @@ public sealed record XPost
     public string? UserId { get; init; }
     public string? UserName { get; init; }
     public string? UserScreenName { get; init; }
+    /// <summary>话题标签（不含 #）—— %TAGS% 用，来源与 Flutter x_api.dart 一致。</summary>
+    public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
     public IReadOnlyList<XMedia> Media { get; init; } = Array.Empty<XMedia>();
 }
 
@@ -250,10 +252,24 @@ public static class XApi
                 }
             }
 
+            // 话题标签：legacy.entities.hashtags[].text（与 Flutter x_api.dart 同源）
+            var tags = new List<string>();
+            if (legacy.TryGetProperty("entities", out var ents) &&
+                ents.TryGetProperty("hashtags", out var hts) &&
+                hts.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var h in hts.EnumerateArray())
+                {
+                    var tag = h.TryGetProperty("text", out var tv) ? tv.GetString() : null;
+                    if (!string.IsNullOrEmpty(tag)) tags.Add(tag);
+                }
+            }
+
             return new XPost
             {
                 Id = id, CreatedAt = createdAt, Text = text,
                 UserId = userId, UserName = userName, UserScreenName = screenName,
+                Tags = tags,
                 Media = media,
             };
         }
@@ -393,10 +409,24 @@ public static class XApi
                     }
                 }
 
+                // v1.1 的话题标签在 entities.hashtags[].text（与 GraphQL 同源）
+                var v11Tags = new List<string>();
+                if (TryDig(t, out var ents11, "entities") &&
+                    ents11.TryGetProperty("hashtags", out var hts11) &&
+                    hts11.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var h in hts11.EnumerateArray())
+                    {
+                        var tag = h.TryGetProperty("text", out var tv) ? tv.GetString() : null;
+                        if (!string.IsNullOrEmpty(tag)) v11Tags.Add(tag);
+                    }
+                }
+
                 posts.Add(new XPost
                 {
                     Id = id, CreatedAt = createdAt, Text = text,
                     UserId = userId, UserName = userName, UserScreenName = screenName,
+                    Tags = v11Tags,
                     Media = media,
                 });
             }

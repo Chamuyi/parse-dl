@@ -47,6 +47,8 @@ public sealed partial class BiliPage : Page
 
     /// <summary>结果列表里每一行（勾选框 ↔ 分P）的映射。</summary>
     private readonly List<(BiliPart Part, CheckBox Box, Border Row)> _rows = new();
+    /// <summary>「抓当前页」列出来的稿件号（列表里只有 BV 号、还没取分 P 详情时用）。</summary>
+    private List<string>? _pageBvids;
 
     private string _saveDir = "";
 
@@ -225,9 +227,196 @@ public sealed partial class BiliPage : Page
             SetStatus("内嵌页还停在首页 —— 先在左边打开一条稿件，再点「抓当前页」");
             return;
         }
-        // 抓「现在这一页」是用户的意图，所以链接框被**无条件覆盖**（照原项目）
+
+        // **「抓当前页」= 抓这个页面上的全部视频**（2026-10-30 用户澄清）。
+        //
+        // 用户原话：「抓当前页是需要抓当前页面的所有视频，抓当前播放才是现在放的视频」。
+        // 原来的实现两个按钮几乎一样 —— 都只取一个 bvid 然后解析那一条，
+        // 「抓当前页」根本不是「抓全部」。
+        //
+        // 现在分两步：
+        //  ① 先从页面 DOM 里把能看到的稿件号全捞出来（这是「当前页面的所有视频」）；
+        //  ② 捞到多个就把它们当一份名单，直接进批量下载队列；
+        //     只捞到一个（单稿件页）就走原来的单条解析，保留分 P 勾选界面。
+        var ids = await CollectPageVideoIdsAsync();
+        // **多条：直接在右侧列表列出来让用户自选**（2026-10-30 用户要求）。
+        //
+        // 用户原话：「为什么要去批量页，直接在抓取列表列出来，让我来自选不就行了」。
+        // 原来这里只把名单塞进链接框、让用户自己跳去批量下载页 —— 多此一举。
+        // 现在直接渲染成勾选列表，和单稿件页的分 P 列表同一个交互。
+        if (ids.Count > 1)
+        {
+            LinkBox.Text = "";
+            RenderVideoList(ids);
+            SetStatus("当前页共 " + ids.Count + " 条视频，勾选后点「开始下载」");
+            Aria2Engine.Log("[B站] 抓当前页拿到 " + ids.Count + " 条：" + string.Join(", ", ids.Take(5))
+                + (ids.Count > 5 ? " …" : ""));
+            return;
+        }
+
+        // 只有 1 条（或 DOM 捞不到）→ 退回「按当前 URL 解析单条」
         LinkBox.Text = url;
         await ParseLinkAsync(url);
+    }
+
+    /// <summary>
+    /// 把「抓当前页」捞到的一批稿件号**直接渲染成勾选列表**（用户要求：列出来自选）。
+    ///
+    /// 与单稿件页的分 P 列表共用同一套行样式与勾选逻辑，
+    /// 区别只是这里每条是**一个稿件**（BV 号），还没取到分 P 详情 ——
+    /// 标题先用 BV 号占位，点「开始下载」时再按 BV 号逐条取流。
+    /// </summary>
+    private void RenderVideoList(List<string> bvids)
+    {
+        ResultHost.Children.Clear();
+        _rows.Clear();
+        _info = null;
+        EmptyState.Visibility = Visibility.Collapsed;
+
+        var head = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var headLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        headLeft.Children.Add(new FontIcon { Glyph = "\uE7F4", FontSize = 13, Opacity = 0.8 });
+        headLeft.Children.Add(new TextBlock
+        {
+            Text = "抓取结果 " + bvids.Count + " 个作品", FontSize = 13.5,
+            FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center,
+        });
+        head.Children.Add(headLeft);
+
+        var selectedText = new TextBlock
+        {
+            Text = "已选 0", FontSize = 12, Opacity = 0.7,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(selectedText, 1);
+        selectedText.HorizontalAlignment = HorizontalAlignment.Center;
+        head.Children.Add(selectedText);
+
+        var closeBtn = new Button
+        {
+            Content = "\uE711", FontFamily = new FontFamily("Segoe Fluent Icons"),
+            FontSize = 12, Width = 30, Height = 28, Padding = new Thickness(0),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(closeBtn, "关闭抓取结果");
+        closeBtn.Click += (_, _) =>
+        {
+            ResultHost.Children.Clear();
+            _rows.Clear();
+            _pageBvids = null;
+            EmptyState.Visibility = Visibility.Visible;
+            UpdateCapText();
+        };
+        Grid.SetColumn(closeBtn, 2);
+        head.Children.Add(closeBtn);
+        ResultHost.Children.Add(head);
+
+        _pageBvids = new List<string>(bvids);
+        foreach (var bv in bvids)
+        {
+            var row = BuildPageRow(bv, selectedText);
+            _rows.Add((new BiliPart { Title = bv, Page = 0, Cid = null }, (CheckBox)row.Tag, row));
+            ResultHost.Children.Add(row);
+        }
+        UpdateCapText();
+        UpdateSelected(selectedText);
+    }
+
+    /// <summary>「抓当前页」列表里的一行（一个稿件）。</summary>
+    private Border BuildPageRow(string bvid, TextBlock selectedText)
+    {
+        var grid = new Grid { ColumnSpacing = 10 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var box = new CheckBox { IsChecked = true, VerticalAlignment = VerticalAlignment.Top };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, "选择 " + bvid);
+        box.Checked += (_, _) => UpdateSelected(selectedText);
+        box.Unchecked += (_, _) => UpdateSelected(selectedText);
+        grid.Children.Add(box);
+
+        var texts = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+        texts.Children.Add(new TextBlock
+        {
+            Text = bvid, FontSize = 13, FontWeight = FontWeights.SemiBold,
+            IsTextSelectionEnabled = true,
+        });
+        texts.Children.Add(new TextBlock
+        {
+            Text = "点「开始下载」时按此稿件取流", FontSize = 11, Opacity = 0.6,
+        });
+        Grid.SetColumn(texts, 1);
+        grid.Children.Add(texts);
+
+        return new Border
+        {
+            Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
+            BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(8, 8, 6, 8),
+            Child = grid,
+            Tag = box,
+        };
+    }
+
+    /// <summary>
+    /// 从内嵌页的 DOM 里捞**当前页面上的全部稿件号**（去重、保序）。
+    ///
+    /// 为什么走 DOM 而不是接口：用户说的「当前页面的所有视频」就是**他现在看到的那些**，
+    /// 合集页/推荐位/相关推荐的视频都在 DOM 里，接口反而要按类型分别调、还容易触发风控。
+    /// 捞不到就返回空，调用方退回单条解析 —— 不猜、不报错。
+    /// </summary>
+    private async Task<List<string>> CollectPageVideoIdsAsync()
+    {
+        var list = new List<string>();
+        try
+        {
+            var js = """
+                (function () {
+                  var out = [];
+                  var seen = {};
+                  function push(v) {
+                    if (!v) return;
+                    var m = /(BV[1-9A-HJ-NP-Za-km-z]{10})/.exec(String(v));
+                    if (!m) return;
+                    if (seen[m[1]]) return;
+                    seen[m[1]] = 1;
+                    out.push(m[1]);
+                  }
+                  try {
+                    var as = document.querySelectorAll('a[href*="BV"]');
+                    for (var i = 0; i < as.length; i++) push(as[i].getAttribute('href'));
+                  } catch (e) {}
+                  try {
+                    var st = window.__INITIAL_STATE__;
+                    if (st) {
+                      var s = JSON.stringify(st);
+                      var re = /BV[1-9A-HJ-NP-Za-km-z]{10}/g;
+                      var mm;
+                      var guard = 0;
+                      while ((mm = re.exec(s)) !== null && guard++ < 500) push(mm[0]);
+                    }
+                  } catch (e) {}
+                  return out.join(',');
+                })()
+                """;
+            var raw = await Web.CoreWebView2!.ExecuteScriptAsync(js);
+            var text = UnquoteJsString(raw);
+            foreach (var part in (text ?? "").Split(','))
+            {
+                var bv = ExtractBvid(part);
+                if (bv is not null && !list.Contains(bv)) list.Add(bv);
+            }
+        }
+        catch (Exception ex)
+        {
+            Aria2Engine.Log("[B站] 抓当前页读 DOM 失败：" + ex.Message);
+        }
+        return list;
     }
 
     private async void OnGrabPlayingClick(object sender, RoutedEventArgs e) => await GrabPlayingAsync();
@@ -632,13 +821,21 @@ public sealed partial class BiliPage : Page
     /// </summary>
     private async Task DownloadSelectedAsync()
     {
-        if (_info is null) return;
+        // **两种模式**（2026-10-30 支持「抓当前页」直接列出多稿件）：
+        //
+        //  ① 单稿件模式（_info 有值）：列表是这条稿件的分 P，直接用它的 Bvid/Aid。
+        //  ② 多稿件模式（_info 为 null、_pageBvids 有值）：列表每行是**一个稿件**，
+        //     每行自己的 BV 号存在 Part.Title 里，取流前要先按它查一次分 P 详情。
+        var multi = _info is null;
         var chosen = _rows.Where(r => r.Box.IsChecked == true).Select(r => r.Part).ToList();
-        if (chosen.Count == 0) { SetStatus("没有勾选任何分 P"); return; }
+        if (chosen.Count == 0)
+        {
+            SetStatus(multi ? "没有勾选任何作品" : "没有勾选任何分 P");
+            return;
+        }
 
         DownloadButton.IsEnabled = false;
         var api = _api ??= new BiliApi(Cfg.EffectiveCookie);
-        var info = _info;
         var saveDir = Cfg.ResolvedSaveDir;
         var interval = Math.Max(300, Cfg.RequestIntervalMs);
         var ok = 0; var fail = 0;
@@ -647,12 +844,32 @@ public sealed partial class BiliPage : Page
         for (var i = 0; i < chosen.Count; i++)
         {
             var part = chosen[i];
+            // 提到 try 外面：catch 里报错也要用它的名字
+            var realPart = part;
             SetStatus("正在入队 " + (i + 1) + "/" + chosen.Count + "：" + part.Title);
             try
             {
-                if (part.Cid is not string cidStr || !long.TryParse(cidStr, out var cid))
+                // 多稿件模式：这一行是一个稿件，先用它的 BV 号查分 P 详情
+                BiliVideoInfo info;
+                if (multi)
                 {
-                    fail++; failures.Add(part.Title + "：没有 cid"); continue;
+                    var bv = part.Title;
+                    var got = await api.GetVideoInfoAsync(bv, null);
+                    if (got.Pages.Count == 0)
+                    {
+                        fail++; failures.Add(bv + "：取不到分 P（已下架或仅自己可见）"); continue;
+                    }
+                    info = got;
+                    realPart = got.Pages[0];
+                }
+                else
+                {
+                    info = _info!;
+                }
+
+                if (realPart.Cid is not string cidStr || !long.TryParse(cidStr, out var cid))
+                {
+                    fail++; failures.Add(realPart.Title + "：没有 cid"); continue;
                 }
 
                 var play = await api.GetPlayInfoAsync(
@@ -661,12 +878,12 @@ public sealed partial class BiliPage : Page
                 if (!pair.Usable)
                 {
                     fail++;
-                    failures.Add(part.Title + "：" + (pair.Message ?? "取不到可下载的流"));
+                    failures.Add(realPart.Title + "：" + (pair.Message ?? "取不到可下载的流"));
                     continue;
                 }
 
-                var outBase = BuildOutBase(info, part, pair, play);
-                var partDir = BiliEnqueue.ResolveSaveDir(Cfg, saveDir, info, part, pair, play);
+                var outBase = BuildOutBase(info, realPart, pair, play);
+                var partDir = BiliEnqueue.ResolveSaveDir(Cfg, saveDir, info, realPart, pair, play);
                 System.IO.Directory.CreateDirectory(partDir);
 
                 var videoName = pair.IsDash
@@ -674,7 +891,7 @@ public sealed partial class BiliPage : Page
                     : BiliDownloadPlan.MergedName(outBase, Cfg.Container);
                 var (a, msg) = await DownloadStore.Instance.AddAsync(
                     pair.Video!.Url, "B 站", partDir, videoName);
-                if (!a) { fail++; failures.Add(part.Title + "：" + msg); continue; }
+                if (!a) { fail++; failures.Add(realPart.Title + "：" + msg); continue; }
 
                 if (pair.IsDash && pair.Audio is not null)
                 {
@@ -684,7 +901,7 @@ public sealed partial class BiliPage : Page
                     if (!a2)
                     {
                         fail++;
-                        failures.Add(part.Title + "：音频入队失败（" + msg2 + "）");
+                        failures.Add(realPart.Title + "：音频入队失败（" + msg2 + "）");
                         continue;
                     }
                 }
@@ -703,7 +920,7 @@ public sealed partial class BiliPage : Page
             catch (Exception ex)
             {
                 fail++;
-                failures.Add(part.Title + "：" + ex.Message);
+                failures.Add(realPart.Title + "：" + ex.Message);
             }
             if (i < chosen.Count - 1) await Task.Delay(interval);
         }

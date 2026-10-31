@@ -26,7 +26,7 @@ public sealed record SettingsNavArgs(MainWindow Host, string Category);
 /// 分类是同一页内的分节，用顶部横向分段（WinUI SelectorBar，与下载管理页同款控件）
 /// 表达「并列的几段」才对，也不与主导航抢层级。
 ///
-/// 六个分类：外观（材质 / 明暗 / 主题色 / 导航形态）/ 下载 / 代理 / 日志 / 数据目录 / 关于。
+/// 六个分类：外观（材质 / 明暗 / 主题色）/ 下载 / 代理 / 日志 / 数据目录 / 关于。
 /// 分类维度与 Flutter 版 settings_page.dart 的 global 分支一致。
 ///
 /// ### 硬性约定
@@ -46,6 +46,17 @@ public sealed partial class SettingsPage : Page
 
     /// <summary>主题色状态提示行。</summary>
     private TextBlock? _accentStatus;
+
+    /// <summary>
+    /// **正在试色的颜色**（2026-10-30 修「实时预览不能实时」）。
+    ///
+    /// 色轮拖动时把颜色放这里，预览直接用它渲染 —— 但**不写盘**（拖一次会写几十次）。
+    /// 点「应用自定义色」后才清空，落盘并全局生效。null 表示「预览当前已生效的色」。
+    /// </summary>
+    private string? _pendingAccentHex;
+
+    /// <summary>预览控件的宿主容器（每次刷新重建里面的三个控件）。</summary>
+    private StackPanel? _previewHost;
 
     /// <summary>分类项。</summary>
     private sealed record Category(string Id, string Label, string Glyph);
@@ -163,7 +174,7 @@ public sealed partial class SettingsPage : Page
 
     private static string SubtitleOf(string id) => id switch
     {
-        "appearance" => "窗口材质 · 明暗 · 主题色 · 导航形态",
+        "appearance" => "窗口材质 · 明暗 · 主题色",
         "download" => "保存目录 · 并发 · 模板 · 日志开关",
         "proxy" => "代理地址与系统代理",
         "logs" => "运行日志与排障",
@@ -173,64 +184,123 @@ public sealed partial class SettingsPage : Page
 
     // ── 外观 ────────────────────────────────────────────────
 
+    /// <summary>
+    /// 材质方格的选中态描边色 —— 取当前强调色（跟明暗走）。
+    ///
+    /// AccentService 没有直接暴露「当前显示色」，用 Resolve 解析出当前预设的 Fill。
+    /// </summary>
+    private static SolidColorBrush AccentStrokeBrush(bool isDark)
+    {
+        var (fill, _, _, _) = AccentService.Resolve(
+            AccentService.CurrentId, AccentService.CurrentCustomHex, isDark);
+        return AccentService.TryParseHex(fill, out var c)
+            ? new SolidColorBrush(c)
+            : new SolidColorBrush(Windows.UI.Color.FromArgb(255, 30, 144, 255));   // DodgerBlue 兜底
+    }
+
+    /// <summary>
+    /// 窗口材质的**方格选择板**（2026-10-30 用户要求「做成方格，点击切换」）。
+    ///
+    /// 每格是一张卡片：大标题（材质名）+ 一行说明；整格可点，选中格用强调色描边。
+    /// 2 列自适应 —— 内容区宽度不够时自动变 1 列（由外层 StackPanel 的换行实现）。
+    /// </summary>
+    private UIElement BuildMaterialBoard()
+    {
+        var board = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        var host = _host;
+        var current = host?.CurrentMaterial ?? MaterialKind.Mica;
+
+        foreach (var (kind, label, hint) in Materials)
+        {
+            var selected = kind == current;
+            var tile = new Button
+            {
+                Tag = kind,
+                MinWidth = 200,
+                MinHeight = 64,
+                Padding = new Thickness(14, 10, 14, 10),
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                // 选中格用强调色描边；未选中用默认卡片描边
+                BorderThickness = new Thickness(selected ? 2 : 1),
+                BorderBrush = selected ? AccentStrokeBrush(host?.IsDarkTheme ?? true)
+                                       : (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+            };
+            AutomationProperties.SetName(tile, "material-" + kind);
+
+            var inner = new StackPanel { Spacing = 3 };
+            inner.Children.Add(new TextBlock { Text = label, FontSize = 14, FontWeight = FontWeights.SemiBold });
+            inner.Children.Add(new TextBlock { Text = hint, FontSize = 11, Opacity = 0.6, TextWrapping = TextWrapping.Wrap });
+            tile.Content = inner;
+
+            tile.Click += OnMaterialTileClick;
+            board.Children.Add(tile);
+        }
+        return board;
+    }
+
+    /// <summary>点材质方格 → 立即切换，然后整页重建以刷新选中描边。</summary>
+    private void OnMaterialTileClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button b || b.Tag is not MaterialKind kind) return;
+        if (_host is null) return;
+        _host.ApplyMaterial(kind, _host.IsDarkTheme);
+        // 重建外观页：选中描边要跟着挪
+        RenderCategory("appearance");
+    }
+
     private UIElement BuildAppearance()
     {
         var panel = new StackPanel { Spacing = 16 };
 
-        // ① 窗口材质：四档分段单选
-        var materialPanel = new StackPanel { Spacing = 6 };
-        var group = "material-" + Guid.NewGuid().ToString("N");
-        _suppressMaterialEvent = true;
-        foreach (var (kind, label, hint) in Materials)
+        // ① 窗口材质：**方格卡片，点一下直接切换**（2026-10-30 用户要求）
+        //
+        // 原来是四行 RadioButton + 右侧灰色说明文字，占地方又不好点。
+        // 现在做成 2 列方格：每格一个大标题 + 一行说明，整格可点，选中格描边高亮。
+        panel.Children.Add(SettingRows.Card("窗口材质",
+            "点一下立即切换 · 四档全部由 Windows App SDK 官方合成控制器绘制",
+            BuildMaterialBoard()));
+
+        // ② 明暗 —— **三选一：跟随系统 / 深色 / 浅色**（2026-10-30 用户要求加「跟随系统」）
+        var themeRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        var tg = "theme-" + Guid.NewGuid().ToString("N");
+        var curMode = AppSettings.Instance.ThemeMode;
+        var isDark = _host?.IsDarkTheme ?? AppSettings.Instance.IsDark;
+
+        _suppressThemeEvent = true;
+        foreach (var (mode, label, name) in new[]
+                 {
+                     ("System", "跟随系统", "theme-system"),
+                     ("Dark", "深色", "theme-dark"),
+                     ("Light", "浅色", "theme-light"),
+                 })
         {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             var rb = new RadioButton
             {
                 Content = label,
-                GroupName = group,
-                Tag = kind,
-                MinWidth = 130,
-                IsChecked = _host is not null && kind == _host.CurrentMaterial,
+                GroupName = tg,
+                Tag = mode,
+                MinWidth = 100,
+                IsChecked = curMode == mode,
             };
-            AutomationProperties.SetName(rb, "material-" + kind);
-            rb.Checked += OnMaterialChecked;
-            row.Children.Add(rb);
-            row.Children.Add(new TextBlock { Text = hint, FontSize = 12, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center });
-            materialPanel.Children.Add(row);
+            AutomationProperties.SetName(rb, name);
+            rb.Checked += OnThemeChecked;
+            themeRow.Children.Add(rb);
         }
-        _suppressMaterialEvent = false;
-        panel.Children.Add(SettingRows.Card("窗口材质",
-            "四档全部由 Windows App SDK 官方合成控制器绘制",
-            materialPanel));
-
-        // ② 明暗
-        var themeRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        var tg = "theme-" + Guid.NewGuid().ToString("N");
-        var darkRadio = new RadioButton { Content = "深色", GroupName = tg, Tag = true, MinWidth = 100 };
-        var lightRadio = new RadioButton { Content = "浅色", GroupName = tg, Tag = false, MinWidth = 100 };
-        AutomationProperties.SetName(darkRadio, "theme-dark");
-        AutomationProperties.SetName(lightRadio, "theme-light");
-        _suppressThemeEvent = true;
-        var isDark = _host?.IsDarkTheme ?? AppSettings.Instance.IsDark;
-        darkRadio.IsChecked = isDark;
-        lightRadio.IsChecked = !isDark;
         _suppressThemeEvent = false;
-        darkRadio.Checked += OnThemeChecked;
-        lightRadio.Checked += OnThemeChecked;
-        themeRow.Children.Add(darkRadio);
-        themeRow.Children.Add(lightRadio);
-        panel.Children.Add(SettingRows.Card("明暗", "切换后材质会带着真实主题重新应用", themeRow));
+
+        // 「跟随系统」时补一句当前实际生效的明暗，避免用户看不出到底走的哪一档
+        var themeCard = new StackPanel { Spacing = 8 };
+        themeCard.Children.Add(themeRow);
+        if (curMode == "System")
+        {
+            themeCard.Children.Add(SettingRows.Description(
+                "当前系统是" + (isDark ? "深色" : "浅色") + "，界面正跟随它；系统切换时会自动跟着变。"));
+        }
+        panel.Children.Add(SettingRows.Card("明暗", "切换后材质会带着真实主题重新应用", themeCard));
 
         // ③ 主题色 —— 真接逻辑：预设色板 + 自定义色轮 + 实时预览
         panel.Children.Add(BuildAccentCard());
-
-        // ④ 导航形态（同上）
-        var navNote = new StackPanel { Spacing = 6 };
-        navNote.Children.Add(SettingRows.Description(
-            "WinUI 版目前固定为左侧导航栏（NavigationView，PaneDisplayMode=Left）。" +
-            "原 Flutter 版的「底部悬浮 Dock / 常规侧边栏」二选一尚未移植 —— 切换要改 MainWindow 的 NavigationView，" +
-            "不在本页可改的范围内。"));
-        panel.Children.Add(SettingRows.Card("导航形态", "左侧栏 / 悬浮 Dock", navNote));
 
         return panel;
     }
@@ -302,7 +372,11 @@ public sealed partial class SettingsPage : Page
         _accentStatus = new TextBlock { FontSize = 12, Opacity = 0.75, TextWrapping = TextWrapping.Wrap };
         custom.Children.Add(_accentStatus);
 
-        // 色轮 ↔ 十六进制框双向同步。拖动色轮时**不写盘**，只更新输入框文字。
+        // 色轮 ↔ 十六进制框双向同步，**并且都把颜色喂给预览**（2026-10-30 修）。
+        //
+        // 原来这里只更新输入框文字：拖动色轮时预览纹丝不动，用户看到的「实时预览」
+        // 其实只在点「应用自定义色」之后才变 —— 名不副实。
+        // 现在拖动即写入 _pendingAccentHex 并刷新预览（仍然不写盘）。
         var syncing = false;
         colorPicker.ColorChanged += (s, e) =>
         {
@@ -310,6 +384,8 @@ public sealed partial class SettingsPage : Page
             syncing = true;
             _accentHexBox.Text = AccentService.Hex(s.Color);
             syncing = false;
+            _pendingAccentHex = AccentService.Hex(s.Color);
+            RefreshAccentPreview();
         };
         _accentHexBox.TextChanged += (_, _) =>
         {
@@ -320,6 +396,9 @@ public sealed partial class SettingsPage : Page
                 colorPicker.Color = c;
                 syncing = false;
                 _accentStatus!.Text = "";
+                // 手填十六进制同样即时反馈到预览
+                _pendingAccentHex = AccentService.Hex(c);
+                RefreshAccentPreview();
             }
             else
             {
@@ -334,11 +413,36 @@ public sealed partial class SettingsPage : Page
                 _accentStatus!.Text = "十六进制格式不对，应形如 #0078D4";
                 return;
             }
+            // 定稿：清掉「试色」状态，真正落盘并全局生效
+            _pendingAccentHex = null;
             ApplyAccent(AccentService.CustomId, AccentService.Hex(c));
+            _accentStatus!.Text = "已应用：" + AccentService.Hex(c);
         };
 
         custom.Children.Add(colorPicker);
-        panel.Children.Add(SettingRows.Row("自定义色", "色轮上取色，或直接填十六进制；点「应用自定义色」生效。", custom));
+
+        // **自定义色做成「点击展开」的卡片**（2026-10-30 用户要求）：
+        // 默认收起 —— 色轮 + RGB + 十六进制占很高，展开后会把预设色板和预览都挤下去。
+        // 点标题栏展开/收起，箭头跟着翻。
+        var expander = new Expander
+        {
+            Header = new StackPanel
+            {
+                Spacing = 2,
+                Children =
+                {
+                    new TextBlock { Text = "自定义色", FontSize = 14, FontWeight = FontWeights.SemiBold },
+                    new TextBlock { Text = "点这里展开色轮，或直接填十六进制；点「应用自定义色」生效。", FontSize = 11, Opacity = 0.6, TextWrapping = TextWrapping.Wrap },
+                },
+            },
+            Content = custom,
+            IsExpanded = false,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 4, 0, 0),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(expander, "accent-custom-expander");
+        panel.Children.Add(expander);
 
         // ③ 实时预览
         panel.Children.Add(BuildAccentPreview());
@@ -429,6 +533,8 @@ public sealed partial class SettingsPage : Page
     /// <summary>应用一套配色：写设置 → 应用到应用级资源 → 刷新色板与状态行。</summary>
     private void ApplyAccent(string id, string? customHex)
     {
+        // 点预设也意味着「放弃正在试的颜色」，否则预览会停在试色上不跟走。
+        _pendingAccentHex = null;
         var cfg = AppSettings.Instance;
         cfg.AccentPreset = id;
         if (!string.IsNullOrWhiteSpace(customHex)) cfg.AccentHex = customHex!;
@@ -474,50 +580,98 @@ public sealed partial class SettingsPage : Page
         var wrap = new StackPanel { Spacing = 8 };
         wrap.Children.Add(new TextBlock { Text = "实时预览", FontSize = 12, Opacity = 0.6 });
 
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, VerticalAlignment = VerticalAlignment.Center };
+        // **每次刷新重建控件**，而不是改已加载控件的 Resources（2026-10-30 实测）。
+        //
+        // 试过给 Button/ToggleSwitch 的 Resources 塞 AccentButtonBackground 等键：
+        // 控件一旦 Loaded，模板已经把颜色固化，改 Resources 不会重新解析 ——
+        // 实测只有「选中态」那个自绘 Border 变了，按钮和开关纹丝不动。
+        // 重建控件最稳：新实例在挂到可视树时会重新走模板应用。
+        _previewHost = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, VerticalAlignment = VerticalAlignment.Center };
+        wrap.Children.Add(_previewHost);
+        RebuildPreviewControls();
+        return wrap;
+    }
 
-        _previewButton = new Button { Content = "主要按钮", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_previewButton, "accent-preview-button");
-        row.Children.Add(_previewButton);
+    /// <summary>按当前（或正在试的）颜色重建预览的三个控件。</summary>
+    private void RebuildPreviewControls()
+    {
+        if (_previewHost is null) return;
+        _previewHost.Children.Clear();
 
+        var isDark = _host?.IsDarkTheme ?? AppSettings.Instance.IsDark;
+        string fillHex, onAccentHex;
+        if (!string.IsNullOrEmpty(_pendingAccentHex))
+        {
+            fillHex = _pendingAccentHex!;
+            var (_, _, _, onAcc) = AccentService.Resolve(AccentService.CustomId, fillHex, isDark);
+            onAccentHex = onAcc;
+        }
+        else
+        {
+            (fillHex, _, _, onAccentHex) = ResolveAccentForUi(isDark);
+        }
+
+        var hasFill = AccentService.TryParseHex(fillHex, out var fill);
+        var hasOn = AccentService.TryParseHex(onAccentHex, out var onAccent);
+        var fillBrush = hasFill ? new SolidColorBrush(fill) : null;
+        var onBrush = hasOn ? new SolidColorBrush(onAccent) : null;
+
+        // ① 主要按钮 —— 用显式配色，不走 AccentButtonStyle（那个读全局资源）
+        var btn = new Button
+        {
+            Content = "主要按钮",
+            Background = fillBrush,
+            Foreground = onBrush,
+            BorderBrush = fillBrush,
+            BorderThickness = new Thickness(1),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(btn, "accent-preview-button");
+        _previewButton = btn;
+        _previewHost.Children.Add(btn);
+
+        // ② 开关
         var toggleWrap = new StackPanel { Orientation = Orientation.Horizontal, Spacing = SettingRows.InlineGap, VerticalAlignment = VerticalAlignment.Center };
         toggleWrap.Children.Add(new TextBlock { Text = "开关", FontSize = 13, VerticalAlignment = VerticalAlignment.Center });
-        _previewToggle = new ToggleSwitch { IsOn = true, OnContent = "", OffContent = "", MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_previewToggle, "accent-preview-toggle");
-        toggleWrap.Children.Add(_previewToggle);
-        row.Children.Add(toggleWrap);
+        var toggle = new ToggleSwitch { IsOn = true, OnContent = "", OffContent = "", MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
+        // 开关的开态轨道是模板里的 ToggleSwitchFillOn，只能在实例资源上覆盖；
+        // 新建的实例尚未加载，此时塞 Resources 是有效的。
+        if (fillBrush is not null)
+        {
+            toggle.Resources["ToggleSwitchFillOn"] = fillBrush;
+            toggle.Resources["ToggleSwitchFillOnPointerOver"] = fillBrush;
+            toggle.Resources["ToggleSwitchFillOnPressed"] = fillBrush;
+        }
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, "accent-preview-toggle");
+        _previewToggle = toggle;
+        toggleWrap.Children.Add(toggle);
+        _previewHost.Children.Add(toggleWrap);
 
-        _previewSelectedChip = new Border
+        // ③ 选中态色块
+        var chip = new Border
         {
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(12, 6, 12, 6),
             VerticalAlignment = VerticalAlignment.Center,
-            Child = new TextBlock { Text = "选中态", FontSize = 13 },
+            Background = fillBrush,
+            Child = new TextBlock { Text = "选中态", FontSize = 13, Foreground = onBrush },
         };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_previewSelectedChip, "accent-preview-selected");
-        row.Children.Add(_previewSelectedChip);
-
-        wrap.Children.Add(row);
-        RefreshAccentPreview();
-        return wrap;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(chip, "accent-preview-selected");
+        _previewSelectedChip = chip;
+        _previewHost.Children.Add(chip);
     }
 
-    /// <summary>把预览里的选中态配色刷成当前强调色（按钮与开关由系统按资源自动跟）。</summary>
-    private void RefreshAccentPreview()
-    {
-        if (_previewSelectedChip is null) return;
-        var isDark = _host?.IsDarkTheme ?? AppSettings.Instance.IsDark;
-        var (fillHex, _, _, onAccentHex) = ResolveAccentForUi(isDark);
-        if (!AccentService.TryParseHex(fillHex, out var fill)) return;
-        if (!AccentService.TryParseHex(onAccentHex, out var onAccent)) return;
-
-        _previewSelectedChip.Background = new SolidColorBrush(fill);
-        if (_previewSelectedChip.Child is TextBlock tb) tb.Foreground = new SolidColorBrush(onAccent);
-    }
-
+    /// <summary>
+    /// 刷新预览 —— **直接重建那三个控件**（2026-10-30 实测结论）。
+    ///
+    /// 走过一次弯路：给已加载的 Button/ToggleSwitch 改 `Resources` 里的
+    /// `AccentButtonBackground` / `ToggleSwitchFillOn` 是**无效**的 —— 控件模板在
+    /// Loaded 时已把颜色固化，事后改字典不会重新解析（实测只有自绘的 Border 变了）。
+    /// 重建控件最稳：新实例挂上可视树时会重新应用模板。
+    /// </summary>
+    private void RefreshAccentPreview() => RebuildPreviewControls();
     /// <summary>取当前选择在指定明暗下的 (fill, secondary, tertiary, onAccent)。</summary>
     /// <remarks>
-    /// 直接转调 [AccentService.Resolve]：公式只有服务里那一份。
+    /// 直接转调 AccentService.Resolve：公式只有服务里那一份。
     /// 早先在页面里另抄了一遍（还抄错了方向），预览与实际生效颜色对不上。
     /// </remarks>
     private static (string Fill, string Secondary, string Tertiary, string OnAccent) ResolveAccentForUi(bool isDark)
@@ -534,20 +688,27 @@ public sealed partial class SettingsPage : Page
     private void OnThemeChecked(object sender, RoutedEventArgs e)
     {
         if (_suppressThemeEvent || _host is null) return;
-        if (sender is not RadioButton rb || rb.Tag is not bool dark) return;
+        if (sender is not RadioButton rb || rb.Tag is not string mode) return;
+
+        // 先落偏好（SetThemeMode 会顺带把 IsDark 解析成实际生效值）
+        AppSettings.Instance.SetThemeMode(mode);
+        AppSettings.Instance.Save();
+        var dark = AppSettings.Instance.IsDark;
+
         // 改 RootGrid.RequestedTheme 而不是直接调材质：MainWindow 订阅了
         // ActualThemeChanged，会带着真实主题重新 Apply，界面与材质才一致。
         _host.ApplyTheme(dark);
 
         // 强调色分浅/深两套：切了明暗要**重新应用一次**，否则界面已经变浅色、
         // 强调色还停在深色那一套（浅底上的亮蓝按钮对比度会掉）。
-        AppSettings.Instance.IsDark = dark;
-        AppSettings.Instance.Save();
         AccentService.Apply(AccentService.CurrentId, AppSettings.Instance.AccentHex, dark);
 
         // 色板与预览也跟着刷（色块取的是「该明暗下的那一档」）
         RebuildAccentBoard();
         RefreshAccentPreview();
+
+        // 重建外观页：让「当前系统是深色/浅色」那行说明跟着更新
+        RenderCategory("appearance");
     }
 
     // ── 下载 ────────────────────────────────────────────────
@@ -576,11 +737,11 @@ public sealed partial class SettingsPage : Page
             {
                 var folder = await FolderPickerService.PickAsync();
                 if (folder is null) return;
-                var (ok, msg) = FolderPickerService.VerifyWritable(folder.Path);
+                var (ok, msg) = FolderPickerService.VerifyWritable(folder);
                 if (!ok) { status.Text = "❌ 该目录不可写：" + msg; return; }
-                cfg.SaveDirBase = folder.Path;
+                cfg.SaveDirBase = folder;
                 cfg.Save();
-                dirBox.Text = folder.Path;
+                dirBox.Text = folder;
                 status.Text = "✅ 已保存，立即生效";
             }
             catch (Exception ex)
@@ -604,10 +765,16 @@ public sealed partial class SettingsPage : Page
         panel.Children.Add(SettingRows.Card("保存目录", "留空则使用 数据目录\\downloads", dirPanel));
 
         var dl = new StackPanel { Spacing = 16 };
-        dl.Children.Add(SettingRows.Number("并发上限",
-            "aria2 同时下载的任务数（1-16）",
-            cfg.MaxConcurrent, 1, 16,
-            v => { cfg.MaxConcurrent = (int)v; cfg.Save(); }));
+        // **并发固定为 1（串行下载）**（2026-10-29 用户要求「按顺序下载」）。
+        dl.Children.Add(SettingRows.Card("下载顺序",
+            "按推送顺序逐个下载（同时只下 1 个）",
+            new TextBlock
+            {
+                Text = "先识别到的先下，下完再下一条 —— 顺序固定，不可调。",
+                FontSize = 12,
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            }));
         dl.Children.Add(SettingRows.Number("请求间隔（毫秒）",
             "每次接口请求之间的间隔，太小容易触发限流",
             cfg.RequestIntervalMs, 200, 10000,
@@ -720,7 +887,10 @@ public sealed partial class SettingsPage : Page
             cfg.WriteLogs,
             v => { cfg.WriteLogs = v; cfg.Save(); }));
 
-        var logDir = Path.Combine(AppPaths.DataDir, "logs");
+        // **必须与真正写日志的地方同源**（2026-10-30 修）：直接用 Aria2Engine.LogDir。
+        // 不要在这里再拼一次路径 —— 拼两次就会分叉，之前就是这样导致显示的目录是空的。
+        var logDir = Aria2Engine.LogDir;
+        var logFile = Aria2Engine.LogFilePath;
         var info = new StackPanel { Spacing = 6 };
         info.Children.Add(new TextBlock
         {
@@ -736,6 +906,24 @@ public sealed partial class SettingsPage : Page
         var open = new Button { Content = "打开日志目录" };
         open.Click += (_, _) => OpenInExplorer(logDir);
         info.Children.Add(open);
+        // **显示本次运行的日志文件**（2026-10-30）：每次启动新建一个、按启动时间命名，
+        // 所以用户最关心的是「现在这个进程写到哪个文件」。
+        info.Children.Add(SettingRows.Description("本次运行的日志文件："));
+        info.Children.Add(new TextBlock
+        {
+            Text = Path.GetFileName(logFile),
+            FontSize = 12,
+            FontFamily = new FontFamily("Consolas"),
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        });
+        var openFile = new Button { Content = "打开本次日志" };
+        openFile.Click += (_, _) =>
+        {
+            try { OpenInExplorer(logFile); }
+            catch { OpenInExplorer(logDir); }
+        };
+        info.Children.Add(openFile);
         panel.Children.Add(SettingRows.Card("日志", "运行日志落点", info));
 
         // ── 自动删除（用户 2026-10-26：「日志增加自动删除，可以选择时间删除或者不删除」）
@@ -882,16 +1070,37 @@ public sealed partial class SettingsPage : Page
         return panel;
     }
 
+    /// <summary>
+    /// 用资源管理器打开「目录」或「文件」（2026-10-30 修「打开本次日志没反应」）。
+    ///
+    /// **必须区分文件和目录**：原来这里无条件 `Directory.CreateDirectory(path)`，
+    /// 传进来的是文件路径时它会直接抛异常（同名文件已存在），然后被空 catch 吞掉 ——
+    /// 表现就是「按钮点了完全没反应」。
+    ///   · 文件：用 `explorer.exe /select,"文件"` 定位并选中它；
+    ///   · 目录：不存在就建，再用 shell 打开。
+    /// </summary>
     private static void OpenInExplorer(string path)
     {
         try
         {
+            if (File.Exists(path))
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = "/select,\"" + path + "\"",
+                    UseShellExecute = true,
+                });
+                return;
+            }
+
             if (!Directory.Exists(path)) Directory.CreateDirectory(path);
             Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
         }
-        catch
+        catch (Exception ex)
         {
-            // 打不开资源管理器不该让页面崩
+            // 打不开不该让页面崩，但要留下痕迹便于排查
+            Aria2Engine.Log("[打开位置] 失败：" + path + " → " + ex.Message);
         }
     }
 

@@ -148,7 +148,20 @@ public static class DouyinSourceResolver
 
         if (byKind.Count > 0) return Apply(m, byKind, FirstVariantOfKind(m, KindOf(cfg.Source)));
 
-        // 指定字段缺失（如没有 play_addr_h264）时不产出空任务：退回已有候选地址
+        // 指定字段缺失（如没有 play_addr_h264）时不产出空任务：退回已有候选地址。
+        //
+        // **但必须排除音频地址**（2026-10-30）：m.DownloadCandidates 是 Url + AltUrls，
+        // 而早期版本会把 BGM 音频混进视频条目的候选里，退回时就会拿音频当视频下，
+        // 落盘却按 Video 规则给 .mp4 扩展名 —— 实测该文件头是 ID3（MP3）。
+        // 这里做一道保险：只用 Variants 里确实是视频的地址，兜不住就返回原条目。
+        var videoOnly = m.Variants
+            .Where(v => v.Usable && v.Kind is DouyinVariantKind.BitRate
+                or DouyinVariantKind.DefaultAddr or DouyinVariantKind.H264
+                or DouyinVariantKind.H265 or DouyinVariantKind.Download)
+            .SelectMany(v => v.Urls)
+            .Distinct()
+            .ToList();
+        if (videoOnly.Count > 0) return Apply(m, videoOnly, m.Chosen);
         return Apply(m, m.DownloadCandidates, m.Chosen);
     }
 

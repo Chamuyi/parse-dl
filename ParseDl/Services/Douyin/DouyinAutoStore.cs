@@ -123,11 +123,27 @@ public sealed class DouyinAutoStore
 {
     public static DouyinAutoStore Instance { get; } = new();
 
-    public const int MaxTargets = 200;
+    /// <summary>
+    /// **名单数量不再限制**（2026-10-30 用户要求：「名单数量限制取消了，不要限制」）。
+    ///
+    /// 原来这里是 200，超出部分会被静默丢弃（界面提示「超出上限丢弃 N 个」）。
+    /// 保留这个常量只是为了不改方法签名，值取 int.MaxValue —— 实际等于不限制。
+    /// </summary>
+    public const int MaxTargets = int.MaxValue;
     /// <summary>「每个目标最多滚几轮」的档位（一轮 ≈ 700ms，一页约 17~20 条）。</summary>
     public static readonly int[] RoundChoices = { 5, 10, 15, 25, 40, 60, 100 };
 
     private string _rawText = "";
+
+    /// <summary>
+    /// 导入名单时的**文件名（不含扩展名）**，用作下载的顶层文件夹名。
+    ///
+    /// 用户 2026-10-29：「我导入文件下载的话，加一个功能，创建与文件名同名文件夹，
+    /// 先那里面按照文件夹变量和文件名变量保存文件」——
+    /// 即 downloads\&lt;名单文件名&gt;\&lt;文件夹模板&gt;\&lt;文件名模板&gt;。
+    /// 空 = 不建这层（手贴名单、或用户关掉了这个开关）。
+    /// </summary>
+    public string ImportFolderName { get; private set; } = "";
     private DouyinTargetParse _parsed = new();
 
     public event Action? Changed;
@@ -144,6 +160,14 @@ public sealed class DouyinAutoStore
     /// <summary>正在跑第几个（-1 = 还没开始）。</summary>
     public int CurrentIndex { get; private set; } = -1;
     public bool AutoDownload { get; private set; } = true;
+
+    /// <summary>
+    /// 是否在保存目录下**按导入的名单文件名建一层文件夹**（用户 2026-10-29 要求加开关）。
+    ///
+    /// 开（默认）：downloads\&lt;名单文件名&gt;\&lt;文件夹模板&gt;\&lt;文件名模板&gt;
+    /// 关：downloads\&lt;文件夹模板&gt;\&lt;文件名模板&gt;（退回到没有这层时的行为）
+    /// </summary>
+    public bool FolderByName { get; private set; } = true;
 
     public DouyinAutoTask? Current =>
         CurrentIndex >= 0 && CurrentIndex < _parsed.Tasks.Count ? _parsed.Tasks[CurrentIndex] : null;
@@ -169,6 +193,8 @@ public sealed class DouyinAutoStore
             if (node is null) return;
             var text = node["rawText"]?.ToString() ?? "";
             if (node["autoDownload"] is JsonNode ad && bool.TryParse(ad.ToString(), out var b)) AutoDownload = b;
+            if (node["importFolderName"] is JsonNode fn) ImportFolderName = SanitizeFolderName(fn.ToString());
+            if (node["folderByName"] is JsonNode fb && bool.TryParse(fb.ToString(), out var fb2)) FolderByName = fb2;
             if (text.Length > 0) SetRawText(text, persist: false);
         }
         catch (Exception ex)
@@ -187,6 +213,8 @@ public sealed class DouyinAutoStore
             {
                 ["rawText"] = _rawText,
                 ["autoDownload"] = AutoDownload,
+                ["importFolderName"] = ImportFolderName,
+                ["folderByName"] = FolderByName,
             };
             var tmp = FilePath + ".tmp";
             File.WriteAllText(tmp, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
@@ -205,6 +233,10 @@ public sealed class DouyinAutoStore
     {
         if (Running || _rawText == v) return;
         _rawText = v;
+        // **用户手贴名单（没有经过「导入名单」）→ 清掉上一次导入留下的文件夹名**（2026-10-30）
+        // 实测：只粘一个链接，却沿用了上次导入的名单名，文件落进 downloads\收藏\ 里。
+        // 「导入名单」那条路径会在 SetRawText 之后紧接着 SetImportFolderName(file.Name)，不受影响。
+        if (persist && v.Trim().Length > 0) ImportFolderName = "";
         // **先认表格**（用户 2026-10-27：要能直接粘「插眼导出器」导出的 Markdown 名单）。
         // 名单里每行是 | 1 | 作者 | UID | ... | 主页链接 | ... |，整行不是链接，
         // 旧的「一行一个链接」解析会全部判非法。表格能认出来就走表格解析，
@@ -218,6 +250,60 @@ public sealed class DouyinAutoStore
     }
 
     public void ClearText() => SetRawText("");
+
+    /// <summary>
+    /// 退出程序时清空目标名单与「按文件名建文件夹」那层名字（用户 2026-10-30 要求）。
+    ///
+    /// 不走 SetRawText / SetImportFolderName：它们都带 `if (Running) return` 或
+    /// 变更判重，退出时正跑着就清不掉。这里直接改字段再落盘。
+    /// </summary>
+    public void ClearOnExit()
+    {
+        try
+        {
+            _rawText = "";
+            _parsed = new DouyinTargetParse();
+            ImportFolderName = "";
+            CurrentIndex = -1;
+            Save();
+        }
+        catch { }
+    }
+
+    /// <summary>设置「导入文件名」顶层文件夹（空串 = 不建这层）。</summary>
+    /// <summary>开关「按文件名建文件夹」。</summary>
+    public void SetFolderByName(bool v, bool persist = true)
+    {
+        if (FolderByName == v) return;
+        FolderByName = v;
+        if (persist) Save();
+        Notify();
+    }
+
+    /// <summary>实际要用的顶层文件夹名（开关关掉时返回空 = 不建这层）。</summary>
+    public string EffectiveRootFolder => FolderByName ? ImportFolderName : "";
+
+    public void SetImportFolderName(string v, bool persist = true)
+    {
+        var name = SanitizeFolderName(v ?? "");
+        if (ImportFolderName == name) return;
+        ImportFolderName = name;
+        if (persist) Save();
+        Notify();
+    }
+
+    /// <summary>把文件名变成合法的单级目录名（去掉扩展名与非法字符）。</summary>
+    public static string SanitizeFolderName(string fileName)
+    {
+        var s = (fileName ?? "").Trim();
+        if (s.Length == 0) return "";
+        // 去掉扩展名（.md / .txt / .markdown）
+        var dot = s.LastIndexOf('.');
+        if (dot > 0) s = s[..dot];
+        foreach (var c in Path.GetInvalidFileNameChars()) s = s.Replace(c, '_');
+        s = s.Trim().TrimEnd('.');
+        return s.Length > 80 ? s[..80] : s;
+    }
 
     public void SetAutoDownload(bool v, bool persist = true)
     {
@@ -274,7 +360,7 @@ public sealed class DouyinAutoStore
             var url = DouyinUrl.Normalize(raw);
             if (url is null) { rejected.Add(raw); continue; }
             if (!seen.Add(url)) continue;
-            if (tasks.Count >= maxTargets) { truncated++; continue; }
+            // **不再限制名单数量**（2026-10-30 用户要求）
             tasks.Add(new DouyinAutoTask(raw, url));
         }
 

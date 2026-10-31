@@ -82,6 +82,62 @@ public static class FileNameTemplateSelfTest
             string.Join("|", FileNameTemplate.ParseDirSegments("a/../b/c")),
             "a|b|c");
 
+        // ── %TAGS%（2026-10-31 补，X 侧变量）──────────────────────
+        var tagCtx = new TemplateContext
+        {
+            Tags = new[] { "女高", "自拍" },
+            Content = "正文",
+        };
+        Check("TAGS 逗号连接（不含 #）",
+            FileNameTemplate.Resolve("%TAGS%", tagCtx),
+            "女高,自拍");
+        Check("TAGS 为空时出空串",
+            FileNameTemplate.Resolve("[%TAGS%]", new TemplateContext()),
+            "[]");
+
+        // ── X 扩展名判定必须与 Flutter 版一致（2026-10-31 修）──────
+        // Flutter 的 %EXT% 先看下载链接真实后缀，再退回媒体类型。
+        Check("X 图片 .png 链接 → .png（不是一律 jpg）",
+            X.XNaming.ExtensionFor(new X.XMedia
+            {
+                Type = "image",
+                Url = "https://pbs.twimg.com/media/ABC123.png?name=orig",
+            }),
+            "png");
+        Check("X 图片无后缀链接 → jpg",
+            X.XNaming.ExtensionFor(new X.XMedia
+            {
+                Type = "image",
+                Url = "https://pbs.twimg.com/media/ABC123?format=jpg&name=orig",
+            }),
+            "jpg");
+        Check("X 视频 → mp4",
+            X.XNaming.ExtensionFor(new X.XMedia
+            {
+                Type = "video",
+                Url = "https://video.twimg.com/amplify_video/1/vid/avc1/720x1280/x.mp4?tag=16",
+            }),
+            "mp4");
+
+        // ── 带时效签名直链的过期判定（2026-10-31 加，用户报「上千错误任务重试无效」）──
+        // 真实取样：https://v26-web.douyinvod.com/<32hex>/<8hex>/video/tos/...
+        // 其中 8 位 hex 是过期时间戳。0x6ae50d65 = 2026-10-31 05:24（已过期）。
+        var expiredUrl = "https://v26-web.douyinvod.com/66c9b4062cadc768bc5f1ab5901af196/"
+                       + "6ae50d65/video/tos/cn/x/?a=6383";
+        Check("过期直链判定为已过期", SignedUrl.IsExpired(expiredUrl).ToString(), "True");
+        Check("过期直链能解出签名时间",
+            SignedUrl.Describe(expiredUrl).EndsWith("已过期") ? "已过期" : SignedUrl.Describe(expiredUrl),
+            "已过期");
+        // 未过期：取一个远期时间戳（0x7fffffff = 2038-01-19）
+        var aliveUrl = "https://v26-web.douyinvod.com/66c9b4062cadc768bc5f1ab5901af196/"
+                     + "7fffffff/video/tos/cn/x/?a=6383";
+        Check("未过期直链不误判", SignedUrl.IsExpired(aliveUrl).ToString(), "False");
+        Check("非 CDN 链接不误判", SignedUrl.IsExpired("https://example.com/a.jpg").ToString(), "False");
+        Check("空链接不误判", SignedUrl.IsExpired("").ToString(), "False");
+        // 32 位那段很像时间戳但位置不对，必须看第 2 段
+        Check("只看第二段（不看资源哈希）",
+            SignedUrl.ExpiryOf(expiredUrl)?.ToUnixTimeSeconds().ToString(), "1793396069");
+
         sb.AppendLine();
         sb.AppendLine("合计: 通过 " + pass + ", 失败 " + fail);
         return sb.ToString();

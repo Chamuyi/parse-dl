@@ -16,9 +16,23 @@ public sealed partial class MainWindow : Window
     /// <summary>当前导航项 id（'dashboard' / 'home' / ...）。</summary>
     public string CurrentRouteId { get; private set; } = "dashboard";
 
+    /// <summary>正在同步左侧导航选中项 —— 用来挡掉 SelectionChanged 的回环。</summary>
+    private bool _syncingNav;
+
     public MainWindow()
     {
         InitializeComponent();
+
+        // **退出时清空各模块的名单输入**（用户 2026-10-30 要求：
+        // 「三个模块的自动下载，我输入上去和导入文件名单，退出时要清空」）。
+        //
+        // 挂在窗口 Closed 上而不是 App 退出路径：点 ×、Alt+F4、任务栏关闭都走这里。
+        // B站批量页的 TargetsBox 本来就不落盘（每次进页都是空的），所以只需清这两处。
+        Closed += (_, _) =>
+        {
+            try { ParseDl.Services.AutoTaskStore.Instance.ClearOnExit(); } catch { }
+            try { ParseDl.Services.Douyin.DouyinAutoStore.Instance.ClearOnExit(); } catch { }
+        };
 
         // 用官方 TitleBar 控件时**不要**再 SetTitleBar —— 控件自己处理拖拽区，
         // 手动 SetTitleBar 会和控件内部逻辑打架（拖不动 / 双击不最大化）。
@@ -45,12 +59,24 @@ public sealed partial class MainWindow : Window
         // 参照物图吧也是取 root.ActualTheme（BackdropService.cs:202-204）。
         // 从设置恢复上次的明暗与材质档位
         var cfg = AppSettings.Instance;
-        RootGrid.RequestedTheme = cfg.IsDark ? ElementTheme.Dark : ElementTheme.Light;
+        // **「跟随系统」时不能锁死 RequestedTheme**（2026-10-30）：
+        // ThemeMode == "System" 就设 Default，让 XAML 直接跟系统走；
+        // 手动选深/浅才写死 Dark/Light。
+        cfg.SetThemeMode(cfg.ThemeMode);   // 顺带把 IsDark 解析成实际值
+        RootGrid.RequestedTheme = cfg.ThemeMode switch
+        {
+            "Dark" => ElementTheme.Dark,
+            "Light" => ElementTheme.Light,
+            _ => ElementTheme.Default,        // 跟随系统
+        };
         RootGrid.ActualThemeChanged += (_, _) =>
         {
-            cfg.IsDark = RootGrid.ActualTheme == ElementTheme.Dark;
+            var dark = RootGrid.ActualTheme == ElementTheme.Dark;
+            // **只有手动模式下才把实际明暗写回配置**：跟随系统时 IsDark 是派生值，
+            // 写回去会把「跟随系统」悄悄改成「锁定当前明暗」（实测会这样）。
+            if (cfg.ThemeMode != "System") cfg.IsDark = dark;
             cfg.Save();
-            _material.Apply(_material.Current, cfg.IsDark);
+            _material.Apply(_material.Current, dark);
         };
         var startKind = Enum.TryParse<MaterialKind>(cfg.MaterialKind, out var mk) ? mk : MaterialKind.Mica;
         _material.Apply(startKind, cfg.IsDark);
@@ -215,6 +241,7 @@ public sealed partial class MainWindow : Window
 
     private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
+        if (_syncingNav) return;
         if (args.SelectedItem is not NavigationViewItem item) return;
         if (item.Tag is not string routeId) return;
         Navigate(routeId);
@@ -226,6 +253,8 @@ public sealed partial class MainWindow : Window
         if (routeId == CurrentRouteId && NavFrame.Content is not null) return;
         CurrentRouteId = routeId;
         BreadcrumbText.Text = LabelOf(routeId);
+        // 左侧导航高亮跟过去（快捷开始卡进来时原本不动，看起来像本页被替换）
+        SyncNavSelection(routeId);
 
         switch (routeId)
         {
@@ -302,6 +331,59 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// 把左侧导航的选中项同步到目标路由，并展开它所在的父分组。
+    ///
+    /// **为什么必须有**（2026-10-30 用户报「点快捷卡不是跳转，而是本页被换成那一页」）：
+    /// 总览页的「快捷开始」卡只调 Navigate()，而那只换了 NavFrame 的内容和面包屑 ——
+    /// 左侧导航还停在「总览」上，于是看起来不像跳转，像是当前页被替换掉了。
+    /// 标准行为应当是：侧边栏高亮跟过去、父分组自动展开。
+    /// </summary>
+    private void SyncNavSelection(string routeId)
+    {
+        var hit = FindNavItem(NavView.MenuItems, routeId);
+        if (hit is null) return;
+
+        // 设 SelectedItem 会回调 NavView_SelectionChanged → Navigate，
+        // 这里已经在导航途中，用标志位挡掉这次回环，避免重复导航。
+        _syncingNav = true;
+        try
+        {
+            if (hit.Value.Parent is not null) hit.Value.Parent.IsExpanded = true;
+            NavView.SelectedItem = hit.Value.Item;
+        }
+        finally
+        {
+            _syncingNav = false;
+        }
+    }
+
+    /// <summary>
+    /// 在菜单树里按 Tag 找**可导航的叶子项**，同时带回它的父分组。
+    ///
+    /// **必须只匹配叶子项**（2026-10-30 修「快捷开始直达还是没修好」的真根因）：
+    /// 分组父项的 Tag 与它的子项会撞名 —— NavModel.Groups 里父分组 id 是 douyin，
+    /// 它下面的子项 id 也是 douyin。原来的实现先序遍历，命中父分组就返回，于是
+    /// 把 SelectsOnInvoked=false 的父分组设成 SelectedItem：侧栏看起来选中了，
+    /// 但页面根本不会跳。现在改成「先找子项，再判断自己且必须没有子项」。
+    /// </summary>
+    private static (NavigationViewItem Item, NavigationViewItem? Parent)? FindNavItem(
+        IList<object> items, string routeId, NavigationViewItem? parent = null)
+    {
+        foreach (var o in items)
+        {
+            if (o is not NavigationViewItem nvi) continue;
+
+            // 先往子项里找 —— 叶子优先，避免父分组与子项撞名时误命中父项
+            var deeper = FindNavItem(nvi.MenuItems, routeId, nvi);
+            if (deeper is not null) return deeper;
+
+            // 再判断自己：只有「没有子项」的叶子才可作为导航目标
+            if (nvi.MenuItems.Count > 0) continue;
+            if (nvi.Tag is string id && id == routeId) return (nvi, parent);
+        }
+        return null;
+    }
     private static string LabelOf(string routeId)
     {
         foreach (var item in NavModel.Primary)

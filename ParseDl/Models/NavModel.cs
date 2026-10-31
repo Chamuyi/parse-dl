@@ -68,7 +68,8 @@ public static class NavModel
             new NavItem("settings-proxy", "代理", "\uE774"),
             new NavItem("settings-logs", "日志", "\uE9D9"),
             new NavItem("settings-data", "数据目录", "\uE8B7"),
-            new NavItem("settings-about", "关于", "\uE946"),
+            // **不再放「关于」子项**（2026-10-30 用户要求）：侧边栏底部已经有独立的
+            // 「关于」项（见下方 Standalone），设置分组里再来一个纯属重复。
         });
 
     /// <summary>全局项：排在设置分组下面。</summary>

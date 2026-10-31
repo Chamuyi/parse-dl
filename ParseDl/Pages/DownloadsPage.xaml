@@ -25,47 +25,52 @@
                     </Grid.ColumnDefinitions>
 
                     <!-- ① 预览图：视频显示首帧，图片显示自身。占位灰底，加载失败不崩。 -->
-                    <Border Grid.Column="0" Width="96" Height="64" CornerRadius="4"
+                    <Border Grid.Column="0" Width="88" Height="88" CornerRadius="4"
                             Background="{ThemeResource SubtleFillColorSecondaryBrush}">
                         <Grid>
-                            <Image x:Name="Thumb" Stretch="UniformToFill" />
+                            <!-- **Uniform 而不是 UniformToFill**（2026-10-30 用户报「预览图显示不完全」）：
+                                 UniformToFill 会把 96x64 框外的部分裁掉，竖图/长图只剩中间一条；
+                                 改成 Uniform 保证整张图缩放进框内、四周留空但内容完整。 -->
+                            <Image Stretch="Uniform"
+                   Tag="{x:Bind ThumbUrl, Mode=OneWay}" Loaded="OnThumbLoaded"
+                   ImageFailed="OnThumbFailed" />
                         </Grid>
                     </Border>
 
                     <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
                         <!-- 文件名 -->
-                        <TextBlock Text="{x:Bind FileName}" FontSize="13"
+                        <TextBlock Text="{x:Bind FileName, Mode=OneWay}" FontSize="13"
                                    TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
 
                         <!-- 保存位置（用户要求） -->
-                        <TextBlock Text="{x:Bind DirText}" FontSize="11" Opacity="0.55"
+                        <TextBlock Text="{x:Bind DirText, Mode=OneWay}" FontSize="11" Opacity="0.55"
                                    TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
 
                         <!-- 进度条 -->
-                        <ProgressBar Value="{x:Bind Percent}" Maximum="100" Height="4"
+                        <ProgressBar Value="{x:Bind Percent, Mode=OneWay}" Maximum="100" Height="4"
                                      Margin="0,2,0,2" />
 
                         <!-- 状态 + 错误 -->
-                        <TextBlock Text="{x:Bind StatusLine}" FontSize="11" Opacity="0.62"
+                        <TextBlock Text="{x:Bind StatusLine, Mode=OneWay}" FontSize="11" Opacity="0.62"
                                    TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                     </StackPanel>
 
                     <!-- ② 大小 / 速度（用户要求加速度） -->
                     <StackPanel Grid.Column="2" Spacing="2" MinWidth="120"
                                 VerticalAlignment="Center" HorizontalAlignment="Right">
-                        <TextBlock Text="{x:Bind SizeText}" FontSize="12"
+                        <TextBlock Text="{x:Bind SizeText, Mode=OneWay}" FontSize="12"
                                    HorizontalAlignment="Right" />
-                        <TextBlock Text="{x:Bind SpeedText}" FontSize="11" Opacity="0.6"
+                        <TextBlock Text="{x:Bind SpeedText, Mode=OneWay}" FontSize="11" Opacity="0.6"
                                    HorizontalAlignment="Right" />
                     </StackPanel>
 
                     <!-- ③ 按钮组 -->
                     <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6"
                                 VerticalAlignment="Center">
-                        <Button Content="{x:Bind PauseLabel}" MinWidth="60"
+                        <Button Content="{x:Bind PauseLabel, Mode=OneWay}" MinWidth="60"
                                 Click="OnRowPauseClick" />
                         <Button Content="重试" MinWidth="60"
-                                Visibility="{x:Bind RetryVisibility}"
+                                Visibility="{x:Bind RetryVisibility, Mode=OneWay}"
                                 Click="OnRowRetryClick" />
                         <Button Content="打开文件夹" MinWidth="90"
                                 Click="OnRowOpenFolderClick" />
@@ -88,7 +93,6 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- ① 页头（UiKit.PageHeader 运行时生成后塞进来） -->
@@ -208,6 +212,21 @@
                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                         </Style>
                     </ListView.ItemContainerStyle>
+
+                    <!--
+                        **清空集合变动动画**（2026-10-29 修「下载时列表一闪一闪」的真凶之三）。
+
+                        ListView 默认的 ItemContainerTransitions 里有 AddDeleteThemeTransition /
+                        RepositionThemeTransition —— 列表**每增删一行**，其余所有可见行都会播放
+                        「位移 + 淡入」动画。下载时每完成一条就从「下载中」Tab 移走一行、
+                        每入队一条又插一行，于是整个列表持续播放重排动画 = 肉眼看到的「一闪一闪」。
+
+                        清空之后：增删行只是那一行消失/出现，其它行纹丝不动。
+                        虚拟化由 ItemsStackPanel 负责（默认保留），不受影响。
+                    -->
+                    <ListView.ItemContainerTransitions>
+                        <TransitionCollection />
+                    </ListView.ItemContainerTransitions>
                 </ListView>
 
                 <!--
@@ -229,26 +248,8 @@
             </Grid>
         </Border>
 
-        <!-- ⑤ 历史台账（各模块一份，标题与空态由 feed 提供） -->
-        <Border Grid.Row="4"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1" CornerRadius="8" Padding="14">
-            <StackPanel Spacing="10">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="HistoryTitleText" Text="下载历史" FontSize="16"
-                               FontWeight="SemiBold" />
-                    <TextBlock Grid.Column="1" Text="来自 download_ledger.json"
-                               FontSize="12" Opacity="0.6" VerticalAlignment="Center" />
-                </Grid>
-                <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto">
-                    <StackPanel x:Name="HistoryPanel" Spacing="6" />
-                </ScrollViewer>
-            </StackPanel>
-        </Border>
+        <!-- ⑤ 历史台账板块**已按用户要求移除**（2026-10-29）：
+             台账数据本身仍在 download_ledger.json 里照常记录，「跳过已下载」还要用它，
+             只是不在页面上展示。 -->
     </Grid>
 </Page>

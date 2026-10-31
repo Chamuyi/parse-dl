@@ -24,6 +24,7 @@ public sealed class DouyinAutoScroller
     private int _rounds;
     private int _stalls;
     private double _lastHeight;
+    private double _lastTop;
     private bool _running;
     private DouyinAutoScrollStop? _stopReason;
 
@@ -49,6 +50,7 @@ public sealed class DouyinAutoScroller
         _rounds = 0;
         _stalls = 0;
         _lastHeight = 0;
+        _lastTop = 0;
     }
 
     public void Stop(DouyinAutoScrollStop reason = DouyinAutoScrollStop.Stopped)
@@ -59,18 +61,42 @@ public sealed class DouyinAutoScroller
     }
 
     /// <summary>
-    /// 每滚完一轮，把页面当前的 scrollHeight 交回来；返回「是否继续」。
-    /// 停止条件：高度不再增长（连续 StallLimit 轮）或到达 MaxRounds。
+    /// 每滚完一轮，把页面当前的滚动状态交回来；返回「是否继续」。
+    ///
+    /// ### 2026-10-31 重写「到底」判定（用户报「没滚到底就切下一个人主页」）
+    ///
+    /// 老实现只看 `scrollHeight` 是否增长。**抖音是虚拟滚动**：列表容器高度
+    /// 往往在首屏就定死（或只长一点点），后续内容靠回收 DOM + 追加数据，
+    /// 于是 scrollHeight 一半天都不变 —— 连续 StallLimit 轮就被误判成「到底」。
+    /// 更糟的是调用侧原先还有一条「识别到 >0 个作品就立刻停」，两刀砍下来
+    /// 一个主页通常只抓到首屏那十几个就切下一个人了。
+    ///
+    /// 现在改成**三条都为真才算到底**：
+    ///   ① 本轮 `scrollTop` 没有前进（已经把 scrollHeight 走完了）；
+    ///   ② `scrollHeight` 也没增长（没有新内容灌进来）；
+    ///   ③ 连续满足 StallLimit 轮（给慢网/慢游标请求留缓冲）。
+    /// 任一条不满足就继续滚。这样虚拟滚动「容器不涨但内容在换」也能一直滚下去。
     /// </summary>
-    public bool OnRoundResult(double scrollHeight)
+    /// <param name="scrollHeight">容器当前 scrollHeight。</param>
+    /// <param name="scrollTop">容器当前 scrollTop（滚动位置）。</param>
+    /// <param name="moved">本轮实际移动了多少像素（0 = 已经到底、滚不动了）。</param>
+    public bool OnRoundResult(double scrollHeight, double scrollTop = -1, double moved = -1)
     {
         if (!_running) return false;
         _rounds++;
 
-        // 1px 以内的抖动不算「长高了」
-        if (scrollHeight > _lastHeight + 1)
+        // 判断「这一轮有没有实质进展」：高度长高了 或 滚动位置前进了 都算。
+        var heightGrew = scrollHeight > _lastHeight + 1;
+        var positionAdvanced = scrollTop >= 0 && scrollTop > _lastTop + 1;
+        // moved 明确为 0 且高度没长 —— 才是真的「滚不动了」
+        var stuckInPlace = moved >= 0 && moved < 1;
+
+        if (heightGrew) _lastHeight = scrollHeight;
+        if (positionAdvanced) _lastTop = scrollTop;
+
+        if (heightGrew || positionAdvanced || !stuckInPlace)
         {
-            _lastHeight = scrollHeight;
+            // 还有进展（或无法判断有没有停）→ 不算卡住
             _stalls = 0;
         }
         else
@@ -106,6 +132,8 @@ public sealed class DouyinAutoScroller
 public sealed class DouyinAutoScrollReport
 {
     public double ScrollHeight { get; init; }
+    /// <summary>容器当前 scrollTop（-1 = 脚本没回报）。判定「滚不动了」要用它。</summary>
+    public double ScrollTop { get; init; } = -1;
     public int Moved { get; init; }
     public string Hit { get; init; } = "";
     public string? Error { get; init; }
@@ -126,6 +154,7 @@ public sealed class DouyinAutoScrollReport
             return new DouyinAutoScrollReport
             {
                 ScrollHeight = Num(root, "scrollHeight"),
+                ScrollTop = root.TryGetProperty("scrollTop", out _) ? Num(root, "scrollTop") : -1,
                 Moved = (int)Num(root, "moved"),
                 Hit = Str(root, "hit"),
             };
@@ -195,6 +224,7 @@ public static class DouyinScripts
     ok: true,
     hit: name,
     scrollHeight: target ? target.scrollHeight : 0,
+    scrollTop: target ? target.scrollTop : 0,
     moved: Math.round(after - before)
   });
 })()
@@ -227,6 +257,7 @@ public static class DouyinScripts
   return JSON.stringify({
     ok: true,
     scrollHeight: target ? target.scrollHeight : 0,
+    scrollTop: target ? target.scrollTop : 0,
     moved: Math.round(after - before)
   });
 })()

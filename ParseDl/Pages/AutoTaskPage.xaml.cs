@@ -21,7 +21,7 @@ namespace ParseDl.Pages;
 /// 分区顺序与原项目逐条对应：
 ///   ① 页头「自动执行 / 按名单批量跑」
 ///   ② 顶部告警条（运行中提示 / 未登录告警）
-///   ③ 左栏：名单来源 → 历史名单 → 下载配置（与主页共用）→ 执行设置
+///   ③ 左栏：名单来源 → 历史名单 → 下载配置（自动执行自己那份，与主页分开）→ 执行设置
 ///   ④ 右栏：下载记录（原项目是右侧一栏，空态「还没有下载记录」）
 ///   ⑤ 底部说明
 ///
@@ -32,7 +32,9 @@ public sealed partial class AutoTaskPage : Page
     private const string ModuleKey = "x";
 
     private readonly AutoTaskStore _store = AutoTaskStore.Instance;
-    private static ModuleSettings S => AppSettings.Instance.ForModule(ModuleKey);
+    // **自动执行用独立设置槽**（2026-10-29 用户要求「二者分开」）：
+    // 原来和 X 主页共用 ForModule("x")，改一边另一边跟着变。
+    private static ModuleSettings S => AppSettings.Instance.ForAutoTask();
 
     private StackPanel? _alertHost;
     private TextBlock? _notice;
@@ -126,16 +128,22 @@ public sealed partial class AutoTaskPage : Page
         cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(115, GridUnitType.Star) });
         cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100, GridUnitType.Star) });
 
+        // **执行设置移到右栏、放到记录列表上方**（2026-10-29 用户要求）。
+        //
+        // 用户反馈「右边空白有点多，把执行设置移动到右边，放在列表上面」。
+        // 原来执行设置跟下载配置一起堆在左栏，左栏很长、右栏只有一个记录列表，
+        // 于是右栏下方大片留白。执行设置是「点开始前的最后一步」，
+        // 放在右栏列表正上方正好承接「设好参数 → 看结果」的动作顺序。
         var left = new StackPanel { Spacing = 14 };
         left.Children.Add(BuildSourceCard());
         left.Children.Add(BuildFollowingCard());
         left.Children.Add(BuildPresetsCard());
         left.Children.Add(BuildConfigCard());
-        left.Children.Add(BuildExecutionCard());
         Grid.SetColumn(left, 0);
         cols.Children.Add(left);
 
         var right = new StackPanel { Spacing = 14 };
+        right.Children.Add(BuildExecutionCard());
         _resultHost = new StackPanel();
         right.Children.Add(UiKit.Card(_resultHost, 16));
         Grid.SetColumn(right, 1);
@@ -327,21 +335,18 @@ public sealed partial class AutoTaskPage : Page
     {
         try
         {
-            var picker = new Windows.Storage.Pickers.FileOpenPicker();
-            picker.FileTypeFilter.Add(".txt");
-            // WinUI 3 必须先把 picker 和窗口句柄关联，否则 ShowAsync 抛异常
-            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindow);
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-
-            var file = await picker.PickSingleFileAsync();
-            if (file is null) return;
-            var text = await Windows.Storage.FileIO.ReadTextAsync(file);
+            // 2026-10-31：改用新版选择器（旧的 FileOpenPicker + InitializeWithWindow
+            // 在非打包应用里必抛 COMException，被 catch 吞掉 = 点了没反应）
+            var path = await FolderPickerService.PickFileAsync(".txt");
+            if (path is null) return;
+            var text = await System.IO.File.ReadAllTextAsync(path);
+            var fileName = System.IO.Path.GetFileName(path);
 
             // 顺序要紧：先灌进输入框（会触发 TextChanged → SetRawText，它会把 FileName 清空），
             // 再 SetFileName，否则刚选的文件名立刻被抹掉。
             if (_rawBox is not null) _rawBox.Text = text;
             _store.SetRawText(text);
-            _store.SetFileName(file.Name);
+            _store.SetFileName(fileName);
 
             var lines = AutoTaskStore.ParseIds(text);
             SetNotice("已读取 " + lines.Ids.Count + " 行有效名单");
@@ -555,12 +560,12 @@ public sealed partial class AutoTaskPage : Page
         RefreshPresets();
     }
 
-    // ── ③-3 下载配置（与主页共用）──────────────────────────────
+    // ── ③-3 下载配置（自动执行自己的那份，与主页分开）──────────
 
     private UIElement BuildConfigCard()
     {
         _configHost = new StackPanel { Spacing = 14 };
-        return UiKit.SectionCard("下载配置（与主页共用）", _configHost);
+        return UiKit.SectionCard("下载配置", _configHost);
     }
 
     private void RefreshConfig()

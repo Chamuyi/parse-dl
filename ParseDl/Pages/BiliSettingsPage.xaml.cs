@@ -288,9 +288,9 @@ public sealed partial class BiliSettingsPage : Page
                 var folder = await FolderPickerService.PickAsync(
                     string.IsNullOrWhiteSpace(Cfg.SaveDir) ? null : Cfg.SaveDir);
                 if (folder is null) return;
-                Cfg.SaveDir = folder.Path;
+                Cfg.SaveDir = folder;
                 Save();
-                dirBox.Text = folder.Path;
+                dirBox.Text = folder;
             }
             catch { }
         };
@@ -810,7 +810,7 @@ public sealed partial class BiliSettingsPage : Page
                 var folder = await FolderPickerService.PickAsync(
                     string.IsNullOrWhiteSpace(box.Text) ? null : box.Text);
                 if (folder is null) return;
-                box.Text = folder.Path;
+                box.Text = folder;
             }
             catch { }
         };

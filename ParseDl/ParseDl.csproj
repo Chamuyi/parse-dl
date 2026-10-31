@@ -91,7 +91,15 @@
   -->
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="*" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="*" />
+    <!--
+      **固定版本，不要用 `*`**（2026-10-29 踩到）：
+      原来写 `Version="*"`，2026-10-29 构建时浮动到了 2.6.4，而本机只装了
+      Microsoft.WindowsAppRuntime.2 的 **2.6.4 x86**（x64 只有 2.5.1 的 DDLM），
+      于是 x64 产物一启动就弹「Required components of the Windows App Runtime are missing
+      (MSIX package version >= 2.6.4.0)」——同一份源码，前一天还能跑，今天就起不来。
+      固定 2.5.1 与本机已装运行时对齐；将来要升级，先装对应版本的 x64 运行时再改这里。
+    -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="*" />
     <!-- WebView2：内嵌浏览器，X / 抖音的页面抓取靠它 -->
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3719.77" />

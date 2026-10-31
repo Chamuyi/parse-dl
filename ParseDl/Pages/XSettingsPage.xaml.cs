@@ -26,8 +26,11 @@ namespace ParseDl.Pages;
 /// 1. 账号 —— 登录状态、auth_token / ct0、智能导入、保存并验证、退出登录
 /// 2. 下载 —— 保存目录、文件夹模板、文件名模板（全部占位符 + 实时预览）、
 ///    并发、请求间隔、跳过已下载
-/// 3. 筛选 —— 媒体类型、时间范围
-/// 4. 接口缓存 —— 排障说明（WinUI 版尚未实现 queryId 缓存，如实标注）
+/// 3. 接口缓存 —— 排障说明（WinUI 版尚未实现 queryId 缓存，如实标注）
+///
+/// **筛选（媒体类型 / 时间范围）已从本页移除**（2026-10-30 用户要求）：
+/// X 主页与自动执行页各自都有一份「下载配置」，就在要下载的地方、改完立刻能看见效果；
+/// 设置页再来一份纯属重复，还容易让人以为改的是另一套。
 ///
 /// 所有改动**立即写盘**（AppSettings.Save），不依赖「保存」按钮 ——
 /// 这是模块设置页既有约定，登录态也不例外。
@@ -84,8 +87,8 @@ public sealed partial class XSettingsPage : Page
 
     private ModuleSettings S => AppSettings.Instance.ForModule(ModuleKey);
 
-    private TextBox _authTokenBox = null!;
-    private TextBox _ct0Box = null!;
+    private PasswordBox _authTokenBox = null!;
+    private PasswordBox _ct0Box = null!;
     private TextBlock _loginStatus = null!;
     private TextBlock _loginHint = null!;
     private Border _loginBadge = null!;
@@ -119,7 +122,6 @@ public sealed partial class XSettingsPage : Page
 
         Root.Children.Add(BuildAccountCard());
         Root.Children.Add(BuildDownloadCard());
-        Root.Children.Add(BuildFilterCard());
         Root.Children.Add(BuildCacheCard());
 
         RefreshLoginVisual();
@@ -159,24 +161,29 @@ public sealed partial class XSettingsPage : Page
         panel.Children.Add(_loginStatus);
 
         // auth_token / ct0 两个必填框
-        _authTokenBox = new TextBox
+        // **凭证默认遮蔽**（2026-10-30 用户要求）：auth_token / ct0 是登录凭证，
+        // 明文摆在界面上既不安全也没必要。PasswordBox 自带「点眼睛看」的切换，
+        // 用户需要核对时点一下即可，平时是圆点。
+        _authTokenBox = new PasswordBox
         {
-            Text = S.AuthToken,
+            Password = S.AuthToken,
             PlaceholderText = "auth_token —— 从 DevTools 复制 Value，长度不限",
             FontFamily = new FontFamily("Consolas"),
+            PasswordRevealMode = PasswordRevealMode.Peek,
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_authTokenBox, "auth_token");
-        _authTokenBox.TextChanged += (_, _) => OnCookieChanged();
+        _authTokenBox.PasswordChanged += (_, _) => OnCookieChanged();
         panel.Children.Add(SettingRows.Row("auth_token", "身份令牌。DevTools → Application → Cookies → x.com → auth_token 的 Value。", _authTokenBox));
 
-        _ct0Box = new TextBox
+        _ct0Box = new PasswordBox
         {
-            Text = S.Ct0,
+            Password = S.Ct0,
             PlaceholderText = "ct0 —— 从 DevTools 复制 Value，长度不限",
             FontFamily = new FontFamily("Consolas"),
+            PasswordRevealMode = PasswordRevealMode.Peek,
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_ct0Box, "ct0");
-        _ct0Box.TextChanged += (_, _) => OnCookieChanged();
+        _ct0Box.PasswordChanged += (_, _) => OnCookieChanged();
         panel.Children.Add(SettingRows.Row("ct0", "CSRF token。长度不固定（实测有 160 位的），从 DevTools 原样复制完整值即可。", _ct0Box));
 
         // 操作行
@@ -254,28 +261,28 @@ public sealed partial class XSettingsPage : Page
     private void OnCookieChanged()
     {
         if (_applying) return;
-        var raw = _authTokenBox.Text.Trim() + "\n" + _ct0Box.Text.Trim();
+        var raw = _authTokenBox.Password.Trim() + "\n" + _ct0Box.Password.Trim();
 
         // 整段 cookie 被粘进某一个框 → 尝试自动拆分
         var parsed = ParseCookie(raw);
         if (parsed is not null)
         {
-            var at = _authTokenBox.Text.Trim();
-            var ct0 = _ct0Box.Text.Trim();
+            var at = _authTokenBox.Password.Trim();
+            var ct0 = _ct0Box.Password.Trim();
             if ((parsed.Value.At != at || parsed.Value.Ct0 != ct0) &&
                 (at.Contains((char)61) || at.Contains((char)59) || ct0.Contains((char)61) || ct0.Contains((char)59)))
             {
                 _applying = true;
-                _authTokenBox.Text = parsed.Value.At;
-                _ct0Box.Text = parsed.Value.Ct0;
+                _authTokenBox.Password = parsed.Value.At;
+                _ct0Box.Password = parsed.Value.Ct0;
                 _applying = false;
                 RememberExtras(raw);
                 _loginStatus.Text = "已自动拆分 auth_token 与 ct0";
             }
         }
 
-        S.AuthToken = _authTokenBox.Text.Trim();
-        S.Ct0 = _ct0Box.Text.Trim();
+        S.AuthToken = _authTokenBox.Password.Trim();
+        S.Ct0 = _ct0Box.Password.Trim();
         AppSettings.Instance.Save();
         RefreshLoginVisual();
     }
@@ -385,8 +392,8 @@ public sealed partial class XSettingsPage : Page
                 return;
             }
             _applying = true;
-            _authTokenBox.Text = parsed.Value.At;
-            _ct0Box.Text = parsed.Value.Ct0;
+            _authTokenBox.Password = parsed.Value.At;
+            _ct0Box.Password = parsed.Value.Ct0;
             _applying = false;
             RememberExtras(text);
             S.AuthToken = parsed.Value.At;
@@ -422,8 +429,8 @@ public sealed partial class XSettingsPage : Page
     /// </summary>
     private async Task VerifyAsync()
     {
-        var at = _authTokenBox.Text.Trim();
-        var ct0 = _ct0Box.Text.Trim();
+        var at = _authTokenBox.Password.Trim();
+        var ct0 = _ct0Box.Password.Trim();
 
         if (at.Length == 0 || ct0.Length == 0)
         {
@@ -598,8 +605,8 @@ public sealed partial class XSettingsPage : Page
         S.LastVerifiedUser = "";
         AppSettings.Instance.Save();
         _applying = true;
-        _authTokenBox.Text = "";
-        _ct0Box.Text = "";
+        _authTokenBox.Password = "";
+        _ct0Box.Password = "";
         _applying = false;
         _loginStatus.Text = "已退出登录";
         RefreshLoginVisual();
@@ -624,6 +631,17 @@ public sealed partial class XSettingsPage : Page
     }
 
     // ── ② 下载 ──────────────────────────────────────────────
+
+    /// <summary>
+    /// 设置保存目录状态行。**空字符串就折叠** —— 空 TextBlock 仍占一行高度，
+    /// 和下面的 Divider 一起会把卡片撑出一个空洞（2026-10-30 用户报「怎么空一块」）。
+    /// </summary>
+    private void SetSaveDirStatus(string text)
+    {
+        _saveDirStatus.Text = text;
+        _saveDirStatus.Visibility = string.IsNullOrEmpty(text)
+            ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     private UIElement BuildDownloadCard()
     {
@@ -651,14 +669,24 @@ public sealed partial class XSettingsPage : Page
             // 空的输入框会被读成「没有下载目录」（Flutter 版 2026-10-15 就踩过这条）。
             var global = AppSettings.Instance.SaveDirBase;
             _saveDirBox.Text = global;
-            _saveDirStatus.Text = global.Length == 0
+            SetSaveDirStatus(global.Length == 0
                 ? "已清除，改用数据目录\\downloads"
-                : "已清除本模块设置，改回全局保存目录";
+                : "已清除本模块设置，改回全局保存目录");
         };
         dirRow.Children.Add(clearBtn);
         panel.Children.Add(SettingRows.Row("保存目录", "留空则使用全局默认目录（数据目录\\downloads）", dirRow));
 
-        _saveDirStatus = new TextBlock { Text = "", FontSize = 12, Opacity = 0.75, TextWrapping = TextWrapping.Wrap };
+        // **空状态时折叠**（2026-10-30 用户报「这个地方怎么空一块」）：
+        // 空的 TextBlock 仍然会占一行高度，再叠上下面那条 Divider，卡片里就挖出一个空洞。
+        // 只在真正有提示文字时才让它显示（赋值处同步改 Visibility）。
+        _saveDirStatus = new TextBlock
+        {
+            Text = "",
+            FontSize = 12,
+            Opacity = 0.75,
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = Visibility.Collapsed,
+        };
         panel.Children.Add(_saveDirStatus);
 
         panel.Children.Add(SettingRows.Divider());
@@ -709,11 +737,9 @@ public sealed partial class XSettingsPage : Page
 
         panel.Children.Add(SettingRows.Divider());
 
-        // 并发 / 请求间隔 / 跳过已下载
-        panel.Children.Add(SettingRows.Number("并发上限",
-            "aria2 同时下载的任务数（1-16）。三个模块共用同一个下载引擎，这里是全局值。",
-            AppSettings.Instance.MaxConcurrent, 1, 16,
-            v => { AppSettings.Instance.MaxConcurrent = (int)v; AppSettings.Instance.Save(); }));
+        // **「下载顺序」卡已删除**（2026-10-30 用户：「下载顺序写死的，不能改，你还显示着干啥」）：
+        // 串行下载是引擎启动参数里固定写死的（--max-concurrent-downloads=1），
+        // 用户无法修改，那就不该占一张卡的位置。它的行为已经写在「请求间隔」的说明里。
 
         panel.Children.Add(SettingRows.Number("请求间隔（毫秒）",
             "每次抓取之间的间隔。太小容易触发 X 的限流。",
@@ -776,118 +802,23 @@ public sealed partial class XSettingsPage : Page
         {
             var folder = await FolderPickerService.PickAsync();
             if (folder is null) return;
-            var (ok, msg) = FolderPickerService.VerifyWritable(folder.Path);
+            var (ok, msg) = FolderPickerService.VerifyWritable(folder);
             if (!ok)
             {
-                _saveDirStatus.Text = "❌ 该目录不可写：" + msg;
+                SetSaveDirStatus("❌ 该目录不可写：" + msg);
                 return;
             }
-            S.SaveDir = folder.Path;
+            S.SaveDir = folder;
             AppSettings.Instance.Save();
-            _saveDirBox.Text = folder.Path;
-            _saveDirStatus.Text = "✅ 已保存，立即生效";
+            _saveDirBox.Text = folder;
+            SetSaveDirStatus("✅ 已保存，立即生效");
         }
         catch (Exception ex)
         {
-            _saveDirStatus.Text = "❌ 选择失败：" + ex.GetType().Name + " " + ex.Message;
+            SetSaveDirStatus("❌ 选择失败：" + ex.GetType().Name + " " + ex.Message);
         }
     }
 
-    // ── ③ 筛选 ──────────────────────────────────────────────
-
-    private UIElement BuildFilterCard()
-    {
-        var panel = new StackPanel { Spacing = 12 };
-
-        // 媒体类型
-        var types = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        var current = (S.MediaTypeFilter ?? "").Split((char)44, StringSplitOptions.RemoveEmptyEntries)
-            .Select(x => x.Trim().ToLowerInvariant()).ToHashSet();
-
-        foreach (var (id, label) in new[] { ("video", "视频"), ("image", "图片"), ("gif", "GIF") })
-        {
-            var cb = new CheckBox { Content = label, IsChecked = current.Contains(id), Tag = id, MinWidth = 0 };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(cb, label);
-            cb.Checked += (_, _) => ToggleMediaType(id, true);
-            cb.Unchecked += (_, _) => ToggleMediaType(id, false);
-            types.Children.Add(cb);
-        }
-        panel.Children.Add(SettingRows.Row("媒体类型", "不勾选任何一项表示不限类型。", types));
-
-        panel.Children.Add(SettingRows.Divider());
-
-        // 时间范围
-        var rangePanel = new StackPanel { Spacing = 8 };
-
-        var enableRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = SettingRows.InlineGap };
-        enableRow.Children.Add(new TextBlock { Text = "启用时间范围", FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
-        var rangeToggle = new ToggleSwitch { IsOn = S.TimeRangeEnabled, OnContent = "", OffContent = "", MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(rangeToggle, "启用时间范围");
-        enableRow.Children.Add(rangeToggle);
-        rangePanel.Children.Add(enableRow);
-        rangePanel.Children.Add(SettingRows.Description("只下载发布时间落在区间内的推文。到达下界后停止继续翻页。"));
-
-        // StackPanel 没有 IsEnabled（那是 Control 的成员），所以逐个控件设。
-        var dates = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-
-        var fromPicker = new CalendarDatePicker
-        {
-            PlaceholderText = "起始日期",
-            DateFormat = "{year.full}-{month.integer(2)}-{day.integer(2)}",
-            MinWidth = 180,
-        };
-        if (DateTime.TryParse(S.DateFrom, out var df)) fromPicker.Date = df;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(fromPicker, "起始日期");
-        fromPicker.DateChanged += (_, e) =>
-        {
-            S.DateFrom = e.NewDate?.ToString("yyyy-MM-dd") ?? "";
-            AppSettings.Instance.Save();
-        };
-        dates.Children.Add(fromPicker);
-
-        dates.Children.Add(new TextBlock { Text = "至", VerticalAlignment = VerticalAlignment.Center, Opacity = 0.7 });
-
-        var toPicker = new CalendarDatePicker
-        {
-            PlaceholderText = "结束日期",
-            DateFormat = "{year.full}-{month.integer(2)}-{day.integer(2)}",
-            MinWidth = 180,
-        };
-        if (DateTime.TryParse(S.DateTo, out var dt)) toPicker.Date = dt;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toPicker, "结束日期");
-        toPicker.DateChanged += (_, e) =>
-        {
-            S.DateTo = e.NewDate?.ToString("yyyy-MM-dd") ?? "";
-            AppSettings.Instance.Save();
-        };
-        dates.Children.Add(toPicker);
-
-        fromPicker.IsEnabled = S.TimeRangeEnabled;
-        toPicker.IsEnabled = S.TimeRangeEnabled;
-
-        rangeToggle.Toggled += (_, _) =>
-        {
-            S.TimeRangeEnabled = rangeToggle.IsOn;
-            AppSettings.Instance.Save();
-            fromPicker.IsEnabled = rangeToggle.IsOn;
-            toPicker.IsEnabled = rangeToggle.IsOn;
-        };
-
-        rangePanel.Children.Add(dates);
-        panel.Children.Add(rangePanel);
-
-        return SettingRows.Card("筛选", "媒体类型与时间范围", panel);
-    }
-
-    private void ToggleMediaType(string id, bool on)
-    {
-        var set = (S.MediaTypeFilter ?? "").Split((char)44, StringSplitOptions.RemoveEmptyEntries)
-            .Select(x => x.Trim().ToLowerInvariant()).ToHashSet();
-        if (on) set.Add(id); else set.Remove(id);
-        // 固定顺序输出，避免每次点击都改字符串形状（便于人读 JSON）
-        S.MediaTypeFilter = string.Join(",", new[] { "video", "image", "gif" }.Where(set.Contains));
-        AppSettings.Instance.Save();
-    }
 
     // ── ④ 接口缓存 ──────────────────────────────────────────
 

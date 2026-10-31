@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
+using Windows.UI;
 using ParseDl.Controls;
 using ParseDl.Services;
 using ParseDl.Services.X;
@@ -85,13 +86,17 @@ public sealed partial class XHomePage : Page
         Root.Children.Add(BuildHero());
         Root.Children.Add(BuildSearchCard());
 
+        // **下载配置**（2026-10-29 用户要求「这块在 X 主页也要，二者分开」）。
+        // 自动执行页本来就有一份；现在主页也有一份，且**各自独立** ——
+        // 主页用 ForModule("x")，自动执行用 ForAutoTask()（键 x_auto）。
+        Root.Children.Add(BuildDownloadConfigCard());
+
         _resultHost = new StackPanel { Spacing = 14 };
         Root.Children.Add(_resultHost);
 
-        Root.Children.Add(BuildNotesCard());
-
         PageScroll.ViewChanged += (_, _) => LoadMoreIfNearBottom();
         RebuildApi();
+        RefreshDownloadConfig();
 
         // **把 store 里已有的状态回填到重建后的界面**（2026-10-28）。
         // store 现在是进程级单例，切走再回来数据还在，但 Build() 会重建控件 ——
@@ -147,24 +152,189 @@ public sealed partial class XHomePage : Page
                 VerticalAlignment = VerticalAlignment.Center,
             },
         });
+        // **说明文字与图标同行**（2026-10-30 用户报「这两句话重复」）：
+        // 卡片原来有一行大标题「下载某个 X 用户的全部媒体」，与页面标题副标题一字不差；
+        // 现在标题删掉，说明文字并进同一行，卡片只做「这是什么」的一行注解。
         row.Children.Add(new TextBlock
-        {
-            Text = "下载某个 X 用户的全部媒体",
-            FontSize = 20,
-            FontWeight = FontWeights.SemiBold,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
-        stack.Children.Add(row);
-        stack.Children.Add(new TextBlock
         {
             Text = "输入用户 ID，加载后开始批量下载图片与视频",
             FontSize = 13,
             Opacity = 0.7,
+            VerticalAlignment = VerticalAlignment.Center,
         });
+        stack.Children.Add(row);
 
         return UiKit.Card(stack, 20);
     }
 
+    // ── 下载配置（与自动执行页同款控件，但用主页自己那份设置）─────
+
+    /// <summary>主页的设置槽（与自动执行的 x_auto 是两份独立对象）。</summary>
+    private static ModuleSettings Cfg => AppSettings.Instance.ForModule("x");
+
+    private StackPanel? _cfgHost;
+    private readonly List<(Button Btn, TextBlock Text, Func<bool> Selected)> _cfgChips = new();
+
+    private UIElement BuildDownloadConfigCard()
+    {
+        _cfgHost = new StackPanel { Spacing = 14 };
+        return UiKit.SectionCard("下载配置", _cfgHost);
+    }
+
+    /// <summary>
+    /// 重画下载配置（日期范围 / 媒体类型 / 下载源）。
+    ///
+    /// 这三项与自动执行页**外观和语义完全一致**，但读写的设置对象不同：
+    /// 这里是 <c>ForModule("x")</c>，自动执行是 <c>ForAutoTask()</c>。
+    /// 用户要求「这块在 X 主页也要，二者分开」—— 分开的正是这份设置。
+    /// </summary>
+    private void RefreshDownloadConfig()
+    {
+        if (_cfgHost is null) return;
+        _cfgHost.Children.Clear();
+        _cfgChips.Clear();
+
+        // ── 日期范围 ──
+        var datePanel = new StackPanel { Spacing = 6 };
+        datePanel.Children.Add(CfgLabel("日期范围"));
+        var dateChips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        dateChips.Children.Add(CfgChip("不限",
+            () => !Cfg.TimeRangeEnabled || (Cfg.DateFrom.Length == 0 && Cfg.DateTo.Length == 0),
+            () => { Cfg.TimeRangeEnabled = false; Cfg.DateFrom = ""; Cfg.DateTo = ""; SaveCfg(); }));
+        foreach (var (days, label) in new[] { (7, "最近 7 天"), (30, "最近 1 个月"), (365, "最近 1 年") })
+        {
+            var d = days;
+            dateChips.Children.Add(CfgChip(label, () => IsPresetAround(d), () => ApplyPresetDays(d)));
+        }
+        datePanel.Children.Add(dateChips);
+        _cfgHost.Children.Add(datePanel);
+
+        // ── 媒体类型 ──
+        var mediaPanel = new StackPanel { Spacing = 6 };
+        mediaPanel.Children.Add(CfgLabel("媒体类型"));
+        var mediaChips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        foreach (var (id, label) in new[] { ("image", "照片"), ("video", "视频"), ("gif", "GIF"), ("audio", "音频") })
+        {
+            var key = id;
+            mediaChips.Children.Add(CfgChip(label,
+                () => CfgMediaTypes().Contains(key),
+                () => ToggleCfgMediaType(key)));
+        }
+        mediaPanel.Children.Add(mediaChips);
+        _cfgHost.Children.Add(mediaPanel);
+
+        // ── 下载源 ──
+        var sourcePanel = new StackPanel { Spacing = 6 };
+        sourcePanel.Children.Add(CfgLabel("下载源"));
+        sourcePanel.Children.Add(new TextBlock
+        {
+            Text = "帖子能下载到更早的推文，但爬取速度较慢；媒体可能下载不到更早的推文，但爬取速度更快。",
+            FontSize = 12,
+            Opacity = 0.62,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        var sourceChips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        sourceChips.Children.Add(CfgChip("帖子", () => Cfg.Source == "tweets",
+            () => { Cfg.Source = "tweets"; SaveCfg(); }));
+        sourceChips.Children.Add(CfgChip("媒体", () => Cfg.Source != "tweets",
+            () => { Cfg.Source = "medias"; SaveCfg(); }));
+        sourcePanel.Children.Add(sourceChips);
+        _cfgHost.Children.Add(sourcePanel);
+    }
+
+    private static TextBlock CfgLabel(string text) =>
+        new() { Text = text, FontSize = 13, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
+
+    private void SaveCfg()
+    {
+        AppSettings.Instance.Save();
+        foreach (var c in _cfgChips) CfgStyleChip(c);
+    }
+
+    private HashSet<string> CfgMediaTypes() =>
+        (Cfg.MediaTypeFilter ?? "")
+            .Split((char)44, StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim().ToLowerInvariant())
+            .ToHashSet();
+
+    private void ToggleCfgMediaType(string id)
+    {
+        var set = CfgMediaTypes();
+        if (!set.Add(id)) set.Remove(id);
+        Cfg.MediaTypeFilter = string.Join((char)44, set);
+        SaveCfg();
+    }
+
+    private bool IsPresetAround(int days)
+    {
+        if (!Cfg.TimeRangeEnabled) return false;
+        if (!DateTime.TryParse(Cfg.DateFrom, out var f)) return false;
+        return Math.Abs((DateTime.Today - f.Date).TotalDays - days) < 2;
+    }
+
+    private void ApplyPresetDays(int days)
+    {
+        Cfg.TimeRangeEnabled = true;
+        Cfg.DateFrom = DateTime.Today.AddDays(-days).ToString("yyyy-MM-dd");
+        Cfg.DateTo = DateTime.Today.ToString("yyyy-MM-dd");
+        SaveCfg();
+    }
+
+    private Button CfgChip(string label, Func<bool> selected, Action onClick)
+    {
+        var text = new TextBlock { Text = label, FontSize = 12.5 };
+        var btn = new Button
+        {
+            Content = text,
+            Padding = new Thickness(10, 5, 10, 5),
+            CornerRadius = new CornerRadius(6),
+            BorderThickness = new Thickness(1),
+            MinWidth = 0,
+            MinHeight = 0,
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(btn, label);
+        var entry = (btn, text, selected);
+        _cfgChips.Add(entry);
+        CfgStyleChip(entry);
+        btn.Click += (_, _) =>
+        {
+            onClick();
+            foreach (var c in _cfgChips) CfgStyleChip(c);
+        };
+        return btn;
+    }
+
+    private static void CfgStyleChip((Button Btn, TextBlock Text, Func<bool> Selected) chip)
+    {
+        var accent = UiKit.AccentFill is SolidColorBrush sb ? sb.Color : Microsoft.UI.Colors.DodgerBlue;
+        if (chip.Selected())
+        {
+            chip.Btn.Background = new SolidColorBrush(Color.FromArgb(40, accent.R, accent.G, accent.B));
+            chip.Btn.BorderBrush = new SolidColorBrush(Color.FromArgb(153, accent.R, accent.G, accent.B));
+            chip.Text.Foreground = new SolidColorBrush(accent);
+            chip.Text.FontWeight = FontWeights.SemiBold;
+        }
+        else
+        {
+            // **用主题画刷，不要设成 null**（2026-10-29 踩坑）：
+            // 设 null 时文字在前景为透明 → 按钮上什么都看不见（截图里四个按钮是空的）。
+            chip.Btn.Background = UiKit.SubtleFill;
+            chip.Btn.BorderBrush = UiKit.CardBorder;
+            chip.Text.Foreground = ThemeBrush("TextFillColorPrimaryBrush", Microsoft.UI.Colors.White);
+            chip.Text.FontWeight = FontWeights.Normal;
+        }
+    }
+
+    /// <summary>取主题画刷（与 AutoTaskPage 同一实现）。</summary>
+    private static Brush ThemeBrush(string key, Color fallback)
+    {
+        try
+        {
+            if (Application.Current.Resources.TryGetValue(key, out var v) && v is Brush b) return b;
+        }
+        catch { }
+        return new SolidColorBrush(fallback);
+    }
     private UIElement BuildSearchCard()
     {
         var stack = new StackPanel { Spacing = 10 };
@@ -211,42 +381,7 @@ public sealed partial class XHomePage : Page
         return UiKit.SectionCard("加载 X 用户", stack);
     }
 
-    private UIElement BuildNotesCard()
-    {
-        var stack = new StackPanel { Spacing = 6 };
-        stack.Children.Add(Bullet("本页不内嵌浏览器：用户与作品数据由 X 的 GraphQL / REST 接口取回"));
-        stack.Children.Add(Bullet("需要登录：登录入口只在「X 下载设置 → 账号」，本页不放登录 UI"));
-        stack.Children.Add(Bullet("勾选作品后点「下载所选」只下勾中的；不勾选则下载全部已加载作品"));
-        stack.Children.Add(Bullet("文件名按「X 下载设置 → 文件名模板」生成，模块固定记为「X 媒体」"));
-        stack.Children.Add(Bullet("已下载过的媒体按「X 下载设置 → 跳过已下载」自动跳过"));
-        stack.Children.Add(Bullet("X 翻到末尾时接口只回游标不出内容 —— 连续两页无媒体即自动收工"));
 
-        var testBtn = new Button
-        {
-            Content = "运行离线自测",
-            MinWidth = 120,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Margin = new Thickness(0, 6, 0, 0),
-        };
-        testBtn.Click += async (_, _) => await RunSelfTestAsync();
-        stack.Children.Add(testBtn);
-
-        return UiKit.SectionCard("能力说明", stack);
-    }
-
-    private static UIElement Bullet(string text)
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        row.Children.Add(new TextBlock { Text = "•", FontSize = 13, Opacity = 0.6 });
-        row.Children.Add(new TextBlock
-        {
-            Text = text,
-            FontSize = 13,
-            Opacity = 0.85,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        return row;
-    }
 
     // ── 登录态 ────────────────────────────────────────────────
 
@@ -892,7 +1027,7 @@ public sealed partial class XHomePage : Page
                         catch { }
                     }
 
-                    var (ok, _) = await DownloadStore.Instance.AddAsync(m.Url, ModuleName, dir, name);
+                    var (ok, _) = await DownloadStore.Instance.AddAsync(m.Url, ModuleName, dir, name, m.PreviewUrl);
                     if (ok) queued++; else failed++;
                 }
             }
@@ -913,52 +1048,9 @@ public sealed partial class XHomePage : Page
             UpdateDownloadCard();
         }
     }    /// <summary>
-    /// 已下载集合：下载台账里「已完成」的 URL + 当前队列里所有 URL。
-    /// 台账是唯一能跨重启记住「下过什么」的地方（aria2 会话重启就空）。
-    /// </summary>
-    private static HashSet<string> BuildDownloadedSet()
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            foreach (var e in DownloadLedger.Instance.Query(ModuleName, 2000))
-                if (e.Status == "已完成" && !string.IsNullOrEmpty(e.Url)) set.Add(e.Url);
-        }
-        catch { }
-        try
-        {
-            foreach (var it in DownloadStore.Instance.Items)
-                if (!string.IsNullOrEmpty(it.Url)) set.Add(it.Url);
-        }
-        catch { }
-        return set;
-    }
 
     /// <summary>按「X 下载设置 → 文件名模板」生成文件名（默认模板已含 %EXT%）。</summary>
     // ── 自测 ─────────────────────────────────────────────────
-
-    private async Task RunSelfTestAsync()
-    {
-        var text = XHomeSelfTest.Run();
-        var dlg = new ContentDialog
-        {
-            Title = "X 主页离线自测",
-            Content = new ScrollViewer
-            {
-                MaxHeight = 420,
-                Content = new TextBlock
-                {
-                    Text = text,
-                    FontFamily = new FontFamily("Consolas"),
-                    FontSize = 12,
-                    TextWrapping = TextWrapping.Wrap,
-                },
-            },
-            CloseButtonText = "关闭",
-            XamlRoot = XamlRoot,
-        };
-        await dlg.ShowAsync();
-    }
 
     /// <summary>
     /// 把所有分页都拉完（直到没有下一页，或触发安全上限）。

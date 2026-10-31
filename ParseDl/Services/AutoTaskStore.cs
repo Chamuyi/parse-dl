@@ -182,6 +182,25 @@ public sealed class AutoTaskStore
     public void SaveInput() => Save();
 
     /// <summary>
+    /// 退出程序时清空输入框与名单文件名（用户 2026-10-30 要求：
+    /// 「三个模块的自动下载，我输入上去和导入文件名单，退出时要清空」）。
+    ///
+    /// **直接改字段再落盘，不走 SetRawText** —— 那条路径在跑批时会 early-return，
+    /// 退出时正跑着就清不掉。这里要的是「无论如何都清」。
+    /// </summary>
+    public void ClearOnExit()
+    {
+        try
+        {
+            RawText = "";
+            FileName = "";
+            Save();
+            Raise();
+        }
+        catch { }
+    }
+
+    /// <summary>
     /// 节流写盘：按键每 2 秒最多写一次（既不会每按一个字符都落盘，
     /// 也不会因为没触发「离开页面」就丢掉用户刚粘进去的名单）。
     /// </summary>
@@ -328,7 +347,16 @@ public sealed class AutoTaskStore
                 if (string.IsNullOrEmpty(user.Id))
                     throw new InvalidOperationException("未获取到用户信息");
 
-                var summary = await QueueUserAsync(api, user, filter, settings, cts.Token);
+                // **边识别边推送**：每入队一批就把进度写到这一行的说明里，
+                // 用户在自动执行页能直接看到「已推送 N 个」在涨，不用切页。
+                var idx = i;
+                var summary = await QueueUserAsync(api, user, filter, settings, cts.Token,
+                    (queued, skipped) =>
+                    {
+                        Patch(idx, AutoTaskStatus.Loading,
+                            "已推送 " + queued + " 个"
+                            + (skipped > 0 ? "，跳过 " + skipped + " 个" : ""));
+                    });
                 Patch(i, AutoTaskStatus.Done, summary);
             }
             catch (OperationCanceledException)
@@ -378,83 +406,70 @@ public sealed class AutoTaskStore
     }
 
     /// <summary>把一个用户的作品按下载配置筛出来并入队，返回一行摘要。</summary>
-    private static async Task<string> QueueUserAsync(
-        XHomeApi api, XHomeUser user, FilterSnapshot filter, ModuleSettings settings, CancellationToken ct)
-    {
-        // 下载源：media 源只拉一页（快）；tweets 源多翻几页（能到更早，慢）。
-        // 两种源当前都走 UserMedia 接口 —— 帖子源专用 timeline 端点尚未接入，
-        // 差别只体现在翻页深度上（这一点在页面「下载源」说明里如实标注）。
-        var maxPages = settings.Source == "tweets" ? 5 : 1;
-
-        var posts = new List<XPost>();
-        string? cursor = null;
-        for (var page = 0; page < maxPages; page++)
-        {
-            var p = await api.GetMediasAsync(user.Id!, cursor, 20, ct);
-            posts.AddRange(p.Posts);
-            cursor = p.NextCursor;
-            if (string.IsNullOrEmpty(cursor)) break;
-
-            var oldest = p.Posts.Where(x => x.CreatedAt is not null)
-                .Select(x => x.CreatedAt!.Value).DefaultIfEmpty(DateTime.MinValue).Min();
-            if (filter.From is not null && oldest != DateTime.MinValue && oldest <= filter.From) break;
-        }
-
-        // **每个作品单独算目录**（2026-10-29 修）。
-        //
-        // 原来这里是：var dir = string.IsNullOrWhiteSpace(settings.SaveDir) ? null : settings.SaveDir;
-        // 也就是整批共用一个目录，DirTemplate 根本没被使用 ——
-        // 表现就是 X 下载不在 downloads 下建 @用户名 子目录，文件全平铺在根目录。
-        // 而 XNaming.DirFor 早就实现了（解析模板 + 建多级目录），只是这里没调用。
-        var downloaded = settings.SkipDownloaded ? BuildDownloadedSet() : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        int queued = 0, skipped = 0, filtered = 0, failed = 0;
-
-        foreach (var post in posts)
-        {
-            for (var i = 0; i < post.Media.Count; i++)
-            {
-                var m = post.Media[i];
-                if (filter.MediaTypes.Count > 0 && !filter.MediaTypes.Contains(m.Type)) { filtered++; continue; }
-                if (filter.From is not null && post.CreatedAt is not null && post.CreatedAt.Value < filter.From) { filtered++; continue; }
-                if (filter.To is not null && post.CreatedAt is not null && post.CreatedAt.Value > filter.To) { filtered++; continue; }
-                if (downloaded.Contains(m.Url)) { skipped++; continue; }
-
-                var name = NameFor(post, i);
-                var dir = ParseDl.Services.X.XNaming.DirFor(post, i);
-                var (ok, _) = await DownloadStore.Instance.AddAsync(m.Url, ModuleName, dir, name);
-                if (ok) { queued++; downloaded.Add(m.Url); }
-                else failed++;
-            }
-        }
-
-        var parts = new List<string> { "已加入 " + queued + " 个" };
-        if (skipped > 0) parts.Add("跳过 " + skipped + " 个已下载");
-        if (filtered > 0) parts.Add("过滤 " + filtered + " 个");
-        if (failed > 0) parts.Add(failed + " 个失败");
-        return string.Join("，", parts);
-    }
-
     /// <summary>
-    /// 已下载集合：台账里「已完成」的 URL + 当前队列里的 URL
-    /// （与 XHomePage.BuildDownloadedSet 同一口径）。
+    /// 把一个用户的作品按下载配置筛出来并入队，返回一行摘要。
+    ///
+    /// **边翻页边推送**（2026-10-29 用户要求「慢慢识别、推送到下载管理」）。
+    ///
+    /// 原来分两步：先把最多 5 页作品**全部抓完**攒进 posts，再统一入队。
+    /// 用户看到的是「状态一直转圈 → 下载管理里突然冒出几十条」，中间没有任何反馈。
+    ///
+    /// 现在每抓到一页就立刻筛一遍、立刻入队 —— 和 X 主页「开始下载」的行为一致：
+    /// 识别到一条就推一条，下载管理里能实时看到条目在涨。
     /// </summary>
-    private static HashSet<string> BuildDownloadedSet()
+    /// <summary>
+    /// 把一个用户的作品按下载配置筛出来并入队，返回一行摘要。
+    ///
+    /// **直接复用主页那套 CreationTaskStore**（2026-10-29 用户要求「和主页下载一样」）。
+    ///
+    /// 之前这里是自己造的一套：`maxPages = Source=="tweets" ? 5 : 1`，
+    /// 也就是说**最多只翻 1 页（默认）/ 5 页**，一个账号几百条媒体只能识别到十几条就停了 ——
+    /// 这正是用户看到的「不是全部下载，才识别到几个」。
+    ///
+    /// 主页「开始下载」走的是 CreationTaskStore：**翻到没有下一页为止**（上限 200 页）、
+    /// 每翻一页就把这一页的媒体逐条推给 aria2、并把「已发送/已跳过」实时写给下载管理页。
+    /// 自动执行要的就是同一套行为，所以这里不再重复实现，直接登记一个创建任务并等它跑完。
+    /// </summary>
+    private static async Task<string> QueueUserAsync(
+        XHomeApi api, XHomeUser user, FilterSnapshot filter, ModuleSettings settings, CancellationToken ct,
+        Action<int, int>? onProgress = null)
     {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        try
+        // filter / settings 不再单独使用 —— 过滤条件由 CreationTaskStore 内部
+        // 按 AppSettings.ForModule("x") 自己取（与主页完全同一份设置）。
+        // 保留参数只为不动调用点。
+        _ = filter; _ = settings;
+
+        var task = CreationTaskStore.Instance.Create(
+            user.Id ?? "", user.ScreenName ?? "", user.DisplayName ?? "", user.Avatar ?? "",
+            AppSettings.AutoTaskModuleKey);   // 用自己的设置槽，与主页分开
+
+        // **等它真正跑完**：自动执行是「一个账号跑完再跑下一个」，
+        // 不能只登记就返回，否则账号间隔形同虚设、翻页任务全堆在队列里。
+        // 等待期间把「已发送 / 已跳过」实时回报给页面。
+        var lastSent = -1; var lastSkip = -1;
+        while (!task.Done.Task.IsCompleted)
         {
-            foreach (var e in DownloadLedger.Instance.Query(ModuleName, 2000))
-                if (e.Status == "已完成" && !string.IsNullOrEmpty(e.Url)) set.Add(e.Url);
+            if (ct.IsCancellationRequested)
+            {
+                CreationTaskStore.Instance.Cancel(task.Id);
+                break;
+            }
+
+            if (task.CompleteCount != lastSent || task.SkipCount != lastSkip)
+            {
+                lastSent = task.CompleteCount;
+                lastSkip = task.SkipCount;
+                onProgress?.Invoke(task.CompleteCount, task.SkipCount);
+            }
+
+            var done = await Task.WhenAny(task.Done.Task, Task.Delay(800, ct));
+            if (done == task.Done.Task) break;
         }
-        catch { }
-        try
-        {
-            foreach (var it in DownloadStore.Instance.Items)
-                if (!string.IsNullOrEmpty(it.Url)) set.Add(it.Url);
-        }
-        catch { }
-        return set;
+
+        // 跑完给最后一次回报，保证页面显示的是最终数字
+        onProgress?.Invoke(task.CompleteCount, task.SkipCount);
+
+        return task.ResultText;
     }
 
     /// <summary>文件名生成 —— 与 XHomePage.XNameFor 同一实现（X 下载设置里的模板）。</summary>
@@ -529,5 +544,18 @@ public sealed class AutoTaskStore
         }
 
         return new ParseResult(ids, skipped);
+    }
+
+    /// <summary>目录 + 文件名 → 磁盘上是否真有这个文件（非 0 字节）。</summary>
+    private static bool FileExistsFor(string? dir, string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return false;
+        try
+        {
+            var d = string.IsNullOrWhiteSpace(dir) ? Aria2Engine.DefaultDir() : dir!;
+            var full = System.IO.Path.Combine(d, fileName!);
+            return System.IO.File.Exists(full) && new System.IO.FileInfo(full).Length > 0;
+        }
+        catch { return false; }
     }
 }

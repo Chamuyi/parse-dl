@@ -12,7 +12,7 @@ public sealed class DouyinEnqueueResult
     public int Failed { get; set; }
     public int NotReady { get; set; }
     /// <summary>作品 id → （任务 id、标题、作者）—— 只有确认进入队列的才在这里。</summary>
-    public Dictionary<string, (List<string> TaskIds, string? Title, string? Author)> QueuedByAweme { get; } = new();
+    public Dictionary<string, (List<string> TaskIds, string? Title, string? Author, string? Dir)> QueuedByAweme { get; } = new();
     public string Message { get; set; } = "";
 }
 
@@ -37,7 +37,8 @@ public static class DouyinEnqueuer
         IEnumerable<DouyinItem> items,
         DouyinConfig cfg,
         bool writeLedger = true,
-        bool auto = false)
+        bool auto = false,
+        string rootFolder = "")
     {
         var result = new DouyinEnqueueResult();
         var list = items.ToList();
@@ -52,10 +53,19 @@ public static class DouyinEnqueuer
 
         foreach (var m in list)
         {
-            var (dir, fileName) = DouyinTemplate.BuildTarget(m, cfg, auto);
+            var (dir, fileName) = DouyinTemplate.BuildTarget(m, cfg, auto, rootFolder);
             try
             {
-                var (ok, _) = await DownloadStore.Instance.AddAsync(m.Url, Module, dir, fileName);
+                // **必须把封面带进队列**（2026-10-30 修「视频没预览图」）：
+                // AddAsync 的第 5 个参数是 previewUrl，原来没传 —— 视频条目 Url 是 .mp4，
+                // ThumbUrl 拿不到图就返回空，列表里永远是灰块。m.PreviewUrl 是抖音给的封面帧。
+                // **带上作品 ID + 媒体序号**（2026-10-31）：直链会过期，
+                // 队列恢复时要靠这两个字段回页面现取新地址。
+                // PostId 是所属作品；为空时退回 Id（单条媒体页的情况）。
+                var awemeId = string.IsNullOrEmpty(m.PostId) ? m.Id : m.PostId;
+                var (ok, _) = await DownloadStore.Instance.AddAsync(
+                    m.Url, Module, dir, fileName, m.PreviewUrl,
+                    awemeId: awemeId, mediaIndex: m.MediaIndex);
                 if (!ok)
                 {
                     result.Failed++;
@@ -68,9 +78,9 @@ public static class DouyinEnqueuer
                 if (gid.Length > 0 && !string.IsNullOrEmpty(postId))
                 {
                     if (!result.QueuedByAweme.TryGetValue(postId, out var entry))
-                        entry = (new List<string>(), m.Text, m.UserName);
+                        entry = (new List<string>(), m.Text, m.UserName, dir);
                     if (!entry.TaskIds.Contains(gid)) entry.TaskIds.Add(gid);
-                    result.QueuedByAweme[postId] = entry;
+                    result.QueuedByAweme[postId] = (entry.TaskIds, entry.Title, entry.Author, entry.Dir ?? dir);
                 }
             }
             catch (Exception ex)
@@ -94,22 +104,48 @@ public static class DouyinEnqueuer
     }
 
     /// <summary>
-    /// 按 aria2 的当前状态推进台账（pending → done / 撤销）。
-    /// 事件可能丢（进程在完成前退出、任务被从下载管理里删掉），所以这里不依赖
-    /// 事件顺序：任何时候拿任务表对一遍就能纠正，启动与刷新时都调一次。
+    /// 按 aria2 的实际状态推进台账（pending → done / 撤销）。
+    ///
+    /// **必须直接问 aria2，不能只看 DownloadStore.Instance.Items**（2026-10-30 修）：
+    /// Items 是内存里的下载列表，重启后是空的 —— 而台账里的 gid 是上一进程留下的。
+    /// 于是 Advance 拿到 Unknown 就跳过，那条记录**永远停在 pending**，
+    /// 「跳过已下载」再也认不出它（实测 douyin_downloaded.json 里 240 条全 pending）。
+    ///
+    /// 现在：先在内存表里查；查不到就逐条 tellStatus 补查。
+    /// 只有 aria2 明确报错（gid 已不存在）才保持 Unknown —— 不猜。
     /// </summary>
-    public static bool AdvanceLedger()
+    public static async Task<bool> AdvanceLedgerAsync()
     {
         var byGid = new Dictionary<string, AriaStatus>();
         foreach (var it in DownloadStore.Instance.Items)
             if (!string.IsNullOrEmpty(it.Gid)) byGid[it.Gid] = it.Status;
 
-        return DouyinStore.Instance.Ledger.Advance(gid =>
+        // 内存表里查不到、但台账还欠着的 gid —— 逐条问 aria2
+        var ledger = DouyinStore.Instance.Ledger;
+        var missing = new List<string>();
+        foreach (var gid in ledger.PendingTaskIds())
+        {
+            if (byGid.ContainsKey(gid)) continue;
+            if (missing.Contains(gid)) continue;
+            missing.Add(gid);
+        }
+
+        foreach (var gid in missing)
+        {
+            try
+            {
+                var one = await DownloadStore.Instance.Engine.TellStatusAsync(gid);
+                if (one is not null) byGid[gid] = one.Status;
+            }
+            catch { }
+        }
+
+        return ledger.Advance(gid =>
             byGid.TryGetValue(gid, out var st)
                 ? st switch
                 {
                     AriaStatus.Complete => DouyinTaskState.Complete,
-                    AriaStatus.Error => DouyinTaskState.Failed,
+                    AriaStatus.Error or AriaStatus.Removed => DouyinTaskState.Failed,
                     AriaStatus.Active or AriaStatus.Waiting or AriaStatus.Paused => DouyinTaskState.Running,
                     _ => DouyinTaskState.Unknown,
                 }

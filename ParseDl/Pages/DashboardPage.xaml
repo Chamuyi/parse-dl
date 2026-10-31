@@ -79,15 +79,16 @@
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="16">
                     <StackPanel Spacing="6">
-                        <TextBlock Text="已完成" FontSize="12" Opacity="0.6" />
+                        <TextBlock Text="本次完成" FontSize="12" Opacity="0.6" />
                         <TextBlock x:Name="DoneCount" Text="0" FontSize="24" FontWeight="SemiBold" />
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="2" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1" CornerRadius="8" Padding="16">
+                        BorderThickness="1" CornerRadius="8" Padding="16"
+                        ToolTipService.ToolTip="自开始使用以来累计下载成功的文件数，跨 X / 抖音 / B 站，重启不清零">
                     <StackPanel Spacing="6">
-                        <TextBlock Text="下载台账" FontSize="12" Opacity="0.6" />
+                        <TextBlock Text="累计下载" FontSize="12" Opacity="0.6" />
                         <TextBlock x:Name="LedgerCount" Text="0" FontSize="24" FontWeight="SemiBold" />
                     </StackPanel>
                 </Border>
@@ -213,7 +214,12 @@
                             <TextBlock Text="来自下载任务" FontSize="12" Opacity="0.6"
                                        HorizontalAlignment="Right" />
                         </Grid>
-                        <TextBlock Text="还没有下载任务" FontSize="13" Opacity="0.6" Margin="0,8,0,8" />
+                        <!-- **内容由 Refresh() 填**（2026-10-30 修「最近活动不显示内容」）：
+                             原来这里写死一行「还没有下载任务」，从来没接过数据 ——
+                             于是台账里已有上百条记录，这里永远显示空的。 -->
+                        <StackPanel x:Name="RecentActivityHost" Spacing="10">
+                            <TextBlock Text="还没有下载任务" FontSize="13" Opacity="0.6" Margin="0,8,0,8" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
             </Grid>

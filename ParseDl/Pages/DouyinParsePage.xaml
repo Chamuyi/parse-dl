@@ -31,41 +31,59 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <!-- 地址栏紧跟导航按钮并限宽；弹簧（*）放在「打开」之后，
+                             把右侧图标组推到行尾。
+                             2026-10-31 修正：原先 * 列在地址栏左侧，导航按钮与地址栏
+                             之间空出 ~260px，地址栏看起来被挤在中间。 -->
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <Button x:Name="BackButton" Grid.Column="0" Content="←" MinWidth="40"
-                            ToolTipService.ToolTip="后退" Click="OnBackClick" />
-                    <Button x:Name="ForwardButton" Grid.Column="1" Content="→" MinWidth="40"
-                            ToolTipService.ToolTip="前进" Click="OnForwardClick" />
-                    <Button x:Name="ReloadButton" Grid.Column="2" Content="⟳" MinWidth="40"
-                            ToolTipService.ToolTip="刷新" Click="OnReloadClick" />
-                    <Button x:Name="HomeButton" Grid.Column="3" Content="首页" MinWidth="56"
-                            Click="OnHomeClick" />
-                    <TextBox x:Name="UrlBox" Grid.Column="4" Height="32"
+                    <Button x:Name="BackButton" Grid.Column="0" MinWidth="36"
+                            Padding="0" Height="32"
+                            ToolTipService.ToolTip="后退" Click="OnBackClick">
+                        <FontIcon Glyph="&#xE72B;" FontSize="14" />
+                    </Button>
+                    <Button x:Name="ForwardButton" Grid.Column="1" MinWidth="36"
+                            Padding="0" Height="32"
+                            ToolTipService.ToolTip="前进" Click="OnForwardClick">
+                        <FontIcon Glyph="&#xE72A;" FontSize="14" />
+                    </Button>
+                    <Button x:Name="ReloadButton" Grid.Column="2" MinWidth="36"
+                            Padding="0" Height="32"
+                            ToolTipService.ToolTip="刷新" Click="OnReloadClick">
+                        <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                    </Button>
+                    <Button x:Name="HomeButton" Grid.Column="3" MinWidth="36"
+                            Padding="0" Height="32"
+                            ToolTipService.ToolTip="回到抖音首页" Click="OnHomeClick">
+                        <FontIcon Glyph="&#xE80F;" FontSize="14" />
+                    </Button>
+                    <TextBox x:Name="UrlBox" Grid.Column="4" Height="32" MinWidth="320" MaxWidth="520"
                              VerticalContentAlignment="Center"
                              PlaceholderText="粘贴作品链接 / 作者主页 / 分享口令 / 纯作品 ID"
                              KeyDown="OnUrlKeyDown" />
                     <Button x:Name="GoButton" Grid.Column="5" Content="打开" MinWidth="70"
                             Click="OnGoClick" />
-                    <Button x:Name="CaptureButton" Grid.Column="6" Content="抓取本页" MinWidth="90"
-                            Style="{ThemeResource AccentButtonStyle}" Click="OnCaptureClick" />
-                </Grid>
-                <Grid ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Button x:Name="AutoScrollButton" Grid.Column="0" Content="自动加载"
-                            MinWidth="90" Click="OnAutoScrollClick" />
-                    <Button x:Name="DiagnoseButton" Grid.Column="1" Content="诊断"
-                            MinWidth="70" Click="OnDiagnoseClick" />
-                    <TextBlock x:Name="StatusText" Grid.Column="2" Text="" FontSize="12"
-                               Opacity="0.75" TextWrapping="Wrap"
-                               VerticalAlignment="Center" />
+                    <!-- 右侧：自动加载 / 诊断 / 展开详情 / 状态（与地址栏同一行） -->
+                    <StackPanel Grid.Column="7" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Button x:Name="AutoScrollButton" MinWidth="36" Padding="0" Height="32"
+                                ToolTipService.ToolTip="自动加载（持续下滚抓取）" Click="OnAutoScrollClick">
+                            <FontIcon x:Name="AutoScrollIcon" Glyph="&#xE896;" FontSize="14" />
+                        </Button>
+                        <Button x:Name="DiagnoseButton" MinWidth="36" Padding="0" Height="32"
+                                ToolTipService.ToolTip="诊断拦截脚本状态" Click="OnDiagnoseClick">
+                            <FontIcon Glyph="&#xEBE8;" FontSize="14" />
+                        </Button>
+                        <Button x:Name="OpenDetailButton" MinWidth="36" Padding="0" Height="32"
+                                ToolTipService.ToolTip="展开详情列表（覆盖在页面上）" Click="OnOpenDetailClick">
+                            <FontIcon Glyph="&#xE8A7;" FontSize="14" />
+                        </Button>
+                        <TextBlock x:Name="StatusText" Text="" FontSize="12"
+                                   Opacity="0.75" TextWrapping="Wrap" MaxWidth="260"
+                                   VerticalAlignment="Center" Margin="4,0,0,0" />
+                    </StackPanel>
                 </Grid>
             </StackPanel>
         </Border>
@@ -112,7 +130,7 @@
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="12">
-                <Grid RowSpacing="8">
+                <Grid RowSpacing="6">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -123,26 +141,53 @@
                     </Grid.RowDefinitions>
 
                     <!-- 下载选项（代码生成，两个下拉同宽同高同基线） -->
-                    <StackPanel x:Name="OptionHost" Grid.Row="0" Spacing="8" />
+                    <!-- **必须是 Grid，不能是 StackPanel**（2026-10-30）：
+                         下面的开关排是自写的 DouyinWrapPanel，靠 Measure 拿到的
+                         availableWidth 决定换不换行。垂直 StackPanel 在某些测量路径下
+                         会把宽度约束丢成 PositiveInfinity，换行面板于是永不换行、
+                         DesiredSize 撑超卡片右边界被裁。Grid（单列 *）会把真实宽度传下去。 -->
+                    <Grid x:Name="OptionHost" Grid.Row="0" RowSpacing="6" VerticalAlignment="Top" />
 
                     <!-- 全选 + 已选计数 -->
+                    <!-- **一行搞定**（2026-10-30 用户要求「把这几个图标和全选、共几个作品、已选放一行」）： -->
+                    <!-- 左：全选图标 + 操作图标组；右：共 N 个作品 · 已选 N -->
+                    <!--
+                          **一行两段**（2026-10-30）：左段 = 全选图标 + 操作图标组（紧挨着排，
+                          中间不留空）；右段 = 共 N 个作品 · 已选 N（靠右，超宽时省略号）。
+                          左段是 Auto 列：里面是**定宽图标按钮**，总宽约 230px，最窄右栏 380px
+                          也放得下，所以不再需要换行面板（换行面板在 Auto/StackPanel 里按无穷宽
+                          测量，反而会把内容撑出右边界 —— 上一版就是这么被裁掉的）。
+                          右段是星号列：宽度受限，长摘要自动省略，不会把左段挤走。
+                    -->
                     <Grid Grid.Row="1" ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <CheckBox x:Name="SelectAllBox" Grid.Column="0" Content="全选" MinWidth="0"
-                                  IsThreeState="True" Click="OnSelectAllBoxClick" />
-                        <TextBlock x:Name="SelectedCountText" Grid.Column="1" Text="已选 0"
-                                   FontSize="12" Opacity="0.7"
-                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                        <!-- 左：全选（图标化）+ 操作按钮组 -->
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4"
+                                    VerticalAlignment="Center">
+                            <Button x:Name="SelectAllButton" MinWidth="32" MinHeight="0"
+                                    Padding="0" Height="30" VerticalAlignment="Center"
+                                    ToolTipService.ToolTip="全选 / 取消全选" Click="OnSelectAllBoxClick">
+                                <FontIcon x:Name="SelectAllIcon" Glyph="&#xE739;" FontSize="14" />
+                            </Button>
+                            <StackPanel x:Name="ActionHost" Orientation="Horizontal" Spacing="4"
+                                        VerticalAlignment="Center" />
+                        </StackPanel>
+                        <!-- 中：共 N 个作品（宽度受限，超长省略号）。
+                             直接是 TextBlock（不是横向 StackPanel）：水平 StackPanel 会按
+                             内容宽度测量，TextTrimming 拿不到约束宽度就不生效，文字会整段
+                             溢出到卡片外。 -->
+                        <TextBlock x:Name="ListSummary" Grid.Column="1" Text="" FontSize="12"
+                                   Opacity="0.7" VerticalAlignment="Center"
+                                   HorizontalAlignment="Right" TextTrimming="CharacterEllipsis"
+                                   TextWrapping="NoWrap" Margin="0,0,10,0" />
+                        <!-- 右：已选 N -->
+                        <TextBlock x:Name="SelectedCountText" Grid.Column="2" Text="已选 0" FontSize="12"
+                                   Opacity="0.7" VerticalAlignment="Center" />
                     </Grid>
-
-                    <!-- 操作按钮排：自己写的换行面板，宽度不够时自动换行（不再被截断） -->
-                    <Grid x:Name="ActionHost" Grid.Row="2" />
-
-                    <TextBlock x:Name="ListSummary" Grid.Row="3" Text="" FontSize="12"
-                               Opacity="0.7" TextWrapping="Wrap" />
 
                     <!-- 抓取结果：方格缩略图网格（点击格子放大预览） -->
                     <GridView x:Name="ResultGrid" Grid.Row="4"

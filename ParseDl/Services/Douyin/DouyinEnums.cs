@@ -68,13 +68,33 @@ public static class DouyinEnumText
         _ => "audio_only",
     };
 
+    /// <summary>
+    /// 下拉框里显示的短标签。
+    ///
+    /// **必须短**（2026-10-29 用户反馈「由于截断，显示不完全」）：
+    /// 右侧配置区宽度有限，原来最长那条是
+    /// 「下载地址 (最高质量优先) (ByteVC1/H.265/H.264)」共 41 字符，ComboBox 里被截成
+    /// 「下载地址 (最高质量优先) (ByteVC1/H.265/H.264)」的前半截，用户看不到全貌。
+    /// 现在缩成「最高质量优先」这类 6 字以内，完整编码信息放到 <see cref="Detail"/> 里做 ToolTip。
+    /// </summary>
     public static string Label(this DouyinSource s) => s switch
     {
         DouyinSource.DefaultAddr => "视频（默认）",
-        DouyinSource.H264 => "下载地址 (H.264)",
-        DouyinSource.H265 => "下载地址 (H.265)",
-        DouyinSource.QualityFirst => "下载地址 (兼容性+质量优先) (H.265/H.264)",
-        DouyinSource.QualityFirstBytevc1 => "下载地址 (最高质量优先) (ByteVC1/H.265/H.264)",
+        DouyinSource.H264 => "H.264",
+        DouyinSource.H265 => "H.265",
+        DouyinSource.QualityFirst => "兼容性优先",
+        DouyinSource.QualityFirstBytevc1 => "最高质量优先",
+        _ => "仅音频",
+    };
+
+    /// <summary>完整说明（鼠标悬停时用 ToolTip 显示，避免下拉框被截断）。</summary>
+    public static string Detail(this DouyinSource s) => s switch
+    {
+        DouyinSource.DefaultAddr => "视频（默认地址）",
+        DouyinSource.H264 => "下载地址（H.264）",
+        DouyinSource.H265 => "下载地址（H.265）",
+        DouyinSource.QualityFirst => "下载地址（兼容性 + 质量优先，H.265 / H.264）",
+        DouyinSource.QualityFirstBytevc1 => "下载地址（最高质量优先，ByteVC1 / H.265 / H.264）",
         _ => "下载地址（仅音频）",
     };
 

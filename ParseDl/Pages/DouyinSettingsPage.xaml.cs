@@ -229,7 +229,7 @@ public sealed partial class DouyinSettingsPage : Page
         {
             var folder = await FolderPickerService.PickAsync(cfg.SaveDirBase);
             if (folder is null) return;
-            Mutate(c => c.SaveDirBase = folder.Path);
+            Mutate(c => c.SaveDirBase = folder);
             Build();
         };
         var clearBtn = new Button { Content = "清除", MinWidth = 70 };

@@ -424,6 +424,29 @@ public static class DouyinModuleSelfTest
             assembledCustom.Items.All(m => m.CustomText == "我的标记"));
 
         sb.AppendLine();
+        // ── 按作品 ID 现取地址（2026-10-31 加）──────────────────────
+        // detail 接口返回 {"aweme_detail": {...}}，要能从中按序号挑出媒体地址。
+        // **必须用抖音原生字段**（aweme_id / video.play_addr / images），
+        // 不能用上面 VideoPost 那套内部结构 —— ParseAweme 认的是接口原样 JSON。
+        var detailBody = "{\"status_code\":0,\"aweme_detail\":{" +
+            "\"aweme_id\":\"7300000000000000009\"," +
+            "\"desc\":\"取址测试\"," +
+            "\"video\":{\"play_addr\":{\"url_list\":[" +
+                "\"https://v.douyin.com/fresh1.mp4\",\"https://v.douyin.com/fresh1b.mp4\"]}}" +
+            "}}";
+        var pick1 = DouyinAddressResolver.PickFromDetail(detailBody, 1);
+        Check("detail 能取到第 1 条媒体地址", pick1.Ok && pick1.Url.Length > 0, pick1.Message);
+        // 序号越界时退回第 1 条，不能返回空
+        var pickBig = DouyinAddressResolver.PickFromDetail(detailBody, 999);
+        Check("媒体序号越界时退回第 1 条", pickBig.Url == pick1.Url, "got=" + pickBig.Url);
+        // 空响应 / 无 aweme_detail / status_code 非 0 都要给出明确失败原因
+        Check("空响应判失败", !DouyinAddressResolver.PickFromDetail("", 1).Ok);
+        Check("无 aweme_detail 判失败",
+            !DouyinAddressResolver.PickFromDetail("{\"status_code\":0}", 1).Ok);
+        var limited = DouyinAddressResolver.PickFromDetail("{\"status_code\":2154}", 1);
+        Check("status_code 非 0 判失败且提示含状态码",
+            !limited.Ok && limited.Message.Contains("2154"), limited.Message);
+
         sb.AppendLine("抖音模块 合计: 通过 " + pass + ", 失败 " + fail);
         return sb.ToString();
     }

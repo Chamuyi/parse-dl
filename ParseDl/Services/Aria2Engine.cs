@@ -121,7 +121,15 @@ public sealed class Aria2Engine : IDisposable
             "--summary-interval=0",
             "--console-log-level=warn",
             // 并发上限与默认目录都从设置读（改设置后重启引擎生效）
-            $"--max-concurrent-downloads={Math.Clamp(AppSettings.Instance.MaxConcurrent, 1, 16)}",
+            // **串行下载：并发固定为 1**（2026-10-29 用户要求「按顺序下载」）。
+            //
+            // 用户要的语义是：先识别到 a、后识别到 b，就 a 下完再下 b，依次往下。
+            // 用 aria2 自己的队列 + 并发 1 实现 —— aria2 对 waiting 状态的任务是
+            // **FIFO**（按 addUri 的先后），加一条下一跳，正是「按推送顺序逐个下」。
+            //
+            // 原来这里读 AppSettings.MaxConcurrent（默认 5，可到 16），
+            // 多任务并行会让「顺序」失去意义，也更容易触发 CDN 限速。
+            "--max-concurrent-downloads=1",
             $"--dir={DefaultDir()}",
 
             // ── 重试与超时（2026-10-28 加）────────────────────────────
@@ -334,7 +342,7 @@ public sealed class Aria2Engine : IDisposable
     {
         var days = AppSettings.Instance.LogRetentionDays;
         if (days <= 0) return 0;
-        var dir = System.IO.Path.Combine(AppPaths.DataDir, "logs");
+        var dir = LogDir;
         if (!System.IO.Directory.Exists(dir)) return 0;
 
         var cutoff = DateTime.Now.AddDays(-days);
@@ -358,14 +366,68 @@ public sealed class Aria2Engine : IDisposable
         if (removed > 0) Log("[日志清理] 删除 " + removed + " 个超过 " + days + " 天的日志文件");
         return removed;
     }
-    /// <summary>写一行诊断日志到 数据目录\app.log（设置里关了写日志就不写）。</summary>
+    /// <summary>
+    /// 日志目录：<数据目录>\\logs。
+    ///
+    /// **必须与设置页显示的路径一致**（2026-10-30 修）：设置页写的是
+    /// `DataDir\\logs`，但原来 Log() 实际写 `DataDir\\app.log` —— 于是设置页
+    /// 点「打开日志目录」看到的是空文件夹，用户以为「没有日志」。
+    /// 「按天数自动清理」也一直在扫一个空目录，等于从未生效。
+    /// </summary>
+    public static string LogDir => System.IO.Path.Combine(AppPaths.DataDir, "logs");
+
+    /// <summary>
+    /// 本次运行的日志文件 —— **每次启动新建一个，按启动时间命名**（2026-10-30 用户要求）。
+    ///
+    /// 用户原话：十点打开用了五分钟关掉，十点十分再打开，就重新建一个日志文件。
+    /// 所以文件名取「进程启动那一刻」的时间戳，形如 2026-10-30_22-45-01.log，
+    /// 一次运行一个文件，互不追加。好处是排查时能精确定位是哪一次运行。
+    /// </summary>
+    public static string LogFilePath => System.IO.Path.Combine(LogDir, _sessionStamp + ".log");
+
+    /// <summary>本进程的启动时间戳 yyyy-MM-dd_HH-mm-ss，类加载时固定。</summary>
+    private static readonly string _sessionStamp =
+        System.Diagnostics.Process.GetCurrentProcess().StartTime.ToString("yyyy-MM-dd_HH-mm-ss");
+
+    /// <summary>写一行诊断日志到本次运行的日志文件（设置里关了写日志就不写）。</summary>
     public static void Log(string message)
     {
         try
         {
             if (!AppSettings.Instance.WriteLogs) return;
-            var path = System.IO.Path.Combine(AppPaths.DataDir, "app.log");
-            System.IO.File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {message}{Environment.NewLine}");
+            System.IO.Directory.CreateDirectory(LogDir);
+            MigrateLegacyLogOnce();
+            System.IO.File.AppendAllText(LogFilePath,
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {message}{Environment.NewLine}");
+        }
+        catch { }
+    }
+
+    private static bool _legacyLogMigrated;
+
+    /// <summary>
+    /// 把历史遗留的 `<数据目录>\\app.log` 搬进日志目录（只做一次）。
+    /// 原来日志写在数据目录根部，改成 `logs\\` 之后旧文件会留在外面；
+    /// 这里把它整个搬到 `logs\\legacy-app.log`，内容不丢、目录不再混杂。
+    /// </summary>
+    private static void MigrateLegacyLogOnce()
+    {
+        if (_legacyLogMigrated) return;
+        _legacyLogMigrated = true;
+        try
+        {
+            var legacy = System.IO.Path.Combine(AppPaths.DataDir, "app.log");
+            if (!System.IO.File.Exists(legacy)) return;
+            var dest = System.IO.Path.Combine(LogDir, "legacy-app.log");
+            if (System.IO.File.Exists(dest))
+            {
+                System.IO.File.AppendAllText(dest, System.IO.File.ReadAllText(legacy));
+                System.IO.File.Delete(legacy);
+            }
+            else
+            {
+                System.IO.File.Move(legacy, dest);
+            }
         }
         catch { }
     }

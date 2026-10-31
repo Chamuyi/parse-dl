@@ -375,17 +375,49 @@ public static class DouyinPayloadParser
         }
 
         // ── 视频 ─────────────────────────────────────────────
+        // **视频候选只认真正的视频变体**（2026-10-30）：
+        // 白名单保持原样（BitRate / DefaultAddr），下面那个 allUrls 才是真正决定
+        // 「下载哪个地址」的地方 —— 修错地方等于没修。
         var videoKinds = p.Videos
             .Where(v => v.Kind is DouyinVariantKind.BitRate or DouyinVariantKind.DefaultAddr)
             .ToList();
 
-        if (videoKinds.Count > 0 && p.Kind != "images")
+        // **只要作品本身有图，就不要再额外生成「主视频」条目**（2026-10-30 修真根因）。
+        //
+        // 抖音图文作品的 video 字段往往是「BGM 载体」—— play_addr 直接指向
+        // https://lf9-music-east.douyinstatic.com/obj/ies-music-hj/xxx.mp3。
+        // 原来只判 p.Kind != "images"，但「图文 + 实况视频」这种作品的 kind 是
+        // mixed，照样会生出一个主视频条目，下载下来就是 ID3 / M4A 的纯音频。
+        // 实测证据（download_queue.json）：
+        //   FileName = @恩恩babe_20261030_7702378484702838656.mp4
+        //   Url      = .../ies-music-hj/7689118862347930426.mp3
+        // 而文件头是 ID3（无 ftyp / moov / trak），根本不是 MP4。
+        //
+        // 实况视频不受影响：它由下面的 live 分支单独生成 _Nv 条目。
+        if (videoKinds.Count > 0 && p.Images.Count == 0)
         {
-            var allUrls = Flatten(p.Videos);
+            // **主地址 / 备用地址只能从视频变体里取**（2026-10-30 修）：
+            // 这里原来写 Flatten(p.Videos)，把 music 那一路也算进来了 ——
+            // 只要 audio 排在前面，allUrls[0] 就是 BGM，于是「主视频」下载下来的是音频。
+            // 上次只改了 variants 参数、漏了这里，所以问题照旧。
+            var allUrls = Flatten(videoKinds);
             if (allUrls.Count > 0)
             {
-                var variants = new List<DouyinVariant>(p.Videos);
-                if (audio is not null) variants.Add(audio);
+                // **只保留真正的视频变体**（2026-10-30 实测：BGM 以 ftyp=M4A、handler=soun 的纯音频
+                // 落成了「主视频」文件名 @作者_日期_标题.mp4 —— 用户没勾「附带 BGM」也照下。
+                // 原来写 new List<DouyinVariant>(p.Videos)，把 music 那一路也带进来了。
+                var variants = videoKinds.Select(v => v).ToList();
+                // **视频条目绝不能混入 BGM 音频**（2026-10-30 修「真视频没下下来、
+                // 却下了一个 ID3 头的 mp3 文件、还标成 .mp4」）。
+                //
+                // 原来这里把 audio 也 Add 进 variants，本意是给 %BGM% 之类的模板变量用。
+                // 但 DouyinSourceResolver.Resolve() 在「指定字段缺失」时会退回
+                // `m.DownloadCandidates`（= Url + AltUrls），而 videoVariants 的产物里
+                // 混着 audio 变体时，Flatten(p.Videos) 取到的第一个地址可能就是 BGM ——
+                // 于是「视频」任务实际下的是音频，扩展名却按 Video 规则给了 .mp4。
+                // 实测证据：该文件头是 ID3（MP3），362497 字节，根本没有视频轨道。
+                //
+                // 音频只属于「AudioOnly 下载源」和「附带 BGM」两条路径，不参与视频候选。
                 var first = videoKinds[0];
                 outList.Add(Build(p.Id, DouyinMediaType.Video, allUrls[0],
                     p.Images.Count == 0 ? 1 : p.Images.Count + 1,

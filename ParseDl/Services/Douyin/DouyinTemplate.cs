@@ -189,7 +189,7 @@ public static class DouyinTemplate
             case "DESCRIPTION": return Description(m, p);
             case "AWEME_ID": return m.PostId;
             case "CUSTOM_TEXT": return m.CustomText ?? "";
-            case "IMAGE_INDEX": return IsMainVideo(m) ? "" : "_" + (m.MediaIndex - 1).ToString(CultureInfo.InvariantCulture);
+            case "IMAGE_INDEX": return ImageIndexSuffix(m);
             case "RESOLUTION": return ResolutionText(m);
             case "BITRATE":
                 var br = m.Chosen?.Bitrate ?? 0;
@@ -220,6 +220,33 @@ public static class DouyinTemplate
         }
     }
 
+    /// <summary>
+    /// 文件名里的序号后缀（`%IMAGE_INDEX%`）。
+    ///
+    /// **实况图的静态图与配对视频必须共用同一个序号**（2026-10-30 用户选方案 A）。
+    /// `MotionPhoto.TryPairOnComplete` 按 `xxx_2.jpg ↔ xxx_2v.mp4` 的约定找配对，
+    /// 而原来的实现是「只有主视频不带序号，其余都带」—— 实况图的配对视频 id 以 `v` 结尾、
+    /// 不算主视频，于是它也带序号，但带的是它自己的 MediaIndex（图是 `_0`、视频没有），
+    /// 两边序号对不上，合成永远不触发。
+    ///
+    /// 现在的规则：
+    /// - 主视频（id == PostId）：空
+    /// - 实况图配对视频（id 以 `v` 结尾）：`_Nv`，N 与它配对的静态图一致
+    /// - 其它（图集每一张）：`_N`
+    /// </summary>
+    private static string ImageIndexSuffix(DouyinItem m)
+    {
+        if (IsMainVideo(m)) return "";
+        var idx = (m.MediaIndex - 1).ToString(CultureInfo.InvariantCulture);
+        // 实况图配对视频：id 形如 `<postId>_<N>v`，序号与同组静态图相同，末尾补 v
+        if (m.Type == DouyinMediaType.Video && m.Id != m.PostId
+            && m.Id.EndsWith("v", StringComparison.Ordinal))
+        {
+            return "_" + idx + "v";
+        }
+        return "_" + idx;
+    }
+
     /// <summary>作品主视频 = 视频且 id 等于作品 id（实况图的配对视频带 v 后缀，不算）。</summary>
     public static bool IsMainVideo(DouyinItem m)
         => m.Type == DouyinMediaType.Video && m.Id == m.PostId;
@@ -247,17 +274,13 @@ public static class DouyinTemplate
     {
         if (m.Type == DouyinMediaType.Video) return ".mp4";
         if (m.Type == DouyinMediaType.Audio) return ".mp3";
-        var url = m.Url;
-        if (!string.IsNullOrEmpty(url))
-        {
-            var noQuery = url.Split('?')[0];
-            var dot = noQuery.LastIndexOf('.');
-            if (dot >= 0 && dot < noQuery.Length - 1)
-            {
-                var tail = noQuery[(dot + 1)..];
-                if (tail.Length is >= 1 and <= 5 && tail.All(char.IsLetterOrDigit)) return "." + tail.ToLowerInvariant();
-            }
-        }
+
+        // **图片统一用 .jpg**（2026-10-30 用户选方案 A）。
+        //
+        // 原来是从 URL 后缀里猜（抖音的图常带 `.jpeg`、`~tplv-xxx.jpeg` 之类），
+        // 猜出来是 `.jpeg` 而实况图合成的配对约定写的是 `xxx_2.jpg ↔ xxx_2v.mp4`，
+        // 扩展名这一处也对不上。而且抖音 CDN 的 URL 后缀五花八门，猜出来的值不稳定。
+        // JPEG 就是 JPEG，写死 `.jpg` 既稳定又与 MotionPhoto 的约定一致。
         return ".jpg";
     }
 
@@ -328,13 +351,24 @@ public static class DouyinTemplate
     ///   不受设置页 EnableSaveFolder 影响）。
     /// 这样「设置里那套」不会误控自动下载。
     /// </summary>
-    public static (string Dir, string FileName) BuildTarget(DouyinItem item, DouyinConfig cfg, bool auto)
+    public static (string Dir, string FileName) BuildTarget(DouyinItem item, DouyinConfig cfg, bool auto, string rootFolder = "")
     {
         // 开发版（Debug）一律锁在 exe\downloads（用户 2026-10-28：开发版数据含下载
         // 必须严格在 exe 目录内）。发行版仍按用户配置的目录走。
         var baseDir = AppPaths.ResolveDownloadDir(cfg.SaveDirBase, out _);
         if (!AppPaths.LockToInstallDir && string.IsNullOrWhiteSpace(cfg.SaveDirBase))
             baseDir = Aria2Engine.DefaultDir();
+
+        // **顶层文件夹 = 导入的名单文件名**（2026-10-29 用户要求）。
+        //
+        // 「我导入文件下载的话，创建与文件名同名文件夹，先那里面按照文件夹变量和
+        //  文件名变量保存文件」—— 即 downloads\<名单文件名>\<文件夹模板>\<文件名模板>。
+        // 只对自动下载模式生效（auto=true），手动下载不受影响。
+        if (auto && !string.IsNullOrWhiteSpace(rootFolder))
+        {
+            var segsRoot = ParseDirSegments(rootFolder);
+            foreach (var s in segsRoot) baseDir = System.IO.Path.Combine(baseDir, s);
+        }
 
         var useFolder = auto ? cfg.AutoCreateFolder : cfg.EnableSaveFolder;
         var dirTemplate = auto ? cfg.EffectiveAutoDirTemplate : cfg.DirTemplate;

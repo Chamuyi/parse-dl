@@ -39,7 +39,52 @@ public sealed class AppSettings
 
     // ── 外观 ──────────────────────────────────────────
     public string MaterialKind { get; set; } = "Mica";
+
+    /// <summary>
+    /// 明暗偏好（2026-10-30 加「跟随系统」）：
+    ///   "System" —— 跟随 Windows 的「应用模式」，系统切深色/浅色时界面跟着变；
+    ///   "Dark" / "Light" —— 手动锁定。
+    ///
+    /// 老配置里没有这个字段，加载时按 <see cref="IsDark"/> 回填（见 Load）。
+    /// </summary>
+    public string ThemeMode { get; set; } = "System";
+
+    /// <summary>
+    /// 实际生效的明暗（**只读派生值**，不要直接改它）。
+    /// ThemeMode == "System" 时取系统的应用主题，否则取 ThemeMode。
+    /// 写入请用 <see cref="SetThemeMode"/>，它会同时更新 ThemeMode 与 IsDark。
+    /// </summary>
     public bool IsDark { get; set; } = true;
+
+    /// <summary>系统当前是否深色（读注册表 AppsUseLightTheme）。读不到时按深色处理。</summary>
+    public static bool SystemIsDark()
+    {
+        try
+        {
+            using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            var v = k?.GetValue("AppsUseLightTheme");
+            if (v is int i) return i == 0;
+        }
+        catch { }
+        return true;
+    }
+
+    /// <summary>按 ThemeMode 解析出实际明暗。</summary>
+    public bool ResolveIsDark()
+        => ThemeMode switch
+        {
+            "Dark" => true,
+            "Light" => false,
+            _ => SystemIsDark(),
+        };
+
+    /// <summary>设置明暗偏好并同步 IsDark（三者之一：System / Dark / Light）。</summary>
+    public void SetThemeMode(string mode)
+    {
+        ThemeMode = mode is "Dark" or "Light" ? mode : "System";
+        IsDark = ResolveIsDark();
+    }
 
     // ── 代理 ──────────────────────────────────────────
     // 对齐 Flutter 版 lib/models/settings.dart 的 ProxySettings：
@@ -78,6 +123,48 @@ public sealed class AppSettings
     [JsonIgnore]
     public string FilePath => Path.Combine(AppPaths.DataDir, "settings.json");
 
+    /// <summary>
+    /// 自动执行页专用的设置槽（2026-10-29 用户要求「和主页分开」）。
+    ///
+    /// 之前自动执行页和 X 主页都用 <c>ForModule("x")</c> —— **同一份对象**，
+    /// 在自动执行页把「媒体类型」改成只看视频，主页那边也跟着变，反之亦然。
+    /// 用户要的是两页各自独立：主页那页配的是「手动加载后下载」的规则，
+    /// 自动执行配的是「按名单批量跑」的规则，本来就该分开。
+    ///
+    /// 做法：在 <see cref="Modules"/> 里另开一个键 <c>x_auto</c>，
+    /// 复用同一个 <see cref="ModuleSettings"/> 类型，但对象互不相干。
+    /// **登录态（AuthToken / Ct0）仍然共用 x 那一份** —— 账号只有一个，
+    /// 分开会导致「主页登录了、自动执行说没登录」。
+    /// </summary>
+    public ModuleSettings ForAutoTask()
+    {
+        if (!Modules.TryGetValue(AutoTaskModuleKey, out var m))
+        {
+            m = new ModuleSettings();
+            Modules[AutoTaskModuleKey] = m;
+        }
+
+        // **登录态必须每次从 x 槽同步过来**（2026-10-29 修回归）。
+        //
+        // 上一版只在这里新建空槽就算完 —— 结果自动执行一跑就报
+        // 「失败：未登录，无法创建下载任务」，而 X 下载设置页明明显示「已登录」。
+        // 原因：`XHomeApi.HasLogin => AuthToken.Length > 0 && Ct0.Length > 0`，
+        // 而新建的 x_auto 槽这两个字段都是空 —— 「共用登录态」只写在注释里，代码没做。
+        //
+        // 现在每次取用前都把凭据同步一份：账号只有一个（登录入口只在 X 下载设置页），
+        // 不存在「两个槽各登各的」这种需求。
+        var auth = ForModule("x");
+        m.AuthToken = auth.AuthToken;
+        m.Ct0 = auth.Ct0;
+        m.Cookie = auth.Cookie;
+        m.ExtraCookies = auth.ExtraCookies;
+        m.LastVerifiedUser = auth.LastVerifiedUser;
+        return m;
+    }
+
+    /// <summary>自动执行页独立设置槽的键名。</summary>
+    public const string AutoTaskModuleKey = "x_auto";
+
     public ModuleSettings ForModule(string id)
     {
         if (!Modules.TryGetValue(id, out var m))
@@ -107,7 +194,15 @@ public sealed class AppSettings
             MaxConcurrent = loaded.MaxConcurrent;
             Modules = loaded.Modules ?? new();
             MaterialKind = loaded.MaterialKind;
-            IsDark = loaded.IsDark;
+            // 【2026-10-30】ThemeMode 是新字段：老配置文件里没有，反序列化后是默认值
+            // "System"。若用户以前手动设过深色/浅色（配置里 IsDark 与之不符），
+            // 以老字段为准回填，避免升级后「莫名其妙变成跟随系统」。
+            ThemeMode = string.IsNullOrWhiteSpace(loaded.ThemeMode) ? "System" : loaded.ThemeMode;
+            // 老配置（没有 ThemeMode 键）无法区分「新装的默认」与「手动设过」——
+            // 用一个显式标记判断：有 IsDark 但没有 ThemeMode 就当成手动锁定。
+            if (!json.Contains("\"ThemeMode\"", StringComparison.Ordinal))
+                ThemeMode = loaded.IsDark ? "Dark" : "Light";
+            IsDark = ResolveIsDark();
             WriteLogs = loaded.WriteLogs;
             LogRetentionDays = loaded.LogRetentionDays;
             // 2026-10-24 新增的一批字段集中在这一处读，减少与并行分支的合并冲突

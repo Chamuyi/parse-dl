@@ -1,38 +1,95 @@
 using System;
 using System.Threading.Tasks;
-using Windows.Storage;
-using Windows.Storage.Pickers;
-using WinRT.Interop;
+using Microsoft.Windows.Storage.Pickers;
 
 namespace ParseDl.Services;
 
 /// <summary>
-/// 文件夹选择器 —— 解决 MSIX 打包应用写不了任意磁盘目录的问题。
+/// 文件夹选择器。
 ///
-/// 为什么需要它：打包应用（即使声明了 runFullTrust）在部分环境下对
-/// 用户任意路径的写入会被拦；而通过 <see cref="FolderPicker"/> 选中的目录，
-/// 系统会授予应用对该 <see cref="StorageFolder"/> 的访问权。
+/// ### 2026-10-31 改用 WinAppSDK 2.x 新版 Pickers API（用户报「抖音设置里点选择文件夹报错」）
 ///
-/// WinUI 3 的关键点：**必须先 InitializeWithWindow 传 HWND**，
-/// 否则 PickSingleFolderAsync 会抛 COMException（0x80070578 无效窗口句柄）。
+/// 旧实现用的是 UWP 那套 `Windows.Storage.Pickers.FolderPicker` +
+/// `InitializeWithWindow.Initialize(picker, hwnd)`。它在**非打包（unpackaged）**
+/// 应用里不可靠 —— 本工程就是 `WindowsPackageType=None`，实测点「选择文件夹」
+/// 直接抛 COMException，而 Message 还是空串，日志里只能看到一行
+/// `System.Runtime.InteropServices.COMException:`（crash.log 2026-10-31 03:45 抓到）。
+///
+/// WinAppSDK 1.8+/2.x 提供的新 API 走的是**现代 IFileDialog + WindowId**，
+/// 专为桌面（非打包）应用设计，不再需要 InitializeWithWindow，也不再依赖包身份：
+///   `var picker = new Microsoft.Windows.Storage.Pickers.FolderPicker(windowId);`
+///   `var result = await picker.PickSingleFolderAsync();`
+///   `result?.Path` —— 直接给文件系统路径字符串，不需要 StorageFolder。
+///
+/// 返回 **string?** 而不是 StorageFolder：非打包应用本来就有完整文件系统权限，
+/// 不需要 StorageFolder 那层授权令牌，只要一个路径就够。
 /// </summary>
 public static class FolderPickerService
 {
-    /// <summary>弹出文件夹选择器。用户取消返回 null。</summary>
-    public static async Task<StorageFolder?> PickAsync(string? startPath = null)
+    /// <summary>弹出文件夹选择器，返回选中的绝对路径；用户取消返回 null。</summary>
+    public static async Task<string?> PickAsync(string? startPath = null)
     {
-        var picker = new FolderPicker
+        var win = App.MainWindow
+                  ?? throw new InvalidOperationException("主窗口尚未创建，无法弹出文件夹选择器");
+
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(win);
+        var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+
+        var picker = new FolderPicker(windowId)
         {
-            SuggestedStartLocation = PickerLocationId.Downloads,
             CommitButtonText = "选择此文件夹",
+            SuggestedStartLocation = PickerLocationId.Downloads,
         };
-        // FolderPicker 必须至少有一个 FileTypeFilter，否则抛异常
-        picker.FileTypeFilter.Add("*");
 
-        var hwnd = WindowNative.GetWindowHandle(App.MainWindow);
-        InitializeWithWindow.Initialize(picker, hwnd);
+        var result = await picker.PickSingleFolderAsync();
+        return result?.Path;
+    }
 
-        return await picker.PickSingleFolderAsync();
+    /// <summary>
+    /// 弹出**文件**选择器，返回选中的绝对路径；用户取消返回 null。
+    ///
+    /// ### 2026-10-31 加（用户报「点导入名单没有反应」）
+    ///
+    /// 和文件夹选择器同一个病根：`Windows.Storage.Pickers.FileOpenPicker` +
+    /// `InitializeWithWindow` 在**非打包**应用里必抛 COMException。更糟的是
+    /// 两处调用点都把异常 `catch` 掉了（`catch { }` / 只写日志），
+    /// 用户看到的就是**点了完全没反应**，连报错框都没有。
+    ///
+    /// 新版 API 用法与文件夹选择器对称：
+    ///   `new FileOpenPicker(windowId)` + `PickSingleFileAsync()` → `result?.Path`
+    /// 扩展名过滤用 `FileTypeFilter.Add(".md")`（**必须带点**，新版 API 不接受 "*"）。
+    /// </summary>
+    /// <param name="extensions">扩展名列表，如 `.md` / `.txt`；为空则不过滤。</param>
+    public static async Task<string?> PickFileAsync(params string[] extensions)
+    {
+        var win = App.MainWindow
+                  ?? throw new InvalidOperationException("主窗口尚未创建，无法弹出文件选择器");
+
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(win);
+        var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+
+        var picker = new FileOpenPicker(windowId)
+        {
+            CommitButtonText = "选择",
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+        };
+
+        if (extensions is { Length: > 0 })
+        {
+            foreach (var e in extensions)
+            {
+                var ext = e.StartsWith((char)46) ? e : "." + e;
+                picker.FileTypeFilter.Add(ext);
+            }
+        }
+        else
+        {
+            // 不过滤时也必须至少给一个，否则对话框里什么都看不见
+            picker.FileTypeFilter.Add("*");
+        }
+
+        var result = await picker.PickSingleFileAsync();
+        return result?.Path;
     }
 
     /// <summary>

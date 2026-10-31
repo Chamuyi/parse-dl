@@ -11,20 +11,82 @@ using Microsoft.UI.Dispatching;
 namespace ParseDl.Services;
 
 /// <summary>一条下载记录（界面绑定的对象）。</summary>
-public sealed class DownloadItem
+public sealed class DownloadItem : System.ComponentModel.INotifyPropertyChanged
 {
-    public string Gid { get; init; } = "";
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+    private void Raise([System.Runtime.CompilerServices.CallerMemberName] string? name = null)
+        => PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(name));
+    /// <summary>批量通知（一次轮询改了多个字段时用，避免逐字段触发）。</summary>
+    private void RaiseAll(params string[] names)
+    {
+        foreach (var n in names) Raise(n);
+    }
+    private string _gid = "";
+    public string Gid { get => _gid; set { if (_gid == value) return; _gid = value; Raise(); } }
     public string Url { get; init; } = "";
-    public string FileName { get; set; } = "";
-    public string Dir { get; set; } = "";
+    /// <summary>预览图 URL（图片用自身；视频用封面帧）。由入队方传入。</summary>
+    private string _previewUrl = "";
+    public string PreviewUrl { get => _previewUrl; set { if (_previewUrl == value) return; _previewUrl = value; Raise(); Raise(nameof(ThumbUrl)); } }
+    private string _fileName = "";
+    public string FileName { get => _fileName; set { if (_fileName == value) return; _fileName = value; Raise(); Raise(nameof(DirText)); } }
+    private string _dir = "";
+    public string Dir { get => _dir; set { if (_dir == value) return; _dir = value; Raise(); Raise(nameof(DirText)); } }
     public string Module { get; init; } = "X 媒体";
+
+    /// <summary>
+    /// 抖音作品 ID + 媒体序号（2026-10-31 加）。
+    ///
+    /// 直链会过期，但「哪个作品的第几条媒体」是稳定的 ——
+    /// 恢复队列时靠这两个字段现取一份新鲜地址。
+    /// 非抖音任务留空即可。
+    /// </summary>
+    public string? AwemeId { get; init; }
+    public int MediaIndex { get; init; }
+
     public DateTime CreatedAt { get; init; } = DateTime.Now;
 
-    public AriaStatus Status { get; set; } = AriaStatus.Waiting;
-    public long CompletedBytes { get; set; }
-    public long TotalBytes { get; set; }
-    public long SpeedBytesPerSec { get; set; }
-    public string Error { get; set; } = "";
+    /// <summary>
+    /// **入队序号**（2026-10-30 加）。
+    ///
+    /// 为什么不能只靠 CreatedAt 排序：`DateTime.Now` 的精度约 15ms，
+    /// 而抖音/B站 批量入队是紧凑循环（抖音实测一秒能入几十条），
+    /// 于是**很多条拿到完全相同的时间戳** —— 排序就退化成「看插入位置」，
+    /// 实际表现为「顺序看着乱、后加入的跑到前面」。X 那边一条条慢慢来，
+    /// 所以以前没暴露出来。
+    ///
+    /// 这里用一个进程级自增号做**第二排序键**，保证「谁先入队谁在前」绝对稳定。
+    /// </summary>
+    public long Seq { get; init; } = System.Threading.Interlocked.Increment(ref _seqCounter);
+
+    private static long _seqCounter;
+
+    /// <summary>供队列恢复时把计数器推到已用最大值之后（见 RestoreQueueAsync）。</summary>
+    internal static ref long SeqCounter => ref _seqCounter;
+
+
+    private AriaStatus _status = AriaStatus.Waiting;
+    public AriaStatus Status
+    {
+        get => _status;
+        set
+        {
+            if (_status == value) return;
+            _status = value;
+            RaiseAll(nameof(Status), nameof(StatusText), nameof(PauseLabel), nameof(RetryVisibility), nameof(ProgressText));
+        }
+    }
+    private long _completed;
+    public long CompletedBytes { get => _completed; set { if (_completed == value) return; _completed = value; RaiseAll(nameof(CompletedBytes), nameof(Progress), nameof(ProgressText)); } }
+    private long _total;
+    public long TotalBytes { get => _total; set { if (_total == value) return; _total = value; RaiseAll(nameof(TotalBytes), nameof(Progress), nameof(ProgressText)); } }
+    private long _speed;
+    public long SpeedBytesPerSec { get => _speed; set { if (_speed == value) return; _speed = value; RaiseAll(nameof(SpeedBytesPerSec), nameof(SpeedText)); } }
+    private string _error = "";
+    public string Error { get => _error; set { if (_error == value) return; _error = value; Raise(); } }
+    /// <summary>自动重试次数（网络抖动时用）。</summary>
+    public int RetryCount { get; set; }
+    /// <summary>最近一次重试时间，用于退避。</summary>
+    public DateTime? LastRetryAt { get; set; }
 
     public double Progress => TotalBytes <= 0 ? 0 : (double)CompletedBytes / TotalBytes;
     public string ProgressText => TotalBytes <= 0
@@ -69,15 +131,63 @@ public sealed class DownloadItem
 
 
     /// <summary>预览图 URL（图片用自身；视频用缩略图；没有则空）。</summary>
+    /// <summary>
+    /// 预览图 URL。
+    ///
+    /// **图片直链本身就是预览图**；视频 aria2 拿不到首帧，只能留空走占位。
+    ///
+    /// 注意 X/抖音 的图片 URL 常常**不带扩展名**（如 pbs.twimg.com/media/xxx?format=jpg
+    /// 或抖音的 ~tplv-... 路径），原来只按 .jpg/.png 后缀判断，这类图片永远不出图 ——
+    /// 现在补上 format= 查询参数与常见 CDN 路径特征。
+    /// </summary>
     public string ThumbUrl
     {
         get
         {
-            // 图片直链本身就是预览图；视频用 aria2 拿不到首帧，留空走占位。
+            // **优先用入队方给的封面**（视频封面帧就在这里，2026-10-29 修）。
+            // 原来只在 Url 后缀像图片时才出图 —— X 视频 URL 是 .mp4，永远没封面。
+            if (!string.IsNullOrWhiteSpace(_previewUrl)) return _previewUrl;
             if (string.IsNullOrEmpty(Url)) return "";
             var u = Url.ToLowerInvariant();
-            if (u.Contains(".jpg") || u.Contains(".jpeg") || u.Contains(".png") || u.Contains(".webp"))
+
+            // ① 明确是图片扩展名
+            if (u.Contains(".jpg") || u.Contains(".jpeg") || u.Contains(".png")
+                || u.Contains(".webp") || u.Contains(".gif") || u.Contains(".bmp"))
                 return Url;
+
+            // ② 查询参数里声明了图片格式（X 的 ?format=jpg）
+            if (u.Contains("format=jpg") || u.Contains("format=jpeg")
+                || u.Contains("format=png") || u.Contains("format=webp"))
+                return Url;
+
+            // ③ 常见图片 CDN 路径特征（抖音 / B 站封面）
+            if (u.Contains("~tplv-") || u.Contains("/bfs/") || u.Contains("hdslb.com/bfs"))
+                return Url;
+
+            // ③ **本地兜底：实况视频用同名静态图当预览**（2026-10-30 修「视频没预览图」）。
+            //
+            // 实况图的配对视频 xxx_0v.mp4 与静态图 xxx_0.jpg / xxx_0MP.jpg 在同一目录，
+            // 天然有一张能用的预览图。用户报「视频没预览图」时，队列里那条视频的
+            // PreviewUrl 是空的（历史队列没存封面），这里就靠这条规则补上。
+            if (!string.IsNullOrEmpty(_dir) && !string.IsNullOrEmpty(_fileName))
+            {
+                var stem = System.IO.Path.GetFileNameWithoutExtension(_fileName);
+                if (stem.EndsWith("v", StringComparison.OrdinalIgnoreCase))
+                {
+                    var baseName = stem.Substring(0, stem.Length - 1);
+                    foreach (var cand in new[] { baseName + "MP.jpg", baseName + ".jpg", baseName + ".jpeg", baseName + ".png" })
+                    {
+                        try
+                        {
+                            var full = System.IO.Path.Combine(_dir, cand);
+                            if (System.IO.File.Exists(full)) return new Uri(full).AbsoluteUri;
+                        }
+                        catch { }
+                    }
+                }
+            }
+
+            // 视频：aria2 拿不到首帧，走占位
             return "";
         }
     }
@@ -123,6 +233,9 @@ public sealed class DownloadStore
     public static DownloadStore Instance { get; } = new();
 
     private readonly Aria2Engine _engine = new();
+
+    /// <summary>供台账等外部模块直接查 aria2（跨重启补查 gid 状态）。</summary>
+    public Aria2Engine Engine => _engine;
     private readonly DispatcherQueue? _ui;
     private Timer? _pollTimer;
     private int _polling;
@@ -168,7 +281,8 @@ public sealed class DownloadStore
     /// 现在按原版语义：**只加任务 + 登记，不刷新**。落盘走防抖（见 ScheduleSave）。
     /// </summary>
     public async Task<(bool Ok, string Message)> AddAsync(
-        string url, string module, string? dir = null, string? outName = null)
+        string url, string module, string? dir = null, string? outName = null, string? previewUrl = null,
+        string? awemeId = null, int mediaIndex = 0)
     {
         if (string.IsNullOrWhiteSpace(url)) return (false, "地址为空");
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
@@ -217,10 +331,17 @@ public sealed class DownloadStore
         var gid = await _engine.AddUriAsync(url, targetDir, outName, referer);
         if (string.IsNullOrEmpty(gid)) return (false, "aria2 拒绝该任务");
 
-        var item = new DownloadItem { Gid = gid, Url = url, Module = module };
+        var item = new DownloadItem
+        {
+            Gid = gid, Url = url, Module = module, PreviewUrl = previewUrl ?? "",
+            AwemeId = awemeId, MediaIndex = mediaIndex,
+        };
         if (!string.IsNullOrEmpty(outName)) item.FileName = outName;
         item.Dir = dir ?? Aria2Engine.DefaultDir();
-        OnUi(() => Items.Insert(0, item));
+        // **加到末尾，保持推送顺序**（2026-10-29 用户要求「按顺序下载」）。
+        // 原来是 Insert(0, item) 插到顶部 —— 先识别到 a、后识别到 b，
+        // b 就显示在 a 上面，跟实际下载顺序正好相反。
+        OnUi(() => Items.Add(item));
         // **不做全量刷新**（对齐原版）：状态由轮询自然补齐。
         // 落盘用防抖，避免每条都写一次文件。
         ScheduleSave();
@@ -292,10 +413,54 @@ public sealed class DownloadStore
     private async Task RefreshActiveOnlyAsync()
     {
         if (!_engine.IsRunning) return;
+
+        // **不能只查 tellActive**（2026-10-29 修，用户报「卡在 33% 点暂停才变完成」）。
+        //
+        // aria2 的任务一旦下完就从 tellActive 里消失，落到 stopped。
+        // 原来只查 active，于是界面永远停在最后一次看到的进度（比如 33%），
+        // 直到用户手动点暂停/刷新触发一次全量同步才发现早就完成了。
+        //
+        // 现在：① 先拿 active 列表批量更新（快）；
+        //      ② 再对「界面上仍显示未完成」的那几条逐个 tellStatus 兜底，
+        //         它们可能已经完成/失败但还在 active 之外。
         List<AriaTask> tasks;
         try { tasks = await _engine.TellActiveAsync(); }
         catch { return; }
 
+        var seen = new HashSet<string>();
+        foreach (var t in tasks) seen.Add(t.Gid);
+
+        // 找出「界面上还没终态、但这次 active 里没有」的任务
+        var stragglers = new List<DownloadItem>();
+        foreach (var it in Items)
+        {
+            if (string.IsNullOrEmpty(it.Gid)) continue;
+            if (seen.Contains(it.Gid)) continue;
+            if (it.Status is AriaStatus.Complete or AriaStatus.Error or AriaStatus.Removed) continue;
+            stragglers.Add(it);
+        }
+
+        // 逐个补查（数量通常只有几条，不会拖慢轮询）
+        foreach (var it in stragglers)
+        {
+            try
+            {
+                var one = await _engine.TellStatusAsync(it.Gid);
+                if (one is not null) tasks.Add(one);
+            }
+            catch { }
+        }
+
+
+        // **记录本轮旧状态**（2026-10-30）：终态钩子要判「刚刚变成完成/失败」，
+        // 必须在 OnUi 里被覆盖之前先把旧值取出来。OnUi 可能是 TryEnqueue 异步执行，
+        // 所以这张表只能在这里算，不能放进 OnUi 内部。
+        var prevStatusOf = new Dictionary<string, AriaStatus>();
+        foreach (var t in tasks)
+        {
+            var cur = Items.FirstOrDefault(x => x.Gid == t.Gid);
+            if (cur is not null) prevStatusOf[t.Gid] = cur.Status;
+        }
         OnUi(() =>
         {
             foreach (var t in tasks)
@@ -308,6 +473,10 @@ public sealed class DownloadStore
                 item.SpeedBytesPerSec = t.SpeedBytesPerSec;
                 item.Error = t.Error;
             }
+
+            // **终态钩子**（2026-10-30）：轮询这条路径原来完全没有，导致落台账 /
+            // B站音视频合并 / 抖音实况图合成只在手动打开下载管理页时才跑。
+            RunTerminalHooks(tasks, prevStatusOf);
         });
     }
 
@@ -318,12 +487,20 @@ public sealed class DownloadStore
         try { tasks = await _engine.TellAllAsync(); }
         catch { return; }
 
+        // **记录本轮的旧状态**（2026-10-30 修）。
+        //
+        // 下面第二个循环原来用 it.Status != t.Status 判「这一条刚刚完成」，
+        // 但上面第一个循环已经把 item.Status 改成 t.Status 了 —— 判据恒为 false，
+        // 于是「终态落台账」「B站音视频合并」「实况图合成」三条完成钩子从来没触发过。
+        // 实测证据：目录里 xxx_2.jpg 与 xxx_2v.mp4 并存，日志里一条 [动态照片] 都没有。
+        var prevStatusOf = new Dictionary<string, AriaStatus>();
         OnUi(() =>
         {
             foreach (var t in tasks)
             {
                 var item = Items.FirstOrDefault(i => i.Gid == t.Gid);
                 if (item is null) continue;
+                prevStatusOf[t.Gid] = item.Status;
                 item.Status = t.Status;
                 item.CompletedBytes = t.CompletedBytes;
                 item.TotalBytes = t.TotalBytes;
@@ -332,16 +509,80 @@ public sealed class DownloadStore
                 if (!string.IsNullOrEmpty(t.FileName)) item.FileName = t.FileName;
                 if (!string.IsNullOrEmpty(t.Dir)) item.Dir = t.Dir;
             }
-            // 终态落台账：完成/失败/移除各记一笔，重启后仍能看到历史。
+            RunTerminalHooks(tasks, prevStatusOf);
+
+            // **不再整列表 Replace**（2026-10-29 修）。
+            //
+            // 原来这里每轮轮询都把 Items 的每一项替换一遍，靠集合变更强行重绘 ——
+            // 用户看到的就是「下载列表一闪一闪」。
+            // 现在 DownloadItem 实现了 INotifyPropertyChanged，
+            // 属性一变界面自己刷新，不需要这种粗暴手段。
+        });
+    }
+    /// <summary>
+    /// **完成 / 失败 / 移除的终态处理**（2026-10-30 从 RefreshOnceAsync 抽出）。
+    ///
+    /// 为什么必须抽出来：轮询实际走的是 RefreshActiveOnlyAsync，而它原来
+    /// **只有状态更新、没有任何终态钩子** —— 于是「落台账 / B站音视频合并 /
+    /// 抖音实况图合成」三件事只在用户**手动打开下载管理页**时才有机会跑一次，
+    /// 自动下载跑完根本不触发。实测证据：app.log 里 [动态照片] 一条都没有，
+    /// 且目录里 xxx_0.jpg 与 xxx_0v.mp4 明明并存、却从来不合并。
+    ///
+    /// prevStatusOf 必须在调 OnUi **之前**算好 —— OnUi 可能是 TryEnqueue 异步执行，
+    /// 在它内部填表再读会是空的。
+    /// </summary>
+    private void RunTerminalHooks(List<AriaTask> tasks, Dictionary<string, AriaStatus> prevStatusOf)
+    {
             foreach (var t in tasks)
             {
                 if (t.Status is AriaStatus.Complete or AriaStatus.Error or AriaStatus.Removed)
                 {
                     var it = Items.FirstOrDefault(i => i.Gid == t.Gid);
-                    if (it is not null && it.Status != t.Status)
+                    // 判据已改为「旧状态 != 新状态」（2026-10-30 修）：原来写 it.Status != t.Status，
+                    // 但上一循环已把 it.Status 改成 t.Status，恒为 false，钩子从未触发。
+                    if (it is not null && prevStatusOf.TryGetValue(t.Gid, out var was) && was != t.Status)
                     {
                         it.Status = t.Status;
                         DownloadLedger.Instance.Record(it);
+
+                        // **失败自动重试**（2026-10-29 加）。
+                        //
+                        // 之前的缺口：aria2 自己的 --max-tries=10 只在单次任务内部重试，
+                        // 10 次耗尽后它就把任务标 error 彻底放弃，DownloadStore 只是
+                        // 记一笔台账就完事 —— 用户看到的是「下不了，得自己点重试」。
+                        //
+                        // 而实测走代理时 twimg 的连接会成片超时（code=000），
+                        // 隔一会儿再试往往就好了。所以这里补一层**任务级重试**：
+                        // 指数退避（10s / 30s / 60s），最多 3 次。
+                        if (t.Status == AriaStatus.Error && it.RetryCount < MaxAutoRetries)
+                        {
+                            var delay = AutoRetryDelays[it.RetryCount];
+                            it.RetryCount++;
+                            it.LastRetryAt = DateTime.Now;
+                            var snapshot = it;
+                            _ = Task.Run(async () =>
+                            {
+                                try { await Task.Delay(delay); } catch { return; }
+                                try
+                                {
+                                    // 重新入队（同一个 URL / 目录 / 文件名）
+                                    var gid = await _engine.AddUriAsync(
+                                        snapshot.Url, snapshot.Dir, snapshot.FileName,
+                                        RefererFor(snapshot.Url));
+                                    if (!string.IsNullOrEmpty(gid))
+                                    {
+                                        OnUi(() =>
+                                        {
+                                            snapshot.Gid = gid;
+                                            snapshot.Status = AriaStatus.Waiting;
+                                            snapshot.Error = "";
+                                            snapshot.CompletedBytes = 0;
+                                        });
+                                    }
+                                }
+                                catch { }
+                            });
+                        }
 
                         // 完成即触发 B 站音视频自动合并（用户 2026-10-24 需求第⑤条：
                         // 合并必须自动化，不能让用户再点一次按钮）。
@@ -357,21 +598,50 @@ public sealed class DownloadStore
                             // 用户 2026-10-27：手机上要能直接看动图，而不是「图 + 视频」两个文件。
                             // 内部按「xxx_2.jpg ↔ xxx_2v.mp4」的命名约定配对，配不上就立刻返回，
                             // 不影响普通图集/普通视频。
-                            ParseDl.Services.Douyin.MotionPhoto.TryPairOnComplete(full);
+                            // 改为**目录级**配对（2026-10-30）：单文件钩子与完成先后强耦合，视频后到就永远配不上。
+                            ParseDl.Services.Douyin.MotionPhoto.TryPairOnDirectory(it.Dir);
+                            // **台账「下完才写」的实际落地**（2026-10-30）：完成/失败事件一来就推进一次。
+                            // 只在 pending 上做 pending → done / 撤销，已 done 的直接跳过，不会重复写盘。
+                            _ = ParseDl.Services.Douyin.DouyinEnqueuer.AdvanceLedgerAsync();
                         }
                     }
                 }
             }
-
-            // 触发一次集合变更通知（DownloadItem 未实现 INotifyPropertyChanged，
-            // 用 Replace 让列表项重绘 —— 比给每项加通知简单且够用）
-            for (var i = 0; i < Items.Count; i++)
-            {
-                var cur = Items[i];
-                Items[i] = cur;
-            }
-        });
     }
+
+
+    /// <summary>最多自动重试几次。</summary>
+    /// <summary>
+    /// 最多自动重试几次。
+    ///
+    /// **从 3 提到 6**（2026-10-29 用户反馈「下载失败数量有点多」）。
+    ///
+    /// 实测根因：走代理时 pbs.twimg.com / video.twimg.com 的连接是**随机抖动**的 ——
+    /// 同一批 URL 用 curl 走代理连试 15 次，4 次直接 000；aria2 单跑 8 次失败 3 次。
+    /// 而 aria2 自己的 --max-tries=10 是**单次任务内部**重试，遇到
+    /// `WinTLS: Failed to encrypt a message! 上下文已过期` 这类握手层错误会直接放弃、
+    /// 不再重试（实测确认）。所以必须在任务级多给几次机会。
+    ///
+    /// 抖动是随机的，多试几次命中率显著提高 —— 实测同进程连下 10 次 0 失败。
+    /// </summary>
+    private const int MaxAutoRetries = 6;
+
+    /// <summary>
+    /// 指数退避间隔（秒）。**首次从 10s 缩到 5s**（2026-10-29）。
+    ///
+    /// 原来 10/30/60 —— 用户看到的是「失败了，等半天没动静」。
+    /// 抖动恢复通常只要几秒，首跳太保守只会拖长整体时间。
+    /// 后面的间隔仍逐次拉长，避免把代理压垮。
+    /// </summary>
+    private static readonly TimeSpan[] AutoRetryDelays =
+    {
+        TimeSpan.FromSeconds(5),
+        TimeSpan.FromSeconds(10),
+        TimeSpan.FromSeconds(20),
+        TimeSpan.FromSeconds(40),
+        TimeSpan.FromSeconds(60),
+        TimeSpan.FromSeconds(90),
+    };
 
     private void OnUi(Action action)
     {
@@ -425,6 +695,10 @@ public sealed class DownloadStore
                     CreatedAt = i.CreatedAt,
                     CompletedBytes = i.CompletedBytes,
                     TotalBytes = i.TotalBytes,
+                    PreviewUrl = i.PreviewUrl,
+                    Seq = i.Seq,
+                    AwemeId = i.AwemeId,
+                    MediaIndex = i.MediaIndex,
                 })
                 .ToList();
             var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true });
@@ -452,6 +726,8 @@ public sealed class DownloadStore
         if (!await EnsureEngineAsync()) return 0;
 
         var restored = 0;
+        var expired = 0;
+        var refreshed = 0;
         foreach (var e in saved)
         {
             if (string.IsNullOrWhiteSpace(e.Url)) continue;
@@ -476,7 +752,32 @@ public sealed class DownloadStore
                     catch { }
                 }
 
-                var gid = await _engine.AddUriAsync(e.Url, e.Dir, fileName);
+                // **链接过期就现取一份新地址**（2026-10-31 重做）。
+                //
+                // 抖音 CDN 直链带时效签名（URL 路径里那段 8 位 hex 就是过期时间），
+                // 到点一律 403。实测用户队列 5029 条签名 05:34 过期、
+                // 11:58 恢复时全部报废，重试一万次也没用。
+                //
+                // 现在的做法：队列里存了作品 ID（AwemeId），过期就用它回页面
+                // 现取一份新鲜地址；取不到才跳过并计数。
+                var url = e.Url;
+                if (SignedUrl.IsExpired(url))
+                {
+                    var fresh = await ParseDl.Services.Douyin.DouyinAddressResolver
+                        .ResolveAsync(e.AwemeId ?? "", e.MediaIndex);
+                    if (fresh.Ok)
+                    {
+                        url = fresh.Url;
+                        refreshed++;
+                    }
+                    else
+                    {
+                        expired++;
+                        continue;
+                    }
+                }
+
+                var gid = await _engine.AddUriAsync(url, e.Dir, fileName);
                 if (string.IsNullOrEmpty(gid)) continue;
 
                 var item = new DownloadItem
@@ -487,6 +788,10 @@ public sealed class DownloadStore
                     Dir = e.Dir ?? "",
                     FileName = e.FileName ?? "",
                     CreatedAt = e.CreatedAt,
+                    PreviewUrl = e.PreviewUrl ?? "",
+                    Seq = e.Seq,
+                    AwemeId = e.AwemeId,
+                    MediaIndex = e.MediaIndex,
                 };
                 OnUi(() => Items.Add(item));
                 restored++;
@@ -495,9 +800,35 @@ public sealed class DownloadStore
         }
 
         await RefreshOnceAsync();
+
+        // **恢复后把序号计数器推到最大值之后**（2026-10-30）：
+        // 否则重启后新入队的 Seq 从 1 重新开始，比恢复回来的旧任务还小，
+        // 排序变成「新任务跑到最前面」—— 与「先入队先在前」正好相反。
+        try
+        {
+            var maxSeq = Items.Count == 0 ? 0 : Items.Max(x => x.Seq);
+            if (maxSeq > 0) System.Threading.Interlocked.Exchange(ref DownloadItem.SeqCounter, maxSeq);
+        }
+        catch { }
         SaveQueue();   // 重写一遍，把提交失败的那些剔掉
+
+        // 过期被跳过的那些条**已经从队列里剔掉了**（SaveQueue 只存未完成任务，
+        // 而它们压根没进 Items），所以这里只要把数字报出去，让用户知道
+        // 「不是重试没用，是链接早过期了，得重新抓一遍」。
+        if (refreshed > 0)
+        {
+            Aria2Engine.Log($"[队列恢复] {refreshed} 条链接已过期，已按作品 ID 现取新地址");
+        }
+        if (expired > 0)
+        {
+            LastRestoreExpired = expired;
+            Aria2Engine.Log($"[队列恢复] 跳过 {expired} 条已过期链接（抖音 CDN 直链带时效签名，需重新抓取）");
+        }
         return restored;
     }
+
+    /// <summary>上次恢复队列时因签名过期被跳过的条数（给界面提示用）。</summary>
+    public int LastRestoreExpired { get; private set; }
 
     /// <summary>落盘用的最小字段集（**不含 GID** —— 运行时句柄重启即失效）。</summary>
     private sealed class QueueEntry
@@ -509,6 +840,22 @@ public sealed class DownloadStore
         public DateTime CreatedAt { get; set; }
         public long CompletedBytes { get; set; }
         public long TotalBytes { get; set; }
+        /// <summary>预览图 URL（2026-10-29 修「重启后视频没封面」：之前没存，恢复时封面全丢）。</summary>
+        public string? PreviewUrl { get; set; }
+        public long Seq { get; set; }
+
+        /// <summary>
+        /// **作品 ID + 媒体序号（2026-10-31 加）**。
+        ///
+        /// 抖音的下载直链带时效签名，几小时就 403（实测：签名 05:34 过期，
+        /// 11:46 恢复队列提交时全部失效，2000 条一次性报废）。
+        /// 光存 URL 的队列因此**天然不可恢复** —— 中断一次就全军覆没。
+        ///
+        /// 现在把「重新取地址」所需的原料一起存下来：作品 ID + 该作品内第几条媒体。
+        /// 恢复队列时若 URL 已过期，就用这两个字段回页面现取一份新地址。
+        /// </summary>
+        public string? AwemeId { get; set; }
+        public int MediaIndex { get; set; }
     }
 
     /// <summary>立即落盘（不等防抖）。批量入队收尾、或即将退出时调用。</summary>

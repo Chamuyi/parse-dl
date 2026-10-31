@@ -59,11 +59,14 @@ public sealed partial class AboutPage : Page
         var info = new StackPanel();
         info.Children.Add(UiKit.InfoRow("版本", AppVersion(), selectable: true));
         info.Children.Add(UiKit.InfoRow("架构", "WinUI 3 · Windows App SDK", selectable: true));
-        info.Children.Add(UiKit.InfoRow("许可", "MIT License", selectable: true));
-        info.Children.Add(UiKit.InfoRow("作者", "parse-dl 项目组", selectable: true));
+        info.Children.Add(UiKit.InfoRow("许可", "GPL-3.0", selectable: true));
+        info.Children.Add(UiKit.InfoRow("作者", "茶沐依", selectable: true));
         info.Children.Add(UiKit.InfoRow("系统要求", "Windows 10 1809+ / Windows 11 · 需 Edge WebView2 运行时", selectable: true));
-        info.Children.Add(UiKit.InfoRow("日志目录", System.IO.Path.Combine(AppPaths.DataDir, "logs"), selectable: true));
-        info.Children.Add(UiKit.InfoRow("数据目录", AppPaths.DataDir, selectable: true));
+        // **路径单独占一整行**（2026-10-30 用户报「日志和数据目录是不是太长了」）：
+        // UiKit.InfoRow 的值列是 Auto 宽，长路径会把标签挤到左边、还溢出卡片。
+        // 这里改成「标签一行 + 路径一行」，路径可选中复制、自动换行。
+        info.Children.Add(PathRow("日志目录", "userdata\\logs", System.IO.Path.Combine(AppPaths.DataDir, "logs")));
+        info.Children.Add(PathRow("数据目录", "userdata", AppPaths.DataDir));
         left.Children.Add(info);
 
         var leftCard = UiKit.Card(left, 28);
@@ -72,18 +75,10 @@ public sealed partial class AboutPage : Page
 
         var right = new StackPanel { Spacing = 10 };
         right.Children.Add(new TextBlock { Text = "本机环境", FontSize = 16, FontWeight = FontWeights.SemiBold });
-        right.Children.Add(UiKit.InfoRow("操作系统", Environment.OSVersion.VersionString, selectable: true));
+        right.Children.Add(UiKit.InfoRow("操作系统", OsDisplayName(), selectable: true));
         right.Children.Add(UiKit.InfoRow("处理器架构", System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString()));
         right.Children.Add(UiKit.InfoRow(".NET 版本", Environment.Version.ToString()));
         right.Children.Add(UiKit.InfoRow("运行时", System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription, selectable: true));
-        right.Children.Add(new TextBlock
-        {
-            Text = "窗口材质由 Windows App SDK 官方合成控制器绘制（MicaController / DesktopAcrylicController），与图吧工具箱同一套 API。",
-            FontSize = 12,
-            Opacity = 0.65,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 8, 0, 0),
-        });
 
         var rightCard = UiKit.Card(right, 28);
         Grid.SetColumn(rightCard, 1);
@@ -91,111 +86,90 @@ public sealed partial class AboutPage : Page
 
         Root.Children.Add(cols);
 
-        // ── 自测区块 ──────────────────────────────────────
-        // 为什么放在界面上：打包应用既透传不了命令行参数、也继承不到父进程环境变量
-        // （winapp run 会起独立进程）。一个按钮是唯一可靠的触发方式，
-        // 而且用户自己也能随时复验。
-        var selfTest = new StackPanel { Spacing = 8 };
-        var runBtn = new Button { Content = "运行自测", MinWidth = 110 };
-        var resultText = new TextBlock
-        {
-            Text = "点上方按钮运行离线自测（文件名模板 + B 站链接解析）",
-            FontSize = 12,
-            Opacity = 0.7,
-            TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap,
-            IsTextSelectionEnabled = true,
-            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
-        };
-        runBtn.Click += (_, _) =>
-        {
-            try
-            {
-                var report = SelfTestSuite.RunAll();
-                resultText.Text = report;
-                var outPath = System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "selftest.txt");
-                System.IO.File.WriteAllText(outPath, report);
-            }
-            catch (Exception ex)
-            {
-                resultText.Text = "自测异常: " + ex.Message;
-            }
-        };
-        var netBtn = new Button { Content = "测试 B 站接口（联网）", MinWidth = 160, Margin = new Thickness(0, 0, 0, 0) };
-        netBtn.Click += async (_, _) =>
-        {
-            netBtn.IsEnabled = false;
-            resultText.Text = "正在请求 B 站…";
-            try
-            {
-                var api = new ParseDl.Services.Bili.BiliApi();
-                var info = await api.GetVideoInfoAsync("BV1xx411c7mD");
-                var sb2 = new System.Text.StringBuilder();
-                sb2.AppendLine("视频：" + info.Title);
-                sb2.AppendLine("UP：" + info.OwnerName + "（" + info.OwnerMid + "）");
-                sb2.AppendLine("分P数：" + info.Pages.Count + "  时长：" + info.DurationSec + " 秒");
-                if (info.Pages.Count > 0 && info.Pages[0].Cid is string cidStr && long.TryParse(cidStr, out var cid))
-                {
-                    var play = await api.GetPlayInfoAsync(info.Bvid, cid);
-                    sb2.AppendLine("视频流：" + play.Videos.Count + " 条，最高 " +
-                        (play.Videos.Count > 0 ? play.Videos[0].QualityLabel + " / " + play.Videos[0].Codec : "无"));
-                    sb2.AppendLine("音频流：" + play.Audios.Count + " 条，最高 " +
-                        (play.Audios.Count > 0 ? play.Audios[0].QualityLabel : "无"));
-                }
-                resultText.Text = sb2.ToString();
-                System.IO.File.WriteAllText(
-                    System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "bili_probe.txt"), sb2.ToString());
-            }
-            catch (Exception ex)
-            {
-                resultText.Text = "失败：" + ex.GetType().Name + " " + ex.Message;
-                try
-                {
-                    System.IO.File.WriteAllText(
-                        System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "bili_probe.txt"),
-                        "失败：" + ex);
-                }
-                catch { }
-            }
-            finally { netBtn.IsEnabled = true; }
-        };
-        var loginBtn2 = new Button { Content = "测试登录接口", MinWidth = 120 };
-        loginBtn2.Click += async (_, _) =>
-        {
-            loginBtn2.IsEnabled = false;
-            resultText.Text = "正在测试扫码登录接口…";
-            try
-            {
-                var login = new ParseDl.Services.Bili.BiliLogin();
-                var qr = await login.GenerateQrCodeAsync();
-                var sb3 = new System.Text.StringBuilder();
-                sb3.AppendLine("✅ 二维码生成成功");
-                sb3.AppendLine("轮询 key：" + qr.Key);
-                sb3.AppendLine("二维码地址：" + qr.Url);
-                var poll = await login.PollAsync(qr.Key);
-                sb3.AppendLine("首次轮询状态：" + poll.State + "（未扫码时应为 Waiting）");
-                resultText.Text = sb3.ToString();
-                System.IO.File.WriteAllText(
-                    System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "bili_login_probe.txt"), sb3.ToString());
-            }
-            catch (Exception ex)
-            {
-                resultText.Text = "❌ " + ex.GetType().Name + "：" + ex.Message;
-                try
-                {
-                    System.IO.File.WriteAllText(
-                        System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "bili_login_probe.txt"),
-                        "失败：" + ex);
-                }
-                catch { }
-            }
-            finally { loginBtn2.IsEnabled = true; }
-        };
-        selfTest.Children.Add(runBtn);
-        selfTest.Children.Add(netBtn);
-        selfTest.Children.Add(loginBtn2);
-        selfTest.Children.Add(resultText);
-        Root.Children.Add(UiKit.SectionCard("自测", selfTest, "离线，不联网"));
         BuildLicenseAndCredits();
+    }
+
+    /// <summary>
+    /// 路径一行：**标签与值同行**，值可省略、悬停看完整路径（2026-10-30）。
+    ///
+    /// 演进过程：① 原来用 UiKit.InfoRow，值列 Auto 宽 + 100+ 字符的绝对路径
+    /// → 标签被挤扁、顶破卡片；② 改成「标签一行 + 路径一行」，但路径缩成
+    /// userdata\\logs 之后只有十几个字符，再占一行就是白浪费空间。
+    /// 现在：标签 Auto + 值 *（左对齐、超长省略），一行搞定，完整路径进 ToolTip。
+    /// </summary>
+    private static UIElement PathRow(string label, string shortPath, string fullPath)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 3, 0, 3) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        grid.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 13,
+            Opacity = 0.7,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        var value = new TextBlock
+        {
+            Text = shortPath,
+            FontSize = 12,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextWrapping = TextWrapping.NoWrap,
+            IsTextSelectionEnabled = true,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+        };
+        ToolTipService.SetToolTip(value, fullPath);
+        Grid.SetColumn(value, 1);
+        grid.Children.Add(value);
+        return grid;
+    }
+
+    /// <summary>
+    /// 人类可读的系统版本（2026-10-30 用户问「为什么是 Microsoft Windows NT 10.0.26300.0」）。
+    ///
+    /// 不能直接用 Environment.OSVersion.VersionString —— 那是旧式内部串，
+    /// 既看不出是 Win10 还是 Win11，也读不出 26H2 这种发行代号。
+    /// 也不能用注册表 ProductName —— 微软至今把 Win11 也写成 "Windows 10"。
+    /// 唯一可靠的是 CurrentBuild：>= 22000 即 Windows 11（22000 是 Win11 首个 RTM 版本）。
+    /// </summary>
+    private static string OsDisplayName()
+    {
+        try
+        {
+            using var k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
+            if (k is null) return Environment.OSVersion.VersionString;
+
+            var buildStr = k.GetValue("CurrentBuild") as string;
+            var disp = k.GetValue("DisplayVersion") as string;
+            var ubr = k.GetValue("UBR");
+            if (!int.TryParse(buildStr, out var build)) return Environment.OSVersion.VersionString;
+
+            var name = build switch
+            {
+                >= 22000 => "Windows 11",
+                >= 10240 => "Windows 10",
+                >= 9600 => "Windows 8.1",
+                >= 9200 => "Windows 8",
+                >= 7600 => "Windows 7",
+                _ => "Windows",
+            };
+
+            var sb = new System.Text.StringBuilder(name);
+            if (!string.IsNullOrWhiteSpace(disp)) sb.Append(" · ").Append(disp);
+            sb.Append(" · Build ").Append(build);
+            if (ubr is int u && u > 0) sb.Append(".").Append(u);
+            return sb.ToString();
+        }
+        catch
+        {
+            return Environment.OSVersion.VersionString;
+        }
     }
 
     private static string AppVersion()
@@ -224,39 +198,35 @@ public sealed partial class AboutPage : Page
 
         panel.Children.Add(new TextBlock
         {
-            Text = "MIT License",
+            Text = "GNU General Public License v3.0",
             FontSize = 13,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         panel.Children.Add(new TextBlock
         {
-            Text = "Copyright (c) 2026 parse-dl",
+            Text = "Copyright (C) 2026 茶沐依",
             FontSize = 12,
             Opacity = 0.75,
             IsTextSelectionEnabled = true,
         });
         panel.Children.Add(new TextBlock
         {
-            Text = "Permission is hereby granted, free of charge, to any person obtaining a copy of "
-                 + "this software and associated documentation files (the \"Software\"), to deal in the "
-                 + "Software without restriction, including without limitation the rights to use, copy, "
-                 + "modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, "
-                 + "and to permit persons to whom the Software is furnished to do so, subject to the "
-                 + "following conditions:\n\n"
-                 + "The above copyright notice and this permission notice shall be included in all "
-                 + "copies or substantial portions of the Software.\n\n"
-                 + "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, "
-                 + "INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A "
-                 + "PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT "
-                 + "HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF "
-                 + "CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE "
-                 + "OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.",
+            Text = "本程序是自由软件：你可以依据自由软件基金会发布的 GNU 通用公共许可证（第 3 版）"
+                 + "的条款，对它进行再分发和/或修改。本程序基于「希望它有用」的目的分发，"
+                 + "但不提供任何担保，也不保证适销性或适用于特定用途 —— 详见 GNU 通用公共许可证。"
+
+                 + "You may redistribute and/or modify it under the terms of the GNU General "
+                 + "Public License as published by the Free Software Foundation, version 3."
+                 + " This program is distributed in the hope that it will be useful, but "
+                 + "WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY "
+                 + "or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License "
+                 + "for more details: https://www.gnu.org/licenses/gpl-3.0.html",
             FontSize = 11.5,
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
             IsTextSelectionEnabled = true,
         });
-        Root.Children.Add(UiKit.SectionCard("条款全文", panel, "MIT License"));
+        Root.Children.Add(UiKit.SectionCard("条款全文", panel, "GPL-3.0"));
 
         var credits = new StackPanel { Spacing = 4 };
         foreach (var (name, note) in new (string, string)[]
