@@ -32,6 +32,15 @@ public static class XNaming
             if (parts.Length == 0) return baseDir;
     
             var root = baseDir ?? Aria2Engine.DefaultDir();
+
+            // **作者改名时把目录就地改名**（2026-10-31，与抖音同一套逻辑）。
+            // 只在「模板只有一级」时接管 —— 多级模板每一级各有语义，
+            // 整段替换会破坏结构。
+            if (parts.Length == 1 && !string.IsNullOrEmpty(p.UserId))
+            {
+                parts[0] = XAuthorDir.Resolve(p.UserId, parts[0], root);
+            }
+
             var full = System.IO.Path.Combine(new[] { root }.Concat(parts).ToArray());
             try { System.IO.Directory.CreateDirectory(full); } catch { return baseDir; }
             return full;
