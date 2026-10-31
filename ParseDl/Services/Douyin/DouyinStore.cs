@@ -52,8 +52,17 @@ public sealed class DouyinStore
 {
     public static DouyinStore Instance { get; } = new();
 
-    /// <summary>结果上限。抖音推荐流是无限滚动的，不设上限会一直涨。</summary>
-    public const int MaxItems = 1000;
+    /// <summary>
+    /// **不再有结果条数上限**（2026-10-31 用户明确要求「不要上限」）。
+    ///
+    /// 原来是 1000（移植自 Flutter 版 kMaxItems），Ingest 超过就从头部丢最旧的。
+    /// 实测代价：收藏页 198 个作品 = 1666 条媒体，只能留住 1000 条，
+    /// 界面直接显示「超出上限已丢弃 666 条」—— 用户根本下不全；
+    /// 而且丢弃时会顺手 Selected.Remove，先全选再继续滚，前面选的会被悄悄取消。
+    /// 列表本身是 GridView + ItemsWrapGrid（虚拟化，只构建可见项），
+    /// 保留全部结果不会把控件全建出来。
+    /// </summary>
+
     /// <summary>结果分组的页面数上限（超出时淘汰最久没用过的）。</summary>
     public const int MaxPages = 20;
 
@@ -289,15 +298,7 @@ public sealed class DouyinStore
         Current.Items.AddRange(fresh);
         Touch(Current);
 
-        while (Current.Items.Count > MaxItems)
-        {
-            var removed = Current.Items[0];
-            Current.Items.RemoveAt(0);
-            Current.Ids.Remove(removed.Id);
-            Current.Selected.Remove(removed.Id);
-            Current.Dropped++;
-        }
-
+        // 不再按 MaxItems 截断（2026-10-31 用户要求去掉上限）——全部保留。
         Notify();
         return fresh.Count;
     }

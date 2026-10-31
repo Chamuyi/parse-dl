@@ -927,7 +927,8 @@ public sealed partial class DouyinParsePage : Page
             ? "还没有抓到内容：先在左边登录并滚动页面，作品会自动出现在这里。"
             : text);
         if (_store.HasFilter) text += " · 筛选后 " + shown + " 个作品";
-        if (_store.Dropped > 0) text += " · 超出上限已丢弃 " + _store.Dropped + " 条";
+        // 「超出上限已丢弃 N 条」这句随上限一起移除（2026-10-31 用户要求不要上限，
+        // 结果列表全量保留，不再有丢弃）。
         ListSummary.Text = text;
 
         var sel = _store.SelectedCount;
