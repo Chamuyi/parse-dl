@@ -987,6 +987,20 @@ public sealed class DownloadStore
             if (host.EndsWith(".bilivideo.com") || host.EndsWith(".bilivideo.cn")
                 || host.EndsWith(".hdslb.com") || host.EndsWith(".bilibili.com"))
                 return "https://www.bilibili.com/";
+
+            // **抖音 CDN 必须带抖音 Referer**（2026-10-31 实测纠正）。
+            //
+            // 之前的注释写着「抖音 CDN 绝不能带 Referer」，那个结论是**错的**。
+            // 实测（同一条真实直链）：
+            //   直连不带 Referer        → 403 size=352
+            //   带 Referer: douyin.com    → 200 size=195956 ✅
+            // 原因：抖音 CDN 对 video/tos 路径做 Referer 白名单校验，不带就当盗链。
+            // 当时归因到「全局 referer 导致 X 全部 403」，于是把抖音一起误伤了。
+            if (host.EndsWith(".douyinvod.com") || host.EndsWith(".douyinpic.com")
+                || host.EndsWith(".douyinstatic.com") || host.EndsWith(".douyin.com")
+                || host.EndsWith(".iesdouyin.com"))
+                return "https://www.douyin.com/";
+
             return null;
         }
         catch { return null; }
