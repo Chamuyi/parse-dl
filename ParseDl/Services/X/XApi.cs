@@ -91,16 +91,30 @@ public static class XApi
                     var sign = off[0] == (char)45 ? -1 : 1;
                     var oh = int.Parse(off.Substring(1, 2));
                     var om = int.Parse(off.Substring(3, 2));
-                    return dt.AddMinutes(-sign * (oh * 60 + om));
+                    var utc = dt.AddMinutes(-sign * (oh * 60 + om));
+                    // **必须转本地时区**（2026-11-01 修「X 跳过已下载失效」）。
+                    //
+                    // Flutter 版 parseTwitterCreatedAt 的返回值统一 `toLocal()`
+                    // （见 lib/services/twitter_time.dart:91-92 的注释：
+                    //  「返回值统一 toLocal() —— 原版 dayjs(...).format(...) 输出的就是本地时间，
+                    //    模板里的 %POST_TIME% 因此显示用户所在时区的日期」）。
+                    //
+                    // C# 这边原来直接返回 UTC，于是同一个作品：
+                    //   · Flutter 版落盘叫「2026-08-31 13-34-52…」；
+                    //   · WinUI 版算出来是「2026-08-31 05-34-52…」（差 8 小时）。
+                    // 后果不只是文件名不一样 —— 下载前「跳过同名文件」是按**完整路径**
+                    // 判断的，路径对不上就一律判「没下过」，于是把已下过的整批重下一遍。
+                    return utc.ToLocalTime();
                 }
                 catch { return null; }
             }
         }
 
+        // ISO 兜底同样要转本地时区（理由同上一条注释）。
         if (DateTime.TryParse(s, null,
             System.Globalization.DateTimeStyles.AdjustToUniversal |
             System.Globalization.DateTimeStyles.AssumeUniversal, out var iso))
-            return iso;
+            return DateTime.SpecifyKind(iso, DateTimeKind.Utc).ToLocalTime();
 
         return null;
     }

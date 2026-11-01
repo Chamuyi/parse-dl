@@ -191,6 +191,12 @@ public partial class App : Application
                     + ParseDl.Services.Douyin.MotionPhoto.SelfTest()
                     + Environment.NewLine + "===== X 关注列表解析自测 =====" + Environment.NewLine
                     + ParseDl.Services.X.XFollowingApi.SelfTest()
+                    // **X 时间线解析自测**（2026-11-01 补注册）：
+                    // 里面钉着「发布时间必须转本地时区」——那条口径错了会让
+                    // 文件名与 Flutter 版差 8 小时，「跳过同名文件」全部失效。
+                    // 原来这个方法写好了但**没接进来**，等于白写。
+                    + Environment.NewLine + "===== X 时间线解析自测 =====" + Environment.NewLine
+                    + ParseDl.Services.X.XApiSelfTest.Run()
                     + Environment.NewLine + "===== 开发版目录锁自测 =====" + Environment.NewLine
                     + DirLockSelfTest();
                 var outPath = System.IO.Path.Combine(ParseDl.Services.AppPaths.DataDir, "selftest.txt");

@@ -89,12 +89,24 @@ public static class XApiSelfTest
         Check("非 twimg 域名不动",
             XApi.NormalizeImageUrl("https://example.com/a.jpg") == "https://example.com/a.jpg");
 
+        // **断言必须与时区无关**（2026-11-01 改）。
+        //
+        // 原来这两条钉的是「Hour == 21 / == 13」——那是**返回 UTC 时**才成立的期望值。
+        // 现在 ParseTwitterTime 按 Flutter 版口径统一转本地时区（toLocal），
+        // 在本机（UTC+8）21:15 UTC 会变成次日 05:15，旧断言必然红。
+        // 硬钉某个小时等于把测试绑死在本机时区上 —— 换台机器又会红。
+        // 改成校验「换算后的 UTC 时刻」，与时区无关。
         var t = XApi.ParseTwitterTime("Sat Jan 20 21:15:36 +0000 2024");
-        Check("Twitter 时间解析",
-            t is not null && t.Value.Year == 2024 && t.Value.Month == 1
-            && t.Value.Day == 20 && t.Value.Hour == 21, t?.ToString() ?? "null");
-        Check("时区偏移 +0800 换算成 UTC 13 点",
-            XApi.ParseTwitterTime("Sat Jan 20 21:15:36 +0800 2024")?.Hour == 13);
+        Check("Twitter 时间解析（UTC 时刻正确）",
+            t is not null
+            && t.Value.ToUniversalTime() == new DateTime(2024, 1, 20, 21, 15, 36, DateTimeKind.Utc),
+            t?.ToUniversalTime().ToString("o") ?? "null");
+        Check("时区偏移 +0800 换算成 UTC 13:15",
+            XApi.ParseTwitterTime("Sat Jan 20 21:15:36 +0800 2024")?.ToUniversalTime()
+                == new DateTime(2024, 1, 20, 13, 15, 36, DateTimeKind.Utc));
+        Check("解析结果统一为本地时区",
+            t is not null && t.Value.Kind == DateTimeKind.Local,
+            t is null ? "null" : t.Value.Kind.ToString());
         Check("垃圾时间返回 null", XApi.ParseTwitterTime("not a date") is null);
         Check("空时间返回 null", XApi.ParseTwitterTime("") is null);
 
@@ -115,6 +127,19 @@ public static class XApiSelfTest
                     p.Media.Count == 1 ? p.Media[0].Url : "");
                 Check("媒体尺寸", p.Media.Count == 1 && p.Media[0].Width == 1200);
                 Check("时间已解析", p.CreatedAt?.Year == 2024);
+
+                // **时间必须是本地时区**（2026-11-01 修「X 跳过已下载失效」）。
+                // Flutter 版 parseTwitterCreatedAt 返回 toLocal() 之后的时间，
+                // C# 原来返回 UTC → 同一作品两边文件名差 8 小时 → 按完整路径判「没下过」
+                // → 整批重复下载。实测用户队列 1390 条里 1125 条加 8h 才命中磁盘文件。
+                var ct = p.CreatedAt!.Value;
+                Check("时间已转本地时区（Kind=Local）",
+                    ct.Kind == DateTimeKind.Local, ct.Kind.ToString());
+                Check("时间换算与 UTC 一致",
+                    ct.ToUniversalTime() == DateTime.Parse(
+                        "2024-01-20T21:15:36Z", null,
+                        System.Globalization.DateTimeStyles.AdjustToUniversal),
+                    ct.ToUniversalTime().ToString("o"));
             }
         }
         catch (Exception ex)

@@ -203,6 +203,14 @@ public static class FileNameTemplate
             case "POST_TIME":
                 if (c.PostTime is null) return "未知日期";
                 var t = c.PostTime.Value;
+                // **统一用本地时区**（2026-11-01 修「跳过已下载失效」）。
+                //
+                // Flutter 版 parseTwitterCreatedAt 返回的是 toLocal() 之后的时间，
+                // 模板直接取它的年月日时分秒。C# 这边原来把 UTC 原样输出，
+                // 同一个作品会差 8 小时 → 文件名不同 → 按完整路径判「没下过」→ 重复下载。
+                // 这里兜底再转一次：调用方若已转成本地（Kind=Local）则 ToLocalTime 无副作用，
+                // 只有 Kind=Utc 的才会真正偏移，两种来源都能对齐。
+                if (t.Kind == DateTimeKind.Utc) t = t.ToLocalTime();
                 // 时分秒用连字符而不是冒号（冒号是 Windows 文件名非法字符）
                 var date = $"{t.Year:D4}-{t.Month:D2}-{t.Day:D2}";
                 return Flag("d") ? date : $"{date} {t.Hour:D2}-{t.Minute:D2}-{t.Second:D2}";
