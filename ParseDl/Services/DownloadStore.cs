@@ -269,6 +269,8 @@ public sealed class DownloadStore
     private readonly DispatcherQueue? _ui;
     private Timer? _pollTimer;
     private int _polling;
+    /// <summary>上次尝试自愈引擎的时刻（限流用，避免每 0.8 秒重启一次）。</summary>
+    private DateTime _lastEngineHeal = DateTime.MinValue;
 
     public ObservableCollection<DownloadItem> Items { get; } = new();
 
@@ -462,9 +464,95 @@ public sealed class DownloadStore
     private async Task SafeRefreshAsync()
     {
         if (Interlocked.Exchange(ref _polling, 1) == 1) return;
+        try { await HealEngineIfNeededAsync(); } catch { }
         try { await RefreshActiveOnlyAsync(); }
         catch { }
         finally { Interlocked.Exchange(ref _polling, 0); }
+    }
+
+    /// <summary>
+    /// **引擎自愈**（2026-11-03 加）。修的是用户报的「下载卡住了」。
+    ///
+    /// 两个致命缺陷叠在一起：
+    ///   ① 代理只在 aria2c 启动那一刻传进去，之后永不重读。代理软件晚于本程序
+    ///      启动时，系统代理还是关的 → 没传 --all-proxy → X 的 twimg 直连不通 →
+    ///      所有任务 0 字节、速度恒为 0，界面看着就是「卡住」。
+    ///   ② 轮询入口 `RefreshActiveOnlyAsync` 开头是 `if (!_engine.IsRunning) return;`
+    ///      —— 引擎没了就**静默返回**，既不自愈也不报错，界面永远停在旧状态。
+    ///      而 `EnsureEngineAsync` 只在「入队」时被调用，若抓取全在跳过、没有新入队，
+    ///      就再也不会尝试启动引擎。
+    ///
+    /// 现在每轮轮询先过这里：引擎死了就拉起；引擎活着但代理与当前设置不一致
+    /// （代理后开、或换了端口）就重启一次，把新代理带上。
+    /// </summary>
+    private async Task HealEngineIfNeededAsync()
+    {
+        // 没有在下载的东西就不用折腾引擎，省得空转重启。
+        if (Items.Count == 0) return;
+
+        // 引擎没跑：拉起（StartAsync 内部会把当前代理传进去）
+        if (!_engine.IsRunning)
+        {
+            if (DateTime.UtcNow - _lastEngineHeal < TimeSpan.FromSeconds(20)) return;
+            _lastEngineHeal = DateTime.UtcNow;
+            Aria2Engine.Log("[引擎自愈] aria2 已停止，正在重启");
+            EngineReady = false;
+            if (await EnsureEngineAsync())
+            {
+                Aria2Engine.Log($"[引擎自愈] 已重启，代理='{_engine.StartedProxy}'");
+                await ResubmitPendingAsync();
+            }
+            return;
+        }
+
+        // 引擎活着但代理与当前设置不一致（典型：程序先起、代理后开）
+        var want = Aria2Engine.CurrentProxy();
+        var have = _engine.StartedProxy;
+        if (!string.Equals(want, have, StringComparison.OrdinalIgnoreCase))
+        {
+            if (DateTime.UtcNow - _lastEngineHeal < TimeSpan.FromSeconds(60)) return;
+            _lastEngineHeal = DateTime.UtcNow;
+            Aria2Engine.Log($"[引擎自愈] 代理已变更 '{have}' → '{want}'，重启引擎");
+            try { _engine.StopForRestart(); } catch { }
+            EngineReady = false;
+            if (await EnsureEngineAsync())
+            {
+                Aria2Engine.Log($"[引擎自愈] 已带新代理重启='{_engine.StartedProxy}'");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 引擎重启后把「界面上还没下完」的任务重新提交一遍。
+    /// aria2 的 waiting 队列在进程退出时全丢，不补提交就等于把它们扔了。
+    /// </summary>
+    private async Task ResubmitPendingAsync()
+    {
+        // **凡是没到终态的都要补**：引擎一重启，所有旧 Gid 全部作废，
+        // 包括原本 Active 的（它们的连接已断）。只补 Waiting/Paused 会漏掉正在下的那几条。
+        var pending = Items
+            .Where(x => x.Status is not (AriaStatus.Complete or AriaStatus.Error or AriaStatus.Removed))
+            .ToList();
+        if (pending.Count == 0) return;
+        Aria2Engine.Log($"[引擎自愈] 补提交 {pending.Count} 条未完成任务");
+        foreach (var it in pending)
+        {
+            try
+            {
+                // 直接走 aria2 的 addUri（不走 AddAsync）：
+                // AddAsync 会**再建一条 DownloadItem**，界面就出现两份同名任务。
+                // 这里只把原有条目的 Gid 换成新任务的，界面行数不变。
+                var gid = await _engine.AddUriAsync(
+                    it.Url, it.Dir ?? "", it.FileName ?? "", RefererFor(it.Url));
+                if (!string.IsNullOrEmpty(gid))
+                {
+                    var item = it;
+                    OnUi(() => { item.Gid = gid!; item.Status = AriaStatus.Waiting; item.SpeedBytesPerSec = 0; });
+                }
+            }
+            catch { }
+        }
+        ScheduleSave();
     }
 
     /// <summary>只刷新正在下载的任务（轮询用）。</summary>

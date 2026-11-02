@@ -53,6 +53,14 @@ public sealed class Aria2Engine : IDisposable
 {
     private Process? _child;
     private string _secret = "";
+    /// <summary>
+    /// 引擎启动时**实际**传给 aria2c 的代理（空串＝没走代理）。
+    ///
+    /// aria2c 是独立进程，代理只在命令行里给一次、之后永不重读；
+    /// 而代理软件常常晚于本程序启动，于是 aria2 带着「没有代理」一直跑到死。
+    /// 留这份快照是为了让上层能发现代理已变更，主动重启引擎。
+    /// </summary>
+    private string _startedProxy = "";
     private int _port;
     // **超时不能设太短**（2026-10-28 修）：原来是 8 秒，批量入队时 aria2 要一个个
     // 建连接、写 .aria2 控制文件，几十上百个任务连着提很容易超过 8 秒，
@@ -65,6 +73,32 @@ public sealed class Aria2Engine : IDisposable
     private bool _disposed;
 
     public bool IsRunning => _child is { HasExited: false };
+
+    /// <summary>引擎启动时的代理快照（供外部比对是否已过时）。</summary>
+    public string StartedProxy => _startedProxy;
+
+    /// <summary>按当前设置**该**用的代理（空串＝不该走代理）。</summary>
+    public static string CurrentProxy() => ResolveProxyForAria2() ?? "";
+
+    /// <summary>
+    /// 停掉子进程但保留端口/密钥，供上层「带新参数重启」。
+    /// 与 Dispose 的区别：不释放 _http、不置 _disposed，所以还能再 StartAsync。
+    /// </summary>
+    public void StopForRestart()
+    {
+        try
+        {
+            if (_child is { HasExited: false })
+            {
+                _child.Kill(entireProcessTree: true);
+                _child.WaitForExit(3000);
+            }
+        }
+        catch { }
+        try { _child?.Dispose(); } catch { }
+        _child = null;
+        _startedProxy = "";
+    }
 
     /// <summary>启动 aria2c。返回是否成功。</summary>
     public async Task<bool> StartAsync()
@@ -183,6 +217,8 @@ public sealed class Aria2Engine : IDisposable
             // 代理是本机时别走 loopback 例外，否则等于没走代理
             args.Add("--no-proxy=");
         }
+        // 记下这次实际用的代理，供上层检测「代理变了需要重启」。
+        _startedProxy = proxy ?? "";
 
         // **UA**：X 与抖音的图床/CDN 会对默认的 aria2 UA 返回 403，必须伪装成浏览器。
         args.Add("--user-agent=" + DownloadUserAgent);
@@ -290,7 +326,7 @@ public sealed class Aria2Engine : IDisposable
     /// 系统代理是分协议写法（如 <c>http=127.0.0.1:7897;https=127.0.0.1:7897</c>）时，
     /// 取 http 那一项即可（aria2 的 all-proxy 对两种协议都用它）。
     /// </summary>
-    private static string ResolveProxyForAria2()
+    internal static string ResolveProxyForAria2()
     {
         try
         {
