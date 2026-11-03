@@ -81,6 +81,18 @@ public sealed class CreationTask
 
     public string ProgressText => "已发送 " + CompleteCount + "　已跳过 " + SkipCount
         + (FailCount > 0 ? "　失败 " + FailCount : "");
+
+    /// <summary>被 X 限流后已自动重排的次数（上限 <see cref="CreationTaskStore.MaxRateLimitRetries"/>）。</summary>
+    public int RateLimitRetries { get; set; }
+
+    /// <summary>
+    /// 重排重跑时要**从第一页重新抓**。
+    ///
+    /// 重排的语义是「这一路都没抓通」，此时 cursor 可能已经推进到中间，
+    /// 沿用旧 cursor 会漏掉前面那几页。已经入队的文件会被「跳过（文件已存在）」挡住，
+    /// 所以从头抓不会造成重复下载。
+    /// </summary>
+    public bool RestartFromScratch { get; set; }
 }
 
 /// <summary>
@@ -95,6 +107,39 @@ public sealed class CreationTaskStore
     private readonly List<CreationTask> _tasks = new();
     private int _seq;
     private bool _pumping;
+
+    /// <summary>
+    /// 单条账号被限流后最多自动重排几次（2026-11-03 加）。
+    ///
+    /// 取 3 次：X 的限流窗口按 15 分钟计，配合 <see cref="XHomeApi"/> 里
+    /// 最高 20 分钟的单次等待，3 次足够跨过大多数窗口；再多就会让整个队列
+    /// 长时间停在同一个账号上，后面的账号全被堵住。
+    /// </summary>
+    public const int MaxRateLimitRetries = 3;
+
+    /// <summary>这个异常是不是「被 X 限流」。按状态码判，不靠消息文本猜。</summary>
+    private static bool IsRateLimited(Exception ex)
+        => ex is XHomeException { StatusCode: 429 };
+
+    /// <summary>
+    /// 可被任务取消标志打断的等待。
+    /// 用 200ms 粒度轮询 <see cref="CreationTask.Cancelled"/>，
+    /// 用户点「取消」后最多 200 毫秒就退出，不会傻等满一个间隔。
+    /// </summary>
+    private static async Task SleepCancellableAsync(int ms, CreationTask t)
+    {
+        for (var left = ms; left > 0 && !t.Cancelled; left -= 200)
+            await Task.Delay(Math.Min(200, left));
+    }
+
+    /// <summary>
+    /// 任务之间的间隔（2026-11-03 加）。
+    ///
+    /// 原来一个账号跑完立刻跑下一个，132 个账号首尾相连零间隔，
+    /// 这是成片 429 的直接推手。间隔取「请求间隔」设置，下限 1 秒。
+    /// </summary>
+    private static int TaskGapMs()
+        => Math.Max(1000, AppSettings.Instance.ForModule("x").RequestIntervalMs);
 
     /// <summary>队列变化通知（界面上抛到 UI 线程）。</summary>
     public event Action? Changed;
@@ -199,6 +244,11 @@ public sealed class CreationTaskStore
                 {
                     Remove(t);
                 }
+
+                // **账号之间要喘口气**（2026-11-03 加）。
+                // 原来一个跑完立刻跑下一个，132 个账号首尾相连零间隔 ——
+                // 这是成片 429 的直接推手。间隔取「请求间隔」设置，下限 1 秒。
+                if (!t.Cancelled) await Task.Delay(TaskGapMs());
             }
         }
         finally
@@ -237,6 +287,23 @@ public sealed class CreationTaskStore
         string? cursor = null;
         var emptyStreak = 0;
 
+        // **真正用上「请求间隔」设置**（2026-11-03 修）。
+        //
+        // 这个设置项在 X 设置页里存在很久了（说明写着「每次抓取之间的间隔。
+        // 太小容易触发 X 的限流」），但 X 这条链路上**没有任何代码读它** ——
+        // 132 个账号是零间隔连打的，于是成片 429。
+        // 下限 500ms 兜底，防止用户把值调到 0 又立刻被限流。
+        var intervalMs = Math.Max(500, settings.RequestIntervalMs);
+
+        // **限流重排要重置计数**（2026-11-03）：不清零的话界面上会保留上一轮的
+        // 「已发送/已跳过」，重跑一遍数字会翻倍，用户以为下了两遍。
+        if (t.RestartFromScratch)
+        {
+            t.RestartFromScratch = false;
+            t.Pages = 0; t.CompleteCount = 0; t.SkipCount = 0; t.FailCount = 0;
+            Notify();
+        }
+
         for (var page = 0; page < 200; page++)
         {
             if (t.Cancelled) return;
@@ -251,9 +318,25 @@ public sealed class CreationTaskStore
             }
             catch (Exception ex)
             {
+                // **限流不算「这条账号失败」**：排队重来，别让用户看到成片红字。
+                if (IsRateLimited(ex) && t.RateLimitRetries < MaxRateLimitRetries)
+                {
+                    t.RateLimitRetries++;
+                    t.Error = $"被 X 限流，已自动排队重试（第 {t.RateLimitRetries}/{MaxRateLimitRetries} 次）";
+                    Aria2Engine.Log($"[创建任务] {t.ScreenName} 被限流，重新入队（第 {t.RateLimitRetries} 次）");
+                    t.RestartFromScratch = true;
+                    lock (_tasks) _tasks.Add(t);   // 排到队尾，等前面积压的任务先跑
+                    Notify();
+                    return;
+                }
                 t.Error = XHomeApi.MapError(ex);
                 return;
             }
+
+            // 翻页之间也要间隔 —— 一次拉 100 条、连翻十几页同样是密集请求。
+            // 这里没有 CancellationToken（这个是后台队列，靠 t.Cancelled 取消），
+            // 所以用「分段 sleep + 每 200ms 查一次取消标志」，取消时最多迟 200ms 退出。
+            if (page > 0) await SleepCancellableAsync(intervalMs, t);
 
             t.Pages++;
             t.Status = CreationStatus.Active;

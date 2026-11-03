@@ -89,6 +89,20 @@ public static class XApiSelfTest
         Check("非 twimg 域名不动",
             XApi.NormalizeImageUrl("https://example.com/a.jpg") == "https://example.com/a.jpg");
 
+        // **限流的错误映射必须认得出来**（2026-11-03 加）。
+        //
+        // 用户实测界面上一片「失败：网络错误：被 X 限流（429），稍后再试」。
+        // 成因是 GetJsonAsync 重试耗尽后把 429 包进了「网络错误：…」，
+        // 状态码被丢掉，上游既认不出限流、也无法据此排队重试。
+        // 下面钉死三条：429 带状态码、MapError 给可操作提示、非 429 不被误判。
+        var rl = new XHomeException("被 X 限流", 429);
+        Check("429 带状态码（供重排判定）", rl.StatusCode == 429);
+        Check("429 的界面提示可操作",
+            XHomeApi.MapError(rl).Contains("429") || XHomeApi.MapError(rl).Contains("频繁"),
+            XHomeApi.MapError(rl));
+        Check("401 不会被误判成限流",
+            new XHomeException("登录已失效", 401).StatusCode != 429);
+
         // **断言必须与时区无关**（2026-11-01 改）。
         //
         // 原来这两条钉的是「Hour == 21 / == 13」——那是**返回 UTC 时**才成立的期望值。

@@ -503,10 +503,25 @@ public sealed class XHomeApi
         }
     }
 
+    /// <summary>
+    /// 限流退避的档位（毫秒）。**不能按普通网络错误那样几百毫秒重试**（2026-11-03 修）。
+    ///
+    /// 用户实测：一次「关注列表」132 个账号连续抓，界面上一片
+    /// 「失败：网络错误：被 X 限流（429），稍后再试」。
+    /// 原因就是这个循环原来只等 900/1800/2700 毫秒 —— 合计 5.4 秒。
+    /// X 的限流窗口是**按 15 分钟**计的，等 5 秒后重试等于立刻再撞一次，
+    /// 三次全撞完就把这条任务判死，用户只能手动一条条重来。
+    ///
+    /// 现在改成 30s / 90s / 180s，累计约 5 分钟；若响应带了
+    /// `x-rate-limit-reset` 就按它算出的剩余秒数等（见 ResolveRetryDelay）。
+    /// </summary>
+    private static readonly int[] RateLimitBackoffMs = { 30_000, 90_000, 180_000 };
+
     private async Task<JsonDocument> GetJsonAsync(string url, bool auth, CancellationToken ct)
     {
         Exception? last = null;
-        for (var attempt = 0; attempt < 3; attempt++)
+        var attempts = RateLimitBackoffMs.Length + 2;   // 限流档位 + 两次普通重试
+        for (var attempt = 0; attempt < attempts; attempt++)
         {
             try
             {
@@ -517,8 +532,11 @@ public sealed class XHomeApi
 
                 if (resp.StatusCode == HttpStatusCode.TooManyRequests)
                 {
-                    last = new XHomeException("被 X 限流（429），稍后再试", 429);
-                    await Task.Delay(900 * (attempt + 1), ct);
+                    var wait = ResolveRetryDelay(resp, attempt);
+                    last = new XHomeException(
+                        $"被 X 限流（429）：已等待 {wait / 1000} 秒后重试（第 {attempt + 1} 次）", 429);
+                    Aria2Engine.Log($"[X 限流] 429，等待 {wait / 1000} 秒后重试（第 {attempt + 1}/{attempts} 次）");
+                    await Task.Delay(wait, ct);
                     continue;
                 }
                 if ((int)resp.StatusCode >= 400)
@@ -539,7 +557,40 @@ public sealed class XHomeApi
             }
         }
 
+        // **限流要把 429 原样抛出去**（2026-11-03 修）：
+        // 原来这里统一包成「网络错误：…」，把 429 的状态码丢了 ——
+        // 上游 MapError 只能按消息文本猜，界面就显示成「网络错误：被 X 限流」。
+        // 重试全部耗尽时，429 应该带着状态码继续往上走，让调用方**认得出来**
+        // 并据此排队重试（见 CreationTaskStore 的限流重排）。
+        if (last is XHomeException xe) throw xe;
         throw new XHomeException(FriendlyNetworkError(last) ?? ("网络错误：" + (last?.Message ?? "未知")));
+    }
+
+    /// <summary>
+    /// 算这次 429 该等多久。
+    ///
+    /// ① 优先用 X 自己给的 `x-rate-limit-reset`（Unix 秒级时间戳）；
+    /// ② 没有该头（或算出来不合理）就退回到固定档位。
+    /// 无论哪条路都夹在 [5 秒, 20 分钟] 内 —— 太短等于没等，太长会把整个队列钉死。
+    /// </summary>
+    private static int ResolveRetryDelay(HttpResponseMessage resp, int attempt)
+    {
+        try
+        {
+            if (resp.Headers.TryGetValues("x-rate-limit-reset", out var vals))
+            {
+                var raw = vals.FirstOrDefault();
+                if (long.TryParse(raw, out var resetUnix))
+                {
+                    var left = resetUnix - DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    var ms = (int)Math.Clamp(left * 1000 + 3000, 5_000, 20 * 60 * 1000);
+                    return ms;
+                }
+            }
+        }
+        catch { }
+        if (attempt < RateLimitBackoffMs.Length) return RateLimitBackoffMs[attempt];
+        return RateLimitBackoffMs[^1];
     }
 
     private async Task<string> GetTextAsync(string url, CancellationToken ct)
