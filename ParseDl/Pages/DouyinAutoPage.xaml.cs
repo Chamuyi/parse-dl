@@ -217,7 +217,28 @@ public sealed partial class DouyinAutoPage : Page
         if (string.IsNullOrEmpty(payload)) return;
 
         var result = DouyinPayloadParser.Parse(payload);
-        if (result.Media.Count == 0) return;
+        if (result.Media.Count == 0)
+        {
+            // **别再默默丢掉了**（2026-11-14 修）。
+            //
+            // 用户报「抖音自动下载抓取到 0 作品、页面显示服务异常」。
+            // 拦截器其实**每次都会**上报诊断（endpoints 里有它实际请求过的接口路径），
+            // 但这里拿到空媒体就 return，诊断信息全被丢掉 —— 于是完全看不出
+            // 是「接口根本没被调用」还是「调用了但被风控拦了」。
+            //
+            // 现在把诊断记进日志：命中过哪些 /aweme/ 端点、各几次。
+            // 有这一行就能分辨：
+            //   · endpoints 为空      → 页面的请求钩子没接触到（脚本注入/UA 问题）
+            //   · 有 aweme/post 但 0 条 → 接口返回被风控拦（需换登录态/重置设备）
+            try
+            {
+                var diag = DescribeEndpoints(payload);
+                if (diag.Length > 0) AppendLog("拦截诊断：" + diag);
+                else AppendLog("拦截诊断：本批无媒体，且未观察到 /aweme/ 接口调用");
+            }
+            catch { }
+            return;
+        }
 
         collector.NoteAweme(result.AwemeCount);
         collector.Ingest(result.Media);
@@ -229,6 +250,27 @@ public sealed partial class DouyinAutoPage : Page
             task.MediaCount = collector.Count;
             _auto.Refresh();
         }
+    }
+
+    /// <summary>
+    /// 从拦截器上报的 payload 里抽出「实际请求过的 /aweme/ 端点」摘要。
+    /// 只用于日志排查，解析失败一律返回空串，不影响主流程。
+    /// </summary>
+    private static string DescribeEndpoints(string payload)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(payload);
+            if (!doc.RootElement.TryGetProperty("endpoints", out var eps)) return "";
+            if (eps.ValueKind != System.Text.Json.JsonValueKind.Object) return "";
+            var parts = new List<string>();
+            foreach (var p in eps.EnumerateObject())
+                parts.Add(p.Name + "×" + p.Value);
+            // 最多列 6 条，避免刷屏
+            if (parts.Count > 6) parts = parts.GetRange(0, 6);
+            return string.Join("，", parts);
+        }
+        catch { return ""; }
     }
 
     private void OnAutoChanged()
@@ -751,6 +793,17 @@ public sealed partial class DouyinAutoPage : Page
         _log.Add(DateTime.Now.ToString("HH:mm:ss") + "  " + line);
         if (_log.Count > 500) _log.RemoveRange(0, _log.Count - 500);
         BuildLogCard();
+
+        // **同时写进日志文件**（2026-11-14 加）。
+        //
+        // 原来这里只往内存列表 `_log` 里塞，界面上看得到、**文件里一个字都没有**。
+        // 后果是「抓到 0 个作品」这种问题根本无法事后排查 —— 本页 25 个 AppendLog
+        // 调用点全部不落盘，只能靠人在界面上现看，窗口一关就全没了。
+        //
+        // 用户 2026-11-14 报「抖音自动下载抓取到 0 作品、页面显示服务异常」，
+        // 我翻遍日志文件找不到任何抓取痕迹，才发现是这里不落盘。
+        // 走 Aria2Engine.Log 是为了复用同一套路径/按天分文件/保留天数清理。
+        try { Aria2Engine.Log("[抖音自动] " + line); } catch { }
     }
 
     // ── 名单导入 ────────────────────────────────────────────────
