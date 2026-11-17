@@ -72,3 +72,7 @@ ParseDl/obj/
 build/
 .dart_tool/
 _verify_20261028/*.json
+
+# 取证快照（含本机界面截图与用户名，禁止入库）
+_verify_*/
+_backup_userdata_*/
