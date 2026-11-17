@@ -174,15 +174,26 @@ public sealed partial class AboutPage : Page
 
     private static string AppVersion()
     {
+        // **版本号只认程序集，不要在这里写死**（2026-11-18 修）。
+        //
+        // 原来这里把主版本硬编码成 "1.3"：csproj 的 <Version> 改成 1.5 之后，
+        // 关于页依然显示「1.3 (1.5.0.0)」，两处不一致且改版本时极易漏掉这一处。
+        // 现在统一从 Assembly 的 Version 推：csproj <Version>1.5.0</Version>
+        // → AssemblyVersion 1.5.0.0 → 显示「1.5.0 (1.5.0.0)」。
         try
         {
             var asm = Assembly.GetExecutingAssembly();
             var v = asm.GetName().Version;
-            return v is null ? "1.3" : $"1.3 ({v})";
+            if (v is null) return "未知";
+            // Major.Minor.Build 去掉末尾的 .0，读者看到 1.5.0 而不是 1.5.0.0
+            var brief = v.Revision > 0
+                ? $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}"
+                : $"{v.Major}.{v.Minor}.{v.Build}";
+            return $"{brief} ({v})";
         }
         catch
         {
-            return "1.3";
+            return "未知";
         }
     }
 

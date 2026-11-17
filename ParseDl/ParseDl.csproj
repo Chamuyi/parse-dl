@@ -15,7 +15,7 @@
     <AssemblyTitle>解析下载器</AssemblyTitle>
     <FileDescription>解析下载器</FileDescription>
     <Company>解析下载器</Company>
-    <Version>1.3.0</Version>
+    <Version>1.5.0</Version>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x86;x64;ARM64</Platforms>
