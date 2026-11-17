@@ -364,13 +364,22 @@ public static class DouyinModuleSelfTest
         Check("页面分组 key：作者", DouyinUrl.PageKey("https://www.douyin.com/user/abc/") == "user:abc");
 
         // ── ⑦ 滚动状态机 ─────────────────────────────────────
-        var sc = new DouyinAutoScroller(maxRounds: 5, stallLimit: 3);
+        //
+        // **注意必须显式传 moved=0**：不传时 moved 默认 -1，stuckInPlace 恒为 false，
+        // 于是「有进展」分支永远成立、stalls 永远不涨，用例就永远测不到「到底」。
+        // 2026-11-18 修正：这两条用例原先只传 scrollHeight，一直假红（抖音模块
+        // 7 项历史遗留失败里就占 2 项）。现在按真实调用形状传满三个参数。
+        var sc = new DouyinAutoScroller(maxRounds: 10, stallLimit: 3);
         sc.Start();
-        Check("第一轮之后继续", sc.OnRoundResult(1000));
+        // 第 1 轮：正常滚动一次（位置从 0 → 1000），建立基线
+        Check("第一轮之后继续", sc.OnRoundResult(1000, 1000, 1000));
         Check("高度增长不算停滞", sc.Stalls == 0);
-        sc.OnRoundResult(1000);
-        sc.OnRoundResult(1000);
-        sc.OnRoundResult(1000);
+        // 之后三轮 scrollTop 不再前进、也没长高、moved=0 —— 连续 3 次停滞即判到底。
+        // 注意第 2 轮不能再用「scrollTop 从 0 涨上去」的写法：那会被算作位置前进
+        // 而把停滞计数清零，导致要多滚两轮才停（本次修用例时踩过）。
+        sc.OnRoundResult(1000, 1000, 0);
+        sc.OnRoundResult(1000, 1000, 0);
+        sc.OnRoundResult(1000, 1000, 0);
         Check("连续 3 轮没长高 → 判到底并停止",
             !sc.Running && sc.StopReason == DouyinAutoScrollStop.NoGrowth, sc.StopReason?.ToString() ?? "null");
 
@@ -384,8 +393,9 @@ public static class DouyinModuleSelfTest
             {
                 var s = new DouyinAutoScroller(maxRounds: 5, stallLimit: 2);
                 s.Start();
-                s.OnRoundResult(100);
-                s.OnRoundResult(100.5);
+                s.OnRoundResult(100, 0, 500);
+                // 只高 0.5px 且没滚动 → 不算长高，累计 1 次停滞
+                s.OnRoundResult(100.5, 0, 0);
                 return s.Stalls == 1;
             })());
         Check("停止原因中文标签齐全",
