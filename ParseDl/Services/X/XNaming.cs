@@ -54,7 +54,7 @@ public static class XNaming
         ///   `url.split('?').first.split('.').last` 若匹配 `^[A-Za-z0-9]{1,5}$` 就取它，
         ///   否则退回 `Media.extension`。
         /// X 的图片 URL 是 `https://pbs.twimg.com/media/<id>.png?name=orig`，
-        /// 于是 **png 图会落成 .png**（实测 D:\\下载目录 下有 851 个 .png 就是这么来的）。
+        /// 于是 **png 图会落成 .png**（实测 D:\下载目录 下有 851 个 .png 就是这么来的）。
         /// 两版不一致会让同一张图一边叫 x.png、一边叫 x.jpg，文件名对不上。
         /// </summary>
         public static string ExtensionFor(XMedia m)

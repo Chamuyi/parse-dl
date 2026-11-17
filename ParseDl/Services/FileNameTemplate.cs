@@ -163,7 +163,7 @@ public static class FileNameTemplate
     /// 净化一整条绝对路径的每一段（盘符段原样保留）。
     ///
     /// 用途：**队列里已经存下来的旧目录**（含尾点这种历史脏数据）在入队/恢复时纠回来。
-    /// 例如 D:\\下载目录\@作者.. 会被纠正成去掉尾点的同名路径。
+    /// 例如 D:\下载\@作者.. 会被纠正成去掉尾点的同名路径。
     /// </summary>
     public static string CleanDirPath(string? fullPath)
     {

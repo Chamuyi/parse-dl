@@ -101,8 +101,8 @@ public static class FileNameTemplateSelfTest
             string.Join("|", FileNameTemplate.ParseDirSegments("@示例作者../sub")),
             "@示例作者|sub");
         Check("整条路径逐段净化（盘符保留）",
-            FileNameTemplate.CleanDirPath(@"D:\\下载\\测试\\示例标签\@示例作者.."),
-            @"D:\\下载\\测试\\示例标签\@示例作者");
+            FileNameTemplate.CleanDirPath(@"D:\下载\测试\@示例作者.."),
+            @"D:\下载\测试\@示例作者");
 
         // ── %TAGS%（2026-10-31 补，X 侧变量）──────────────────────
         var tagCtx = new TemplateContext

@@ -1319,7 +1319,7 @@ public sealed partial class DouyinAutoPage : Page
     /// **只展开变量，不拼完整绝对路径**（2026-10-30 用户反馈「文件名示例怎么完整路径」）。
     ///
     /// 原来这里调 `DouyinTemplate.BuildTarget`，它返回的是**最终落盘目录**，
-    /// 于是示例变成 `D:\\path\\to\\parse-dl\ParseDl\bin\x64\...\downloads\@示例作者` ——
+    /// 于是示例变成 `D:\path\to\parse-dl\ParseDl\bin\x64\...\downloads\@示例作者` ——
     /// 几十个字符的安装路径把真正想看的那段（`@示例作者`）淹没了，
     /// 而且在别的机器上跑还会显示完全不同的路径，毫无参考价值。
     ///
