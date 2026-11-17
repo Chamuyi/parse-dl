@@ -392,6 +392,45 @@ public static class DouyinModuleSelfTest
             DouyinAutoScroller.LabelOf(DouyinAutoScrollStop.NoGrowth).Contains("到底")
             && DouyinAutoScroller.LabelOf(DouyinAutoScrollStop.ReachedMaxRounds).Contains("上限"));
 
+        // ── ⑦b 追平即停（2026-11-18）──────────────────────────
+        //
+        // 这组用例钉的是「不能漏抓」这件事。判据：连续 N 个作品都已在台账里才算追平，
+        // 中间只要夹一个新作品就必须清零重来。
+        {
+            var s = new DouyinAutoScroller(maxRounds: 100, stallLimit: 10,
+                catchUpStop: true, catchUpStreak: 3);
+            s.Start();
+            Check("追平：连续 3 个已下载 → 判定追平并停止",
+                !s.OnBatchSeen(new[] { true, true, true })
+                && s.StopReason == DouyinAutoScrollStop.CaughtUp, s.StopReason?.ToString() ?? "null");
+            Check("追平：记录了撞到的连续条数", s.CatchUpAt == 3, s.CatchUpAt.ToString());
+
+            var s2 = new DouyinAutoScroller(maxRounds: 100, stallLimit: 10,
+                catchUpStop: true, catchUpStreak: 3);
+            s2.Start();
+            Check("追平：夹一个新作品 → 计数清零，不判追平",
+                s2.OnBatchSeen(new[] { true, true }) && s2.OnBatchSeen(new[] { false }) && s2.Running);
+            Check("追平：清零后要重新攒够 3 个才停",
+                s2.OnBatchSeen(new[] { true, true }) && s2.Running
+                && !s2.OnBatchSeen(new[] { true })
+                && s2.StopReason == DouyinAutoScrollStop.CaughtUp);
+
+            var s3 = new DouyinAutoScroller(maxRounds: 100, stallLimit: 10,
+                catchUpStop: false, catchUpStreak: 3);
+            s3.Start();
+            Check("关掉开关 → 一律不判追平（行为与旧版一致）",
+                s3.OnBatchSeen(new[] { true, true, true, true, true }) && s3.Running);
+
+            var s4 = new DouyinAutoScroller(maxRounds: 100, stallLimit: 10,
+                catchUpStop: true, catchUpStreak: 2);
+            s4.Start();
+            Check("追平：全部是新作品 → 永不判追平",
+                s4.OnBatchSeen(new[] { false, false, false }) && s4.Running && s4.CatchUpAt == 0);
+
+            Check("追平停止原因有中文标签",
+                DouyinAutoScroller.LabelOf(DouyinAutoScrollStop.CaughtUp).Contains("追平"));
+        }
+
         // ── ⑧ 台账 ──────────────────────────────────────────
         var ledgerPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
             "pd_douyin_selftest_" + Guid.NewGuid().ToString("N") + ".json");

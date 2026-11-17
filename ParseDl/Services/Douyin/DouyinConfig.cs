@@ -86,11 +86,43 @@ public sealed class DouyinConfig
     public int BatchSize { get; set; } = 50;
     public int RequestIntervalMs { get; set; } = 800;
     public int ScrollStepPx { get; set; } = 600;
+    /// <summary>
+    /// 两轮滚动之间的等待（毫秒）。
+    ///
+    /// **2026-11-18 起它只是「兜底等待」，不是固定节拍**：抓取主循环会看本轮
+    /// 实际有没有滚动 —— 滚动了就只等 250ms 最小间隔立即继续；只有没滚动
+    /// （说明在等新内容加载）才退回到这个值。
+    /// </summary>
     public int ScrollIntervalMs { get; set; } = 700;
     /// <summary>自动下载「每个目标最多滚几轮」。</summary>
     public int MaxRounds { get; set; } = 15;
     /// <summary>连续多少轮页面高度没变就判定到底。</summary>
     public int StallLimit { get; set; } = 6;
+
+    // ── 抓取提速（2026-11-18 加）────────────────────────────
+    /// <summary>
+    /// 自动识别「已经追平历史」并停止往下滚（2026-11-18 加，用户要求）。
+    ///
+    /// ### 为什么需要
+    /// 抖音作者主页是按发布时间**倒序**的，所以「以前抓过的作品」必然集中在列表最上面。
+    /// 老实现要一路滚到「连续 StallLimit 轮滚不动」才停 —— 一个有 500 条作品、
+    /// 本次只新增 3 条的主页，照样把 500 条全滚一遍，绝大多数轮次都在空转。
+    ///
+    /// 打开后：滚动过程中每收到一批作品就查台账，**连续 <see cref="CatchUpStreak"/>
+    /// 个作品都已在台账里（状态 Done）** 即判定「已追平上一次抓到的位置」，停止滚动。
+    ///
+    /// 默认 false —— 关掉时行为与本改动前完全一致，便于对照。
+    /// </summary>
+    public bool CatchUpStop { get; set; }
+
+    /// <summary>
+    /// 「已追平」判据：连续多少个作品都已在台账里就停。
+    ///
+    /// **不能设太小**：作者把旧作品置顶、或中途删稿，会让「连续 N 个都下过」这个假设
+    /// 提前成立，从而漏掉夹在中间的新作品。默认 20 是「宁可多滚 20 条，也不少抓」的取值。
+    /// 范围 5~200（设置页限制）。
+    /// </summary>
+    public int CatchUpStreak { get; set; } = 20;
 
     // ── 筛选（持久化，下次进页面还在）───────────────────────
     public string FilterKeyword { get; set; } = "";
@@ -213,6 +245,8 @@ public static class DouyinSettings
                 ScrollIntervalMs = I("scrollIntervalMs", 700),
                 MaxRounds = I("maxRounds", 15),
                 StallLimit = I("stallLimit", 6),
+                CatchUpStop = B("catchUpStop", false),
+                CatchUpStreak = I("catchUpStreak", 20),
                 FilterKeyword = S("filterKeyword", ""),
                 FilterDateRange = DouyinEnumText.DateRangeFromId(S("filterDateRange", "")),
                 FilterMinDurationSec = In("filterMinDurationSec"),
@@ -271,6 +305,8 @@ public static class DouyinSettings
                 ["scrollIntervalMs"] = c.ScrollIntervalMs,
                 ["maxRounds"] = c.MaxRounds,
                 ["stallLimit"] = c.StallLimit,
+                ["catchUpStop"] = c.CatchUpStop,
+                ["catchUpStreak"] = c.CatchUpStreak,
                 ["filterKeyword"] = c.FilterKeyword,
                 ["filterDateRange"] = c.FilterDateRange.Id(),
                 ["filterTagMode"] = c.FilterTagMode == DouyinTagMode.All ? "all" : "any",

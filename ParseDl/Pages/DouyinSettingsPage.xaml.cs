@@ -147,6 +147,10 @@ public sealed partial class DouyinSettingsPage : Page
                 Number(cfg.MaxRounds, 1, 200, v => Mutate(c => c.MaxRounds = (int)v))),
             ("判定「到底」的连续轮数", "连续这么多轮页面高度没变才算到底（默认 6，约 4 秒）",
                 Number(cfg.StallLimit, 1, 30, v => Mutate(c => c.StallLimit = (int)v))),
+            ("自动识别已抓位置并停止", "开启后：连续 N 个作品都已在台账里，就判定「已追平上次抓到的位置」并停止滚动。主页作品几百条时能省掉大半空转；关掉则一律滚到底", 
+                Toggle(cfg.CatchUpStop, v => Mutate(c => c.CatchUpStop = v))),
+            ("追平判定连续条数", "连续多少个作品已在台账里才算追平。调小更快但可能漏抓（作者置顶旧作品时会提前满足），默认 20", 
+                Number(cfg.CatchUpStreak, 5, 200, v => Mutate(c => c.CatchUpStreak = (int)v))),
         }));
 
         Root.Children.Add(Group("筛选默认值", new (string, string, UIElement)[]

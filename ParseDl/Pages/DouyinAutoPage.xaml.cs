@@ -963,9 +963,17 @@ public sealed partial class DouyinAutoPage : Page
             // 前面那批的链接在排队期间就过期了 —— 实测 2000 条一次性报废。
             // 现在一个主页的媒体下完才继续，链接从取到用只隔几分钟，
             // 过期窗口被压到最小。
+            //
+            // **2026-11-18 豁免**：本次一条新作品都没抓到（Queued == 0，全是「已下载过」），
+            // 那就没有任何直链需要保护，没有等待的理由 —— 直接进下一个目标。
+            // 这是多主页场景下省时间的主要来源之一：追平即停之后，大量主页都是这种情形。
             if (_auto.AutoDownload && task.Queued > 0)
             {
                 await WaitDownloadsAsync(task);
+            }
+            else if (_auto.AutoDownload && task.Queued == 0 && task.AwemeCount > 0)
+            {
+                AppendLog("[" + task.Label + "] 本次没有新作品需要下载，直接处理下一个目标");
             }
 
             task.Status = task.AwemeCount == 0 ? DouyinAutoStatus.Empty : DouyinAutoStatus.Done;
@@ -1009,8 +1017,18 @@ public sealed partial class DouyinAutoPage : Page
         var scroller = new DouyinAutoScroller(
             maxRounds: cfg.MaxRounds,
             stallLimit: cfg.StallLimit,
-            interval: TimeSpan.FromMilliseconds(Math.Max(200, cfg.ScrollIntervalMs)));
+            interval: TimeSpan.FromMilliseconds(Math.Max(200, cfg.ScrollIntervalMs)),
+            catchUpStop: cfg.CatchUpStop,
+            catchUpStreak: cfg.CatchUpStreak);
         scroller.Start();
+
+        // 已经喂给状态机「追平判定」的作品 id，避免同一批重复计入。
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        if (cfg.CatchUpStop)
+        {
+            AppendLog("已开启「自动识别已抓位置」：连续 " + cfg.CatchUpStreak +
+                      " 个作品在台账里就判定追平并停止");
+        }
 
         while (_auto.Running && scroller.Running)
         {
@@ -1038,6 +1056,21 @@ public sealed partial class DouyinAutoPage : Page
                 _auto.Refresh();
             }
 
+            // **追平判定**（2026-11-18）：把这批里还没喂过的作品按出现顺序交给状态机。
+            // 抖音按发布时间倒序，所以「连续 N 个都已下载」= 已经追到上次抓到的位置。
+            //
+            // 注意按 **PostId（作品）** 去重，不是按媒体 Id：一个图集有 N 张图、
+            // 它们属于同一个作品，按媒体判会把「连续 N 条」算成 1 条作品。
+            if (more && collector is not null && cfg.CatchUpStop)
+            {
+                foreach (var item in collector.Items)
+                {
+                    if (string.IsNullOrEmpty(item.PostId) || !seen.Add(item.PostId)) continue;
+                    var done = DouyinStore.Instance.Ledger.Contains(item.PostId);
+                    if (!scroller.OnBatchSeen(new[] { done })) { more = false; break; }
+                }
+            }
+
             // **2026-10-31 删掉「识别到作品就停」**（用户报「没滚到底就切下一个人主页，
             // 抓取不彻底」）。
             //
@@ -1053,7 +1086,15 @@ public sealed partial class DouyinAutoPage : Page
                           + (collector?.AwemeCount ?? 0) + " 个作品）");
                 break;
             }
-            await Task.Delay(scroller.Interval);
+
+            // **自适应等待**（2026-11-18）：不再固定睡满 ScrollIntervalMs。
+            // 页面回报「本轮确实滚动了」→ 立即进入下一轮，只用最小间隔给页面留出
+            // 渲染/发游标请求的时间；只有「没滚动」时才退回到配置的间隔，
+            // 等它把新内容加载出来。这样正常滚动时每轮省掉几百毫秒。
+            var minGap = TimeSpan.FromMilliseconds(250);
+            var wait = report.Moved > 0 ? minGap : scroller.Interval;
+            if (wait < minGap) wait = minGap;
+            await Task.Delay(wait);
         }
         return scroller.StopReason;
     }

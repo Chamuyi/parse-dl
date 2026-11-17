@@ -6,7 +6,7 @@ using System.Text.Json;
 namespace ParseDl.Services.Douyin;
 
 /// <summary>自动滚动为什么停。</summary>
-public enum DouyinAutoScrollStop { Stopped, ReachedMaxRounds, NoGrowth, Error }
+public enum DouyinAutoScrollStop { Stopped, ReachedMaxRounds, NoGrowth, Error, CaughtUp }
 
 /// <summary>
 /// 自动滚动的状态机（纯逻辑，可单测）—— 对齐 Flutter 版 douyin_scroll.dart 的
@@ -21,6 +21,11 @@ public sealed class DouyinAutoScroller
     public int StallLimit { get; }
     public TimeSpan Interval { get; }
 
+    /// <summary>是否启用「追平即停」（2026-11-18）。false 时整条逻辑不参与，行为退回旧版。</summary>
+    public bool CatchUpStop { get; }
+    /// <summary>连续多少个作品已在台账里就判定「已追平」。</summary>
+    public int CatchUpStreak { get; }
+
     private int _rounds;
     private int _stalls;
     private double _lastHeight;
@@ -28,11 +33,23 @@ public sealed class DouyinAutoScroller
     private bool _running;
     private DouyinAutoScrollStop? _stopReason;
 
-    public DouyinAutoScroller(int maxRounds = 20, int stallLimit = 6, TimeSpan? interval = null)
+    /// <summary>当前「连续已在台账里」的计数（跨批累计，遇到新作品清零）。</summary>
+    private int _catchUpRun;
+    /// <summary>已追平时撞上的连续条数（写日志用）。</summary>
+    private int _catchUpAt;
+
+    public DouyinAutoScroller(
+        int maxRounds = 20,
+        int stallLimit = 6,
+        TimeSpan? interval = null,
+        bool catchUpStop = false,
+        int catchUpStreak = 20)
     {
         MaxRounds = maxRounds < 1 ? 1 : maxRounds;
         StallLimit = stallLimit < 1 ? 1 : stallLimit;
         Interval = interval ?? TimeSpan.FromMilliseconds(700);
+        CatchUpStop = catchUpStop;
+        CatchUpStreak = catchUpStreak < 1 ? 1 : catchUpStreak;
     }
 
     public bool Running => _running;
@@ -40,6 +57,8 @@ public sealed class DouyinAutoScroller
     public int Stalls => _stalls;
     public double LastHeight => _lastHeight;
     public DouyinAutoScrollStop? StopReason => _stopReason;
+    /// <summary>追平时撞到的连续「已下过」条数；未追平为 0。</summary>
+    public int CatchUpAt => _catchUpAt;
 
     /// <summary>开始（已在跑就什么都不做，防手抖连点把进度重置）。</summary>
     public void Start()
@@ -51,6 +70,8 @@ public sealed class DouyinAutoScroller
         _stalls = 0;
         _lastHeight = 0;
         _lastTop = 0;
+        _catchUpRun = 0;
+        _catchUpAt = 0;
     }
 
     public void Stop(DouyinAutoScrollStop reason = DouyinAutoScrollStop.Stopped)
@@ -58,6 +79,41 @@ public sealed class DouyinAutoScroller
         if (!_running) return;
         _running = false;
         _stopReason = reason;
+    }
+
+    /// <summary>
+    /// 把「本批作品里哪些是台账里已有的」喂进来；返回是否应当继续滚动。
+    ///
+    /// **按列表顺序逐条判**，而不是只看这批的统计 —— 抖音按发布时间倒序排列，
+    /// 所以「连续 <see cref="CatchUpStreak"/> 条都下过」才是「已经追平上次位置」的可靠信号；
+    /// 而「这批 80% 都下过」在中间夹着新作品时也会成立，那个判据会漏抓。
+    ///
+    /// 遇到任何**未下载**的作品就清零重来：说明还没追到交界处，得继续往下滚。
+    /// </summary>
+    /// <param name="alreadyDownloaded">按页面出现顺序排列的「是否已在台账里」。</param>
+    public bool OnBatchSeen(IReadOnlyList<bool> alreadyDownloaded)
+    {
+        if (!_running || !CatchUpStop) return _running;
+
+        for (var i = 0; i < alreadyDownloaded.Count; i++)
+        {
+            if (alreadyDownloaded[i])
+            {
+                _catchUpRun++;
+                if (_catchUpRun >= CatchUpStreak)
+                {
+                    _catchUpAt = _catchUpRun;
+                    Stop(DouyinAutoScrollStop.CaughtUp);
+                    return false;
+                }
+            }
+            else
+            {
+                // 撞到新作品 —— 交界处还在下面，计数清零。
+                _catchUpRun = 0;
+            }
+        }
+        return true;
     }
 
     /// <summary>
@@ -124,6 +180,7 @@ public sealed class DouyinAutoScroller
         DouyinAutoScrollStop.Stopped => "已手动停止",
         DouyinAutoScrollStop.ReachedMaxRounds => "已达本次滚动上限",
         DouyinAutoScrollStop.NoGrowth => "已到底（没有更多内容）",
+        DouyinAutoScrollStop.CaughtUp => "已追平上次抓到的位置",
         _ => "出错停止",
     };
 }
@@ -135,6 +192,8 @@ public sealed class DouyinAutoScrollReport
     /// <summary>容器当前 scrollTop（-1 = 脚本没回报）。判定「滚不动了」要用它。</summary>
     public double ScrollTop { get; init; } = -1;
     public int Moved { get; init; }
+    /// <summary>可滚容器的高度（视口高度，px）；0 = 脚本没回报。用于判断「一屏内就到头」。</summary>
+    public double Viewport { get; init; }
     public string Hit { get; init; } = "";
     public string? Error { get; init; }
 
@@ -156,6 +215,7 @@ public sealed class DouyinAutoScrollReport
                 ScrollHeight = Num(root, "scrollHeight"),
                 ScrollTop = root.TryGetProperty("scrollTop", out _) ? Num(root, "scrollTop") : -1,
                 Moved = (int)Num(root, "moved"),
+                Viewport = Num(root, "viewport"),
                 Hit = Str(root, "hit"),
             };
         }
@@ -215,6 +275,10 @@ public static class DouyinScripts
   }
   var target = best || document.scrollingElement || document.documentElement;
   var before = target.scrollTop;
+  // 直接跳到底（保持原行为）。**不要改成「每次滚一屏」**：抖音是虚拟滚动，
+  // 列表到底后才会加载下一页，所以限制轮数的从来不是滚动距离，而是内容加载速度。
+  // 跳到底 + 等新内容灌进来，每轮正好前进「已加载的一页」；改成小步滚反而让
+  // 同样一段内容要花好几轮才走完，直接顶到 MaxRounds 上限、把抓取量砍掉。
   target.scrollTop = target.scrollHeight;
   var after = target.scrollTop;
   var cls = '';
@@ -225,7 +289,8 @@ public static class DouyinScripts
     hit: name,
     scrollHeight: target ? target.scrollHeight : 0,
     scrollTop: target ? target.scrollTop : 0,
-    moved: Math.round(after - before)
+    moved: Math.round(after - before),
+    viewport: target ? target.clientHeight : 0
   });
 })()
 """;
