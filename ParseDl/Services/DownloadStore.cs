@@ -434,7 +434,48 @@ public sealed class DownloadStore
 
     public async Task RemoveAsync(DownloadItem item)
     {
+        // **取消要留痕 + 回滚抖音台账的 pending**（2026-11-20 用户实测事故）。
+        //
+        // 原来这里只做两件事：从界面列表移除、存队列。于是：
+        //   · 下载台账（download_ledger.json）里一条记录都没有 —— 用户事后问
+        //     「我取消的那批记录在哪」时完全查不到；
+        //   · 抖音台账（douyin_downloaded.json）里入队时写的 pending **还在**。
+        //     pending 不算「已下载」（Contains 只认 Done），但它占着记录，
+        //     用户重新抓同一个主页时这批作品的 pending 会跟真 Done 记录混在一起，
+        //     让「跳过已下载」的判断变得没法解释，误抓的作品也没法简单重试。
+        // 现在：取消时落一条「已取消」到下载台账，再把抖音台账里对应的 pending 撤掉。
+        //
+        // 两个边界：
+        //   · 已完成 / 已出错 / 已移除的条目（`ClearCompletedAsync` 会走这里）
+        //     不是「取消」，照旧只清理，不写「已取消」；
+        //   · 一个图集有 N 个媒体共用同一个 AwemeId，只有**最后一条**被取消时
+        //     才回滚台账 —— 否则删了一张图就把整个作品的 pending 撤了。
+        var wasTerminal = item.Status is AriaStatus.Complete or AriaStatus.Error or AriaStatus.Removed;
+
         try { await _engine.RemoveAsync(item.Gid); } catch { }
+
+        if (!wasTerminal) DownloadLedger.Instance.Record(item, "已取消");
+
+        var awemeId = item.AwemeId;
+        if (!wasTerminal
+            && item.Module == ParseDl.Services.Douyin.DouyinEnqueuer.Module
+            && !string.IsNullOrEmpty(awemeId))
+        {
+            var stillAlive = Items.Any(x => x != item
+                && x.AwemeId == awemeId
+                && x.Status is AriaStatus.Active or AriaStatus.Waiting or AriaStatus.Paused);
+            if (!stillAlive)
+            {
+                try
+                {
+                    var n = ParseDl.Services.Douyin.DouyinStore.Instance.Ledger
+                        .CancelPending(new[] { awemeId! });
+                    if (n > 0) ParseDl.Services.Douyin.DouyinStore.Instance.NotifyLedgerView();
+                }
+                catch { }
+            }
+        }
+
         OnUi(() => Items.Remove(item));
         SaveQueue();
     }

@@ -440,6 +440,39 @@ public sealed class DouyinLedger
         }
     }
 
+    /// <summary>
+    /// 撤掉「已提交、还在下」的记录（**只动 pending，已下完的不动**），返回撤掉的条数。
+    ///
+    /// **为什么需要它**（2026-11-20 用户实测事故）：入队时 <see cref="MarkQueued"/> 就写了
+    /// pending 记录；用户随后在下载管理里取消，走的是
+    /// <c>DownloadStore.RemoveAsync</c> —— 只从界面列表移除 + 存队列，
+    /// **既没回滚抖音台账、也没写下载台账**。结果这批 pending 永久留在
+    /// `douyin_downloaded.json` 里，之后「跳过已下载」把它们当成下过，
+    /// 真作品反而被挡掉；用户想重试也无从下手（界面上没有这批的记录）。
+    ///
+    /// 取消 = 明确表达「这条不要了」，所以要把 pending 撤掉让下次能重抓。
+    /// 已 Done 的不撤：那是真的下完过，取消一个残留任务不代表要重下。
+    /// </summary>
+    public int CancelPending(IEnumerable<string> awemeIds)
+    {
+        var ids = awemeIds.Where(x => !string.IsNullOrEmpty(x)).Distinct().ToList();
+        if (ids.Count == 0) return 0;
+        lock (_gate)
+        {
+            EnsureLoaded();
+            var removed = 0;
+            foreach (var id in ids)
+            {
+                if (!_records.TryGetValue(id, out var rec)) continue;
+                if (rec.IsDone) continue;   // 已下完的不动
+                _records.Remove(id);
+                removed++;
+            }
+            if (removed > 0) Save();
+            return removed;
+        }
+    }
+
     /// <summary>「清除下载记录」。返回是否真的落盘（写盘失败时不能报「已清除」）。</summary>
     public bool Clear()
     {

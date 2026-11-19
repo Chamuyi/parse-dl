@@ -126,19 +126,30 @@ public sealed class DownloadLedger
     }
 
     /// <summary>记一笔（已存在的 gid 会被更新，不重复追加）。</summary>
-    public void Record(DownloadItem item)
+    public void Record(DownloadItem item) => Record(item, null);
+
+    /// <summary>
+    /// 记一笔，<paramref name="statusOverride"/> 非空时用它当状态文案。
+    ///
+    /// **为什么要这个重载**（2026-11-20）：用户取消下载时任务从界面列表直接移除，
+    /// 状态没走到任何终态，于是 <c>RunTerminalHooks</c> 的「旧状态 != 新状态」永远不成立，
+    /// 台账里连一条痕迹都没有 —— 用户事后问「我取消的那批记录在哪」时无从查起。
+    /// 取消要走这里显式写一条「已取消」。
+    /// </summary>
+    public void Record(DownloadItem item, string? statusOverride)
     {
         lock (_lock)
         {
             EnsureLoaded();
             var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            var status = string.IsNullOrEmpty(statusOverride) ? item.StatusText : statusOverride!;
             var existing = _entries.FirstOrDefault(e => e.Gid == item.Gid);
             if (existing is not null)
             {
                 _entries.Remove(existing);
                 _entries.Add(existing with
                 {
-                    Status = item.StatusText,
+                    Status = status,
                     TotalBytes = item.TotalBytes,
                     FileName = item.FileName,
                     Dir = item.Dir,
@@ -155,7 +166,7 @@ public sealed class DownloadLedger
                     FileName = item.FileName,
                     Dir = item.Dir,
                     Module = item.Module,
-                    Status = item.StatusText,
+                    Status = status,
                     TotalBytes = item.TotalBytes,
                     FinishedAt = now,
                     Error = item.Error,
