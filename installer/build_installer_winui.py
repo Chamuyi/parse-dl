@@ -24,7 +24,7 @@ PUBLISH = os.path.join(
 STAGING = os.path.join(PROJECT, "build", "winui_staging")
 NSI = os.path.join(PROJECT, "installer", "解析下载器_winui.nsi")
 EXE = "解析下载器.exe"
-VERSION = "1.6"
+VERSION = "1.7"
 OUT_NAME = f"解析下载器_{VERSION}_x64-setup.exe"
 OUT_DIR = os.environ.get("INSTALLER_OUT_DIR") or os.path.join(PROJECT, "build", "dist")
 
