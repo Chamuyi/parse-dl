@@ -19,7 +19,7 @@ Unicode true
 !define APP_KEY       "解析下载器 (WinUI)"
 !define APP_PUBLISHER "茶沐依"
 !ifndef VERSION
-  !define VERSION     "1.5"
+  !define VERSION     "1.6"
 !endif
 !define APP_VERSION   "${VERSION}"
 !define APP_VERSION_4 "${VERSION}.0.0"
