@@ -624,6 +624,56 @@ public sealed class Aria2Engine : IDisposable
         }
     }
 
+    /// <summary>
+    /// 把一条**等待中**的任务挪到队列最前（`aria2.changePosition`，how = POS_SET）。
+    ///
+    /// 用途：模块间公平调度。aria2 的 `--max-concurrent-downloads` 是**全局**的，
+    /// 它按队列顺序取任务，于是「先入队的模块」会把并发槽全占住，后来的模块
+    /// 一条都轮不上（2026-11-20 实测：X 积压 352 条在前，抖音 229 条排在
+    /// 101~329 位，5 个槽全是 X，抖音自动流程空等 30 分钟）。
+    ///
+    /// 只对 waiting/paused 状态的任务有效；已 active 的会返回错误，调用方自己跳过。
+    /// 返回 true 表示 RPC 成功（不代表任务立刻开始下 —— 槽满时它只是排到队首，
+    /// 等有槽空出来第一个上）。
+    /// </summary>
+    public async Task<bool> ChangePositionAsync(string gid, int pos, string how = "POS_SET")
+    {
+        if (string.IsNullOrEmpty(gid)) return false;
+        try
+        {
+            var r = await CallAsync("aria2.changePosition", new object[] { gid, pos, how });
+            return r is not null;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// 按队列顺序取**等待中**任务的 gid（供公平调度判断「谁还排着队」）。
+    ///
+    /// 只取 gid，不取 files（几百条时 files 会让单次 RPC 拖到几十秒）。
+    /// num = 1000：只是调度参考，不必真的拉完整个队列。
+    /// </summary>
+    public async Task<List<string>> TellWaitingGidsAsync(int offset = 0, int num = 1000)
+    {
+        var list = new List<string>();
+        try
+        {
+            var r = await CallAsync("aria2.tellWaiting",
+                new object[] { offset, num, new[] { "gid", "status" } });
+            if (r is null || r.Value.ValueKind != JsonValueKind.Array) return list;
+            foreach (var item in r.Value.EnumerateArray())
+            {
+                if (item.TryGetProperty("gid", out var g))
+                {
+                    var gid = g.GetString();
+                    if (!string.IsNullOrEmpty(gid)) list.Add(gid!);
+                }
+            }
+        }
+        catch { }
+        return list;
+    }
+
     /// <summary>批量继续（同样逐条，aria2.unpause 也只接受一个 GID）。</summary>
     public async Task UnpauseManyAsync(IReadOnlyList<string> gids)
     {

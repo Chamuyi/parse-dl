@@ -787,6 +787,12 @@ public sealed partial class SettingsPage : Page
             "按模板算出的完整路径已存在则跳过，不重新下载",
             cfg.SameFileSkip,
             v => { cfg.SameFileSkip = v; cfg.Save(); }));
+        // 【2026-11-20】模块间公平调度。背景：并发槽是全局的、队列按入队顺序取，
+        // 先入队的模块会把槽全占满（实测 X 积压 352 条在前，抖音 229 条一条都不动）。
+        dl.Children.Add(SettingRows.Switch("模块间公平调度",
+            "X / 抖音 / B 站 各留至少一个下载位，避免一个模块的积压把别的模块饿死。关掉则完全按入队顺序",
+            cfg.ModuleFairShare,
+            v => { cfg.ModuleFairShare = v; cfg.Save(); }));
         panel.Children.Add(SettingRows.Card("下载引擎", "并发 · 间隔 · 跳过策略", dl));
 
         var tplPanel = new StackPanel { Spacing = 8 };

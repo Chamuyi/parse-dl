@@ -271,6 +271,8 @@ public sealed class DownloadStore
     private int _polling;
     /// <summary>上次尝试自愈引擎的时刻（限流用，避免每 0.8 秒重启一次）。</summary>
     private DateTime _lastEngineHeal = DateTime.MinValue;
+    /// <summary>上次执行模块间公平调度的时刻（限流用，别在 0.8 秒的轮询里高频打 RPC）。</summary>
+    private DateTime _lastFairShare = DateTime.MinValue;
 
     public ObservableCollection<DownloadItem> Items { get; } = new();
 
@@ -465,6 +467,7 @@ public sealed class DownloadStore
     {
         if (Interlocked.Exchange(ref _polling, 1) == 1) return;
         try { await HealEngineIfNeededAsync(); } catch { }
+        try { await FairShareAsync(); } catch { }
         try { await RefreshActiveOnlyAsync(); }
         catch { }
         finally { Interlocked.Exchange(ref _polling, 0); }
@@ -523,6 +526,73 @@ public sealed class DownloadStore
                 // 最常见的场景下，界面几百条任务永远停在「等待中」，一条都不动。
                 await ResubmitPendingAsync();
             }
+        }
+    }
+
+    /// <summary>
+    /// **模块间公平调度**（2026-11-20 加）。修的是用户报的「X 在下载，抖音一条都不动」。
+    ///
+    /// aria2 的 `--max-concurrent-downloads` 是**全局**的，队列纯按入队顺序取任务。
+    /// 实测：X 积压 352 条（2026-11-18 入队）排在前面，抖音 229 条（11-20 入队）
+    /// 排 101~329 位，5 个并发槽全被 X 占住 —— 抖音自动流程干等 30 分钟超时。
+    ///
+    /// 做法：某个模块**有等待中的任务、却一条都没在下**时，把它的队首任务
+    /// `changePosition` 提到队首，让它至少占到一个槽。多个模块同时缺槽时
+    /// 按各自队首的入队顺序依次排 0/1/2…，避免互相顶掉。
+    ///
+    /// 用 changePosition 而不是 pause/unpause：任务不会被显示成「已暂停」，
+    /// 用户看到的仍然是「等待中」，只是排位提前了。
+    /// 开关：设置页「模块间公平调度」，关掉即回到旧行为（纯 FIFO）。
+    /// </summary>
+    private async Task FairShareAsync()
+    {
+        if (!AppSettings.Instance.ModuleFairShare) return;
+        if (!_engine.IsRunning) return;
+        // 5 秒一次足够：队列顺序不会在 1 秒内变坏，而 changePosition 是 RPC 调用，
+        // 放进 0.8 秒的轮询里会白白占满 aria2 的单线程 RPC。
+        if (DateTime.UtcNow - _lastFairShare < TimeSpan.FromSeconds(5)) return;
+        if (Items.Count < 2) return;
+
+        var activeCountByModule = Items
+            .Where(x => x.Status == AriaStatus.Active)
+            .GroupBy(x => x.Module)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        // 只调度「界面认为在等待、且有 gid」的条目；gid → item 反查用。
+        var waitingByGid = new Dictionary<string, DownloadItem>(StringComparer.Ordinal);
+        foreach (var it in Items)
+        {
+            if (it.Status == AriaStatus.Waiting && !string.IsNullOrEmpty(it.Gid))
+                waitingByGid[it.Gid] = it;
+        }
+        if (waitingByGid.Count == 0) return;
+
+        // 只看 aria2 真正还在排队的那些（用户可能手动删了/暂停了，以 aria2 为准）。
+        var queueGids = await _engine.TellWaitingGidsAsync();
+        if (queueGids.Count == 0) return;
+
+        // 每个模块队列里最靠前的那个任务的入队序号（越小越该先上）。
+        var headByModule = new Dictionary<string, (string Gid, long Seq)>(StringComparer.Ordinal);
+        foreach (var gid in queueGids)
+        {
+            if (!waitingByGid.TryGetValue(gid, out var it)) continue;
+            if (activeCountByModule.TryGetValue(it.Module, out var n) && n > 0) continue; // 该模块已在下，不插队
+            if (headByModule.TryGetValue(it.Module, out var cur) && cur.Seq <= it.Seq) continue;
+            headByModule[it.Module] = (gid, it.Seq);
+        }
+        if (headByModule.Count == 0) return;
+
+        // 多个模块都缺槽时按入队顺序排 0/1/2…，别让后来的把先来的顶掉。
+        var promoted = headByModule.Values.OrderBy(v => v.Seq).ToList();
+        var moved = 0;
+        for (var pos = 0; pos < promoted.Count; pos++)
+        {
+            if (await _engine.ChangePositionAsync(promoted[pos].Gid, pos)) moved++;
+        }
+        _lastFairShare = DateTime.UtcNow;
+        if (moved > 0)
+        {
+            Aria2Engine.Log($"[公平调度] 把 {moved} 个模块的队首任务提到前面：{string.Join("、", promoted.Select(v => waitingByGid[v.Gid].Module))}");
         }
     }
 

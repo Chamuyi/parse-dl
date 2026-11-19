@@ -34,6 +34,20 @@ public sealed class AppSettings
     public int BatchSize { get; set; } = 50;
     public int MaxConcurrent { get; set; } = 5;
 
+    /// <summary>
+    /// **模块间公平调度**（2026-11-20 加，默认开）。
+    ///
+    /// 背景：aria2 的 `--max-concurrent-downloads` 是**全局**的，队列按入队顺序取任务。
+    /// 于是「先入队的模块」会把并发槽全占满，后来的模块一条都轮不上 ——
+    /// 实测 X 积压 352 条排在前面，抖音 229 条排 101~329 位，5 个槽全是 X，
+    /// 抖音自动流程空等 30 分钟。
+    ///
+    /// 打开后：某个模块有等待中的任务、却一条都没在下时，把它的队首任务
+    /// `changePosition` 提到队首，保证每个模块至少占到一个并发槽。
+    /// 关掉则完全回到旧行为（纯 FIFO）。
+    /// </summary>
+    public bool ModuleFairShare { get; set; } = true;
+
     // ── 各模块独立设置（键 = 模块 id：x / douyin / bili）────
     public Dictionary<string, ModuleSettings> Modules { get; set; } = new();
 
@@ -192,6 +206,8 @@ public sealed class AppSettings
             RequestIntervalMs = loaded.RequestIntervalMs;
             BatchSize = loaded.BatchSize;
             MaxConcurrent = loaded.MaxConcurrent;
+            // 【2026-11-20】ModuleFairShare 是新字段，老配置里没有 → 取反序列化后的默认值（true）。
+            ModuleFairShare = loaded.ModuleFairShare;
             Modules = loaded.Modules ?? new();
             MaterialKind = loaded.MaterialKind;
             // 【2026-10-30】ThemeMode 是新字段：老配置文件里没有，反序列化后是默认值
