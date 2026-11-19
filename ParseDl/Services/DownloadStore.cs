@@ -518,6 +518,10 @@ public sealed class DownloadStore
             if (await EnsureEngineAsync())
             {
                 Aria2Engine.Log($"[引擎自愈] 已带新代理重启='{_engine.StartedProxy}'");
+                // **必须补提交**（2026-11-20 修）：重启后 aria2 的 waiting 队列全丢、
+                // 旧 Gid 全部作废。原先这里只记了日志没补提交，于是「代理后开」这个
+                // 最常见的场景下，界面几百条任务永远停在「等待中」，一条都不动。
+                await ResubmitPendingAsync();
             }
         }
     }
