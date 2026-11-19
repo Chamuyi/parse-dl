@@ -1170,25 +1170,59 @@ public sealed partial class DouyinAutoPage : Page
     /// 超时：目标本身的作品太多时会下很久，这里给一个**宽松上限**（默认 30 分钟），
     /// 到点就记日志继续下一个。用户选的是「严格串行」而非「无限等待」，
     /// 一个卡死的主页不该拖垮整批。
+    ///
+    /// **2026-11-20 加「被别的模块饿死」的早退**：底层只有一个 aria2 引擎、
+    /// 并发槽是全局的，别的模块（实测是 X 的 352 条积压）把槽全占住时，
+    /// 抖音这些条目会一直停在「等待中」不动 —— 条数不变、进度不变，
+    /// 原来只能干等满 30 分钟才继续。现在只要连续 <see cref="StarveMinutes"/> 分钟
+    /// 「本模块一条都没在下、待完成条数也没减少」，就判定为被饿死，直接继续下一个目标。
+    /// 这不是放弃：条目仍在队列里，等槽空出来照样会下，只是不阻塞批量流程。
     /// </summary>
     private async Task WaitDownloadsAsync(DouyinAutoTask task)
     {
         const int TimeoutMinutes = 30;
+        // 连续多少分钟「本模块 0 条在下 + 待完成条数不减少」就判定被别的模块饿死。
+        const int StarveMinutes = 3;
+
         var deadline = DateTime.UtcNow.AddMinutes(TimeoutMinutes);
         var announced = false;
 
+        var lastPending = -1;
+        var lastProgressAt = DateTime.UtcNow;
+
         while (_auto.Running)
         {
-            var pending = DownloadStore.Instance.Items.Count(i =>
-                i.Module == DouyinEnqueuer.Module &&
+            var mine = DownloadStore.Instance.Items
+                .Where(i => i.Module == DouyinEnqueuer.Module)
+                .ToList();
+
+            var pending = mine.Count(i =>
                 i.Status is AriaStatus.Active or AriaStatus.Waiting or AriaStatus.Paused);
 
             if (pending == 0) break;
+
+            // 本模块有没有一条真正在下（Active）。0 条 = 槽被别的模块占着。
+            var activeMine = mine.Count(i => i.Status == AriaStatus.Active);
 
             if (!announced)
             {
                 announced = true;
                 AppendLog("[" + task.Label + "] 等待下载完成（还有 " + pending + " 条）…");
+            }
+
+            // 条数变了说明有进展（下完了/失败了），重置饿死计时。
+            if (pending != lastPending)
+            {
+                lastPending = pending;
+                lastProgressAt = DateTime.UtcNow;
+            }
+            else if (activeMine == 0 &&
+                     DateTime.UtcNow - lastProgressAt >= TimeSpan.FromMinutes(StarveMinutes))
+            {
+                AppendLog("[" + task.Label + "] 本模块已 " + StarveMinutes +
+                          " 分钟没有一条在下载（并发位被其他模块占满），还剩 " + pending +
+                          " 条排队中，先继续下一个目标");
+                return;
             }
 
             if (DateTime.UtcNow >= deadline)
