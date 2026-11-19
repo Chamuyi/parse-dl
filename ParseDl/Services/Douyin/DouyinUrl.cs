@@ -84,6 +84,18 @@ public static class DouyinUrl
     }
 
     /// <summary>
+    /// 从作者主页 URL 里取出 sec_uid（`https://www.douyin.com/user/MS4wLjABAAAA…`）。
+    /// 不是主页 / 抠不到就返回空串。
+    /// </summary>
+    public static string SecUidOf(string? url)
+    {
+        if (!Uri.TryCreate((url ?? "").Trim(), UriKind.Absolute, out var uri)) return "";
+        var segs = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segs.Length < 2 || segs[0] != "user") return "";
+        return segs[1];
+    }
+
+    /// <summary>
     /// 目标在列表里的短标签 —— sec_uid 有 50 多个字符，整条铺在列表里会把状态挤没。
     /// </summary>
     public static string TargetLabel(string url)

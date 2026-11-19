@@ -107,6 +107,14 @@ public sealed class DouyinItem
     public string? Text { get; set; }
     public DateTime? CreatedAt { get; set; }
     public string? UserId { get; set; }
+    /// <summary>
+    /// 作者 sec_uid（`MS4wLjABAAAA…`）—— **作者归属校验用**（2026-11-20）。
+    ///
+    /// 与 <see cref="UserId"/> 不是一回事：UserId 来自接口的 `author.uid`（数字），
+    /// 而作者主页 URL 里带的是 sec_uid。自动下载要判断「这条作品是不是目标的」，
+    /// 只能拿这个跟 URL 里的段比。
+    /// </summary>
+    public string? UserSecUid { get; set; }
     public string? UserName { get; set; }
     public string? AuthorUniqueId { get; set; }
     public List<string> Tags { get; set; } = new();
@@ -159,7 +167,7 @@ public sealed class DouyinItem
         Variants = Variants,
         Chosen = Chosen,
         PreviewUrl = PreviewUrl, PostId = PostId, Text = Text, CreatedAt = CreatedAt,
-        UserId = UserId, UserName = UserName, AuthorUniqueId = AuthorUniqueId,
+        UserId = UserId, UserSecUid = UserSecUid, UserName = UserName, AuthorUniqueId = AuthorUniqueId,
         Tags = Tags, MediaIndex = MediaIndex, Source = Source,
         Width = Width, Height = Height, DurationMs = DurationMs,
         LikeCount = LikeCount, CommentCount = CommentCount,
@@ -182,6 +190,14 @@ public sealed class DouyinPost
     public List<string> Tags { get; init; } = new();
     public List<string> MusicUrls { get; init; } = new();
     public string AuthorUid { get; init; } = "";
+    /// <summary>
+    /// 作者的 sec_uid（`MS4wLjABAAAA…`），**与 <see cref="AuthorUid"/> 不是一回事**：
+    /// 前者是主页 URL 里那一段，后者优先取数字 uid。
+    ///
+    /// 用途（2026-11-20）：作者主页滚动时会混入推荐流，别人的作品被当成目标的。
+    /// 主页 URL 只带 sec_uid，所以校验必须拿它比 —— 详见 <see cref="DouyinAutoCollector"/>。
+    /// </summary>
+    public string AuthorSecUid { get; init; } = "";
     public string AuthorName { get; init; } = "";
     public string AuthorId { get; init; } = "";
     public int Digg { get; init; }
@@ -296,6 +312,7 @@ public static class DouyinPayloadParser
             Tags = DouyinVariant.StrList(j, "tags"),
             MusicUrls = DouyinVariant.StrList(j, "musicUrls"),
             AuthorUid = DouyinVariant.Str(j, "authorUid"),
+            AuthorSecUid = DouyinVariant.Str(j, "authorSecUid"),
             AuthorName = DouyinVariant.Str(j, "authorName"),
             AuthorId = DouyinVariant.Str(j, "authorId"),
             Digg = DouyinVariant.Int(j, "digg"),
@@ -329,6 +346,7 @@ public static class DouyinPayloadParser
                 Text = p.Desc,
                 CreatedAt = p.CreatedAt,
                 UserId = string.IsNullOrEmpty(p.AuthorUid) ? null : p.AuthorUid,
+                UserSecUid = string.IsNullOrEmpty(p.AuthorSecUid) ? null : p.AuthorSecUid,
                 UserName = string.IsNullOrEmpty(p.AuthorName) ? null : p.AuthorName,
                 AuthorUniqueId = string.IsNullOrEmpty(p.AuthorId) ? null : p.AuthorId,
                 Tags = p.Tags,

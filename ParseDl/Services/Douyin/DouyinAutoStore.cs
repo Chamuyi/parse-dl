@@ -65,6 +65,21 @@ public sealed class DouyinAutoTask
     /// </summary>
     public string Author { get; set; } = "";
 
+    /// <summary>
+    /// 作者的**数字 UID**（名单里的「作者UID」列，形如 `71287470390`）。
+    /// 手动粘链接时是空串 —— 那时只能靠 <see cref="SecUid"/> 校验。
+    /// </summary>
+    public string AuthorUid { get; set; } = "";
+
+    /// <summary>
+    /// 目标作者的 sec_uid —— 直接从 <see cref="Url"/> 的 `/user/` 段抠（`MS4wLjABAAAA…`）。
+    ///
+    /// **作者归属校验的主依据**（2026-11-20）：主页滚动会混入推荐流，
+    /// 别人的作品会被当成这个号的作品提交下载。sec_uid 是主页 URL 里唯一稳定的身份，
+    /// 每条作品上报时也带同一个值，两边一比就能滤掉。
+    /// </summary>
+    public string SecUid => DouyinUrl.SecUidOf(Url);
+
     public DouyinAutoStatus Status { get; set; } = DouyinAutoStatus.Waiting;
     /// <summary>收集到的作品数（一个图集算一条）。</summary>
     public int AwemeCount { get; set; }
@@ -383,10 +398,31 @@ public sealed class DouyinAutoCollector
     private readonly HashSet<string> _ids = new();
     private int _aweme;
 
+    /// <summary>
+    /// 目标作者的 sec_uid（构造时传入）。空串 = 不做作者校验（单条作品页、手动粘的短链等
+    /// 拿不到 sec_uid 的场景，保持旧行为，不能因为校验不出而全丢）。
+    ///
+    /// **为什么必须有这道校验**（2026-11-20 用户实测事故）：抖音作者主页往下滚时会
+    /// 混入推荐流作品，接口上报的 `author.uid/sec_uid` 与目标作者不同。
+    /// 原来收集器只按媒体 id 去重、组装时只按台账判重，全链路没有一处看作者，
+    /// 于是「作者 · 睡睡泽」这一轮把 15 个别人的作品当成他的提交下载，
+    /// 台账也被写成已下载，用户取消下载后台账还留着 —— 真作品反而被「跳过已下载」挡掉。
+    /// </summary>
+    public string ExpectedSecUid { get; init; } = "";
+
     /// <summary>原始 aweme 条数（图集只算一条）。</summary>
     public int AwemeCount => _aweme;
     public int Count => _items.Count;
     public List<DouyinItem> Items => _items;
+
+    /// <summary>因作者不匹配被丢弃的媒体条数（诊断用）。</summary>
+    public int RejectedByAuthor { get; private set; }
+    /// <summary>因作者不匹配被丢弃的**作品** id（图集的多张图只算一次）。</summary>
+    private readonly HashSet<string> _rejectedPosts = new(StringComparer.Ordinal);
+    public int RejectedPostCount => _rejectedPosts.Count;
+    /// <summary>被丢弃的作品里出现过的作者名（只留前 3 个，用于日志说明「混进来了谁」）。</summary>
+    private readonly List<string> _rejectedAuthors = new();
+    public IReadOnlyList<string> RejectedAuthors => _rejectedAuthors;
 
     public void NoteAweme(int n)
     {
@@ -398,7 +434,38 @@ public sealed class DouyinAutoCollector
     {
         var added = 0;
         foreach (var m in incoming)
+        {
+            if (!IsFromTargetAuthor(m))
+            {
+                RejectedByAuthor++;
+                if (!string.IsNullOrEmpty(m.PostId)) _rejectedPosts.Add(m.PostId);
+                var who = m.UserName ?? "";
+                if (who.Length > 0 && _rejectedAuthors.Count < 3 && !_rejectedAuthors.Contains(who))
+                    _rejectedAuthors.Add(who);
+                continue;
+            }
             if (_ids.Add(m.Id)) { _items.Add(m); added++; }
+        }
         return added;
+    }
+
+    /// <summary>
+    /// 这条媒体是不是目标作者的。
+    ///
+    /// 判据顺序（**宁可放过也不能误杀**）：
+    ///   1. 没设 <see cref="ExpectedSecUid"/> → 一律通过（无法校验的入口保持旧行为）；
+    ///   2. 条目没上报 sec_uid → 通过（老版本拦截脚本 / 某些端点不带 author）；
+    ///   3. 两者相等 → 通过；
+    ///   4. 其余 → 判为别人的作品，丢弃。
+    ///
+    /// 只比 sec_uid 不比数字 uid：主页 URL 里只有 sec_uid，数字 uid 拿不到，
+    /// 单边有值的比较只会误杀。
+    /// </summary>
+    private bool IsFromTargetAuthor(DouyinItem m)
+    {
+        if (string.IsNullOrEmpty(ExpectedSecUid)) return true;
+        var got = m.UserSecUid ?? "";
+        if (got.Length == 0) return true;
+        return string.Equals(got, ExpectedSecUid, StringComparison.Ordinal);
     }
 }

@@ -913,7 +913,10 @@ public sealed partial class DouyinAutoPage : Page
         var task = _auto.Current;
         if (task is null) return;
 
-        _collector = new DouyinAutoCollector();
+        // **带上目标作者的 sec_uid**（2026-11-20）：主页滚动会混入推荐流，
+        // 收集器据此滤掉别人的作品。单条作品页 / 短链抠不到 sec_uid 时是空串，
+        // 此时不做校验（保持旧行为）。
+        _collector = new DouyinAutoCollector { ExpectedSecUid = task.SecUid };
         task.Reset();
         task.Status = DouyinAutoStatus.Opening;
         _auto.Refresh();
@@ -942,6 +945,19 @@ public sealed partial class DouyinAutoPage : Page
             task.Status = DouyinAutoStatus.Collecting;
             _auto.Refresh();
             var reason = await CollectAsync();
+
+            // **作者归属过滤的结果要说话**（2026-11-20）：主页往下滚时会混入推荐流，
+            // 收集器已按 sec_uid 把这些别人的作品丢掉。丢了多少、混进来的是谁，
+            // 必须让用户看见 —— 否则他会以为「这个号就这么几个作品」。
+            if (_collector is { RejectedPostCount: > 0 } rejected)
+            {
+                AppendLog("[" + task.Label + "] 已过滤 " + rejected.RejectedPostCount +
+                          " 个不属于该作者的作品（" + rejected.RejectedByAuthor +
+                          " 条媒体，主页推荐流混入" +
+                          (rejected.RejectedAuthors.Count > 0
+                              ? "：" + string.Join("、", rejected.RejectedAuthors)
+                              : "") + "）");
+            }
 
             if (reason == DouyinAutoScrollStop.ReachedMaxRounds)
             {

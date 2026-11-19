@@ -422,6 +422,10 @@ public static class DouyinInterceptor
 
     var au = a.author || {};
     var auUid = au.uid || au.sec_uid || '';
+    // **sec_uid 单独上报**（2026-11-20）：上面 auUid 优先取数字 uid，而作者主页 URL
+    // 里带的是 sec_uid（MS4wLjABAAAA…），两者是不同的值。只报一个的话，
+    // C# 侧拿 URL 里的 sec_uid 去比对永远对不上，作者校验就只能被迫放弃。
+    var auSec = au.sec_uid || au.secUid || '';
     var mu = a.music || {};
     var st = a.statistics || {};
 
@@ -433,6 +437,7 @@ public static class DouyinInterceptor
       durationMs: v ? num(v.duration) : 0,
       ratio: v ? str(v.ratio) : '',
       authorUid: str(auUid),
+      authorSecUid: str(auSec),
       authorName: str(au.nickname, au.unique_id, au.short_id),
       authorId: str(au.unique_id, au.short_id, au.uid),
       cover: coverOf(v, pics),
